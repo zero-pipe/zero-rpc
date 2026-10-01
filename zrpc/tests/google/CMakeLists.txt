@@ -1,0 +1,68 @@
+set(ZRPC_GOOGLE_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
+set(ZRPC_GOOGLE_GTEST_ROOT ${ZRPC_GOOGLE_ROOT}/gtest)
+set(ZRPC_GOOGLE_BENCH_ROOT ${ZRPC_GOOGLE_ROOT}/benchmark)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(ZRPC_GOOGLE_PLATFORM linux_amd64)
+elseif(WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(ZRPC_GOOGLE_PLATFORM windows_amd64)
+else()
+    set(ZRPC_GOOGLE_PLATFORM "")
+endif()
+
+if(ZRPC_BUILD_GTESTS)
+    if(NOT ZRPC_GOOGLE_PLATFORM)
+        message(FATAL_ERROR "No bundled GoogleTest archive for this platform")
+    endif()
+    if(WIN32)
+        set(ZRPC_GTEST_LIB ${ZRPC_GOOGLE_GTEST_ROOT}/lib/${ZRPC_GOOGLE_PLATFORM}/gtest.lib)
+        set(ZRPC_GTEST_MAIN_LIB ${ZRPC_GOOGLE_GTEST_ROOT}/lib/${ZRPC_GOOGLE_PLATFORM}/gtest_main.lib)
+    else()
+        set(ZRPC_GTEST_LIB ${ZRPC_GOOGLE_GTEST_ROOT}/lib/${ZRPC_GOOGLE_PLATFORM}/libgtest.a)
+        set(ZRPC_GTEST_MAIN_LIB ${ZRPC_GOOGLE_GTEST_ROOT}/lib/${ZRPC_GOOGLE_PLATFORM}/libgtest_main.a)
+    endif()
+    if(NOT EXISTS ${ZRPC_GTEST_LIB} OR NOT EXISTS ${ZRPC_GTEST_MAIN_LIB})
+        message(FATAL_ERROR "GoogleTest archive missing for ${ZRPC_GOOGLE_PLATFORM}")
+    endif()
+    add_executable(test_zrpc_gtest_modules test_zrpc_gtest_modules.cpp)
+    target_include_directories(test_zrpc_gtest_modules PRIVATE
+        ${ZRPC_GOOGLE_GTEST_ROOT}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/message
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/transport
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/core)
+    target_link_libraries(test_zrpc_gtest_modules PRIVATE zrpc ${ZRPC_GTEST_MAIN_LIB}
+        ${ZRPC_GTEST_LIB})
+    if(MSVC)
+        target_compile_options(test_zrpc_gtest_modules PRIVATE
+            $<$<CONFIG:Debug>:/MTd> $<$<NOT:$<CONFIG:Debug>>:/MT>)
+    endif()
+    if(UNIX)
+        find_package(Threads REQUIRED)
+        target_link_libraries(test_zrpc_gtest_modules PRIVATE Threads::Threads)
+    endif()
+    set_target_properties(test_zrpc_gtest_modules PROPERTIES CXX_STANDARD 11 CXX_STANDARD_REQUIRED ON)
+    add_test(NAME zrpc_gtest_modules COMMAND test_zrpc_gtest_modules)
+    set_tests_properties(zrpc_gtest_modules PROPERTIES LABELS "unit" TIMEOUT 120)
+endif()
+
+if(ZRPC_BUILD_BENCHMARKS)
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+        message(STATUS "Google Benchmark is supported only on Linux amd64; skipping benchmark target")
+    else()
+        set(ZRPC_BENCH_LIB ${ZRPC_GOOGLE_BENCH_ROOT}/lib/${ZRPC_GOOGLE_PLATFORM}/libbenchmark.a)
+        if(NOT EXISTS ${ZRPC_BENCH_LIB})
+            message(FATAL_ERROR "Google Benchmark archive missing for ${ZRPC_GOOGLE_PLATFORM}")
+        endif()
+        add_executable(bench_zrpc_modules bench_zrpc_modules.cpp)
+        target_include_directories(bench_zrpc_modules PRIVATE
+            ${ZRPC_GOOGLE_BENCH_ROOT}/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/message
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/transport)
+        target_link_libraries(bench_zrpc_modules PRIVATE zrpc ${ZRPC_BENCH_LIB})
+        if(UNIX)
+            find_package(Threads REQUIRED)
+            target_link_libraries(bench_zrpc_modules PRIVATE Threads::Threads)
+        endif()
+        set_target_properties(bench_zrpc_modules PROPERTIES CXX_STANDARD 11 CXX_STANDARD_REQUIRED ON)
+    endif()
+endif()

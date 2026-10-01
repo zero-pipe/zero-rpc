@@ -1,0 +1,35 @@
+# Build trees (CMake out-of-source)
+/build/
+/build-*/
+build/
+build-*/
+
+# Test artifacts / reports
+/artifacts/
+/artifacts-*/
+/Testing/
+Testing/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+
+# Object files / binaries
+*.o
+*.obj
+*.exe
+*.so
+
+# Bundled test libraries are intentional repository inputs.
+!zrpc/tests/google/benchmark/lib/**/*.a
+!zrpc/tests/google/gtest/lib/**/*.a
+
+# Local vendored dependency metadata
+3rdpart/zero-tool-kit/.git/

@@ -1,0 +1,11 @@
+function(ztk_add_demo name)
+    add_executable(${name} ${name}.c)
+    target_include_directories(${name} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(${name} PRIVATE ztk)
+endfunction()
+
+ztk_add_demo(demo_01_rtsp_manual_poll)
+ztk_add_demo(demo_02_http_poller_pool)
+ztk_add_demo(demo_03_udp_unicast_recv)
+ztk_add_demo(demo_04_udp_unicast_send)
+ztk_add_demo(demo_05_tcp_udp_shared_poller_pool)

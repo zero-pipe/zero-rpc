@@ -1,0 +1,19 @@
+#ifndef ZTK_CONFIG_H
+#define ZTK_CONFIG_H
+
+#define ZTK_VERSION_MAJOR @ZTK_VERSION_MAJOR@
+#define ZTK_VERSION_MINOR @ZTK_VERSION_MINOR@
+#define ZTK_VERSION_PATCH @ZTK_VERSION_PATCH@
+
+#cmakedefine ZTK_PLATFORM_LINUX 1
+#cmakedefine ZTK_PLATFORM_WIN32 1
+#cmakedefine ZTK_PLATFORM_GENERIC 1
+
+#cmakedefine ZTK_HAVE_EPOLL 1
+#cmakedefine ZTK_HAVE_WEPOLL 1
+#cmakedefine ZTK_HAVE_SELECT 1
+#cmakedefine ZTK_HAVE_PIPE2 1
+#cmakedefine ZTK_HAVE_POSIX_SEM 1
+#cmakedefine ZTK_HAVE_OPENSSL 1
+
+#endif /* ZTK_CONFIG_H */

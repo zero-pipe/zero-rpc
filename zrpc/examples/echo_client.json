@@ -1,0 +1,18 @@
+{
+  "node": {
+    "name": "echo_client",
+    "transport": "udp",
+    "bind_host": "127.0.0.1",
+    "io_threads": 1,
+    "mode": "mesh"
+  },
+  "discovery": {
+    "host": "127.0.0.1",
+    "port": 42301,
+    "hello_interval_ms": 200,
+    "node_ttl_ms": 3000,
+    "peers": [
+      { "ip": "127.0.0.1", "port": 42300 }
+    ]
+  }
+}
