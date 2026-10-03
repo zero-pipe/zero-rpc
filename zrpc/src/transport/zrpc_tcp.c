@@ -5,15 +5,32 @@
  * 固定在 io0。为避免跨线程争用，link 表按 poller 分片（每个 poller 独占一行），
  * 热路径无锁；同一会话的 on_recv/on_error 始终在其所属 poller 上执行。
  *
+ * 缓冲模型：
+ *   - 发送快路径：header（栈上）+ payload（借用）一次 sendv 写出，零用户态拷贝。
+ *     半写/积压时仅把“未写后缀”拷进 zrpc_iobuf 待写队列，由 tick / 可写事件续写，
+ *     不再有 body+frame 两次 malloc 与整段 memcpy。
+ *   - 接收：per-link 池化连续累积缓冲 + 读游标；帧到齐后原地解码，均摊压实，
+ *     避免逐帧 memmove 与 realloc。
+ *
  * 无分片/重传：TCP 自身可靠有序。
  */
 #include "zrpc_transport.h"
 
 #include "zrpc_internal.h"
 #include "zrpc_envelope.h"
+#include "zrpc_iobuf.h"
 
 #include <stdlib.h>
 #include <string.h>
+
+/* 入站累积：池化连续缓冲 + 读游标，均摊压实。 */
+typedef struct zrpc_rx_acc {
+    uint8_t *buf;
+    size_t cap;
+    size_t rpos; /* 已消费 */
+    size_t wpos; /* 已写入 */
+    ztk_buf_pool *pool; /* buf 所属池；跨线程释放不能从 current poller 推断 */
+} zrpc_rx_acc_t;
 
 /* 一条 TCP 连接：入站（服务端会话）或出站（客户端连接）。 */
 typedef struct zrpc_tcp_link {
@@ -24,12 +41,8 @@ typedef struct zrpc_tcp_link {
     ztk_tcp_session *session; /* inbound */
     ztk_tcp_client *client;   /* outbound */
     int connected;
-    uint8_t *rx;
-    size_t rx_len;
-    size_t rx_cap;
-    uint8_t *tx; /* connected 前/半写时的待发帧 */
-    size_t tx_len;
-    size_t tx_cap;
+    zrpc_rx_acc_t rx; /* 接收累积 */
+    zrpc_iobuf_t tx;  /* 出站待写队列（仅 outbound 使用） */
 } zrpc_tcp_link_t;
 
 typedef struct zrpc_tcp_transport {
@@ -46,188 +59,284 @@ static void tcp_client_on_recv(ztk_tcp_client *client, const void *data, size_t 
 static void tcp_client_on_error(ztk_tcp_client *client, void *user);
 static void tcp_tick_cb(void *user);
 
-/* ---- 缓冲区 ---- */
+/* ---- 接收累积 ---- */
 
-static int buf_reserve(uint8_t **buf, size_t *cap, size_t need, size_t max) {
-    uint8_t *p;
-    size_t next;
-    if (need <= *cap) {
+static void rx_acc_init(zrpc_rx_acc_t *a) {
+    a->buf = NULL;
+    a->cap = 0;
+    a->rpos = 0;
+    a->wpos = 0;
+    a->pool = NULL;
+}
+
+static void rx_acc_free(zrpc_rx_acc_t *a) {
+    if (!a || !a->buf) {
+        return;
+    }
+    if (a->pool) {
+        ztk_buf_pool_release(a->pool, a->buf, a->cap);
+    } else {
+        free(a->buf);
+    }
+    rx_acc_init(a);
+}
+
+static int rx_acc_reserve(zrpc_rx_acc_t *a, size_t extra) {
+    ztk_poller *poller;
+    ztk_buf_pool *pool;
+    size_t used = a->wpos - a->rpos;
+
+    if (extra == 0) {
         return ZRPC_OK;
     }
-    next = *cap ? *cap : 4096;
-    while (next < need) {
-        if (next > max) {
-            return ZRPC_ERR_TOOBIG;
+    if (a->cap - a->wpos >= extra) {
+        return ZRPC_OK;
+    }
+    /* 尾部空间不足：先均摊压实（把未消费数据搬到头部），再决定是否扩容。 */
+    if (a->rpos > 0) {
+        memmove(a->buf, a->buf + a->rpos, used);
+        a->rpos = 0;
+        a->wpos = used;
+        if (a->cap - a->wpos >= extra) {
+            return ZRPC_OK;
         }
-        next *= 2;
     }
-    p = (uint8_t *)realloc(*buf, next);
-    if (!p) {
-        return ZRPC_ERR_NOMEM;
+    poller = ztk_poller_current();
+    pool = a->pool ? a->pool : (poller ? ztk_poller_buf_pool(poller) : NULL);
+    {
+        size_t need = a->wpos + extra;
+        size_t ncap = a->cap ? a->cap : 8192;
+        while (ncap < need) {
+            ncap *= 2;
+        }
+        if (pool) {
+            size_t got = 0;
+            uint8_t *nb = (uint8_t *)ztk_buf_pool_acquire(pool, ncap, &got);
+            if (!nb) {
+                return ZRPC_ERR_NOMEM;
+            }
+            if (a->buf) {
+                memcpy(nb, a->buf, used);
+                if (a->pool) {
+                    ztk_buf_pool_release(a->pool, a->buf, a->cap);
+                } else {
+                    free(a->buf);
+                }
+            }
+            a->buf = nb;
+            a->cap = got;
+            a->pool = pool;
+        } else {
+            uint8_t *nb = (uint8_t *)realloc(a->buf, ncap);
+            if (!nb) {
+                return ZRPC_ERR_NOMEM;
+            }
+            a->buf = nb;
+            a->cap = ncap;
+        }
+        a->rpos = 0;
+        a->wpos = used;
     }
-    *buf = p;
-    *cap = next;
     return ZRPC_OK;
 }
 
 /* ---- 解析并投递完整帧 ---- */
 
+static void tcp_link_dispatch(zrpc_tcp_transport_t *t, zrpc_tcp_link_t *link, const uint8_t *body,
+                              size_t body_len) {
+    zrpc_node_t *node = t->base.node;
+    zrpc_envelope_view_t env;
+
+    if (zrpc_envelope_decode(body, body_len, &env) != ZRPC_OK) {
+        return;
+    }
+    {
+        zrpc_payload_t pl;
+        char route[ZRPC_MAX_ROUTE];
+        uint16_t rl = env.route_len;
+        if (rl >= ZRPC_MAX_ROUTE) {
+            rl = ZRPC_MAX_ROUTE - 1;
+        }
+        if (rl > 0 && env.route) {
+            memcpy(route, env.route, rl);
+        } else {
+            rl = 0;
+        }
+        route[rl] = '\0';
+        pl.data = env.payload;
+        pl.len = env.payload_len;
+        pl.encoding = env.encoding;
+        {
+            zrpc_stream_meta_t sm;
+            const zrpc_stream_meta_t *smp = NULL;
+            if (env.stream_flags & ZRPC_STREAM_FLAG_STREAM) {
+                sm.flags = env.stream_flags &
+                           (ZRPC_STREAM_FIRST | ZRPC_STREAM_LAST | ZRPC_STREAM_CANCEL);
+                sm.stream_id = env.stream_id;
+                sm.offset = env.stream_offset;
+                sm.total_size = env.stream_total_size;
+                smp = &sm;
+            }
+            zrpc_node_on_message(node, link->ip, link->port, link, &t->base, env.kind,
+                                 env.request_id, route, &pl, smp);
+        }
+    }
+}
+
 static void tcp_link_consume(zrpc_tcp_transport_t *t, zrpc_tcp_link_t *link) {
     zrpc_node_t *node = t->base.node;
-    while (link->rx_len >= 4) {
-        size_t frame = zrpc_tcp_frame_size(link->rx, link->rx_len);
+    size_t max_frame = (size_t)node->max_msg_bytes + ZRPC_MAX_ROUTE + 64;
+    zrpc_rx_acc_t *a = &link->rx;
+
+    for (;;) {
+        size_t avail = a->wpos - a->rpos;
         const uint8_t *body = NULL;
         size_t body_len = 0;
-        if (frame == 0 || frame > (size_t)node->max_msg_bytes + ZRPC_MAX_ROUTE + 64) {
-            link->rx_len = 0; /* 协议错误：丢弃累积 */
+        size_t frame;
+
+        if (avail < ZRPC_TCP_HDR_LEN) {
             return;
         }
-        if (link->rx_len < frame) {
+        frame = zrpc_tcp_frame_size(a->buf + a->rpos, avail);
+        if (frame == 0 || frame > max_frame) {
+            a->rpos = a->wpos = 0; /* 协议错误：丢弃累积 */
             return;
         }
-        if (zrpc_tcp_parse(link->rx, frame, &body, &body_len) == 1) {
+        if (avail < frame) {
+            return;
+        }
+        if (zrpc_tcp_parse(a->buf + a->rpos, frame, &body, &body_len) == 1) {
             node->metrics.tcp_frames_received++;
-            zrpc_envelope_view_t env;
-            if (zrpc_envelope_decode(body, body_len, &env) == ZRPC_OK) {
-                zrpc_payload_t pl;
-                char route[ZRPC_MAX_ROUTE];
-                uint16_t rl = env.route_len;
-                if (rl >= ZRPC_MAX_ROUTE) {
-                    rl = ZRPC_MAX_ROUTE - 1;
-                }
-                if (rl > 0 && env.route) {
-                    memcpy(route, env.route, rl);
-                } else {
-                    rl = 0;
-                }
-                route[rl] = '\0';
-                pl.data = env.payload;
-                pl.len = env.payload_len;
-                pl.encoding = env.encoding;
-                {
-                    zrpc_stream_meta_t sm;
-                    const zrpc_stream_meta_t *smp = NULL;
-                    if (env.stream_flags & ZRPC_STREAM_FLAG_STREAM) {
-                        sm.flags = env.stream_flags &
-                                   (ZRPC_STREAM_FIRST | ZRPC_STREAM_LAST | ZRPC_STREAM_CANCEL);
-                        sm.stream_id = env.stream_id;
-                        sm.offset = env.stream_offset;
-                        sm.total_size = env.stream_total_size;
-                        smp = &sm;
-                    }
-                    zrpc_node_on_message(node, link->ip, link->port, link, &t->base, env.kind,
-                                         env.request_id, route, &pl, smp);
-                }
-            }
+            tcp_link_dispatch(t, link, body, body_len);
         }
-        link->rx_len -= frame;
-        if (link->rx_len > 0) {
-            memmove(link->rx, link->rx + frame, link->rx_len);
+        a->rpos += frame;
+        if (a->rpos == a->wpos) {
+            a->rpos = a->wpos = 0;
         }
     }
 }
 
 static void tcp_link_on_bytes(zrpc_tcp_transport_t *t, zrpc_tcp_link_t *link, const void *data,
                               size_t len) {
-    if (buf_reserve(&link->rx, &link->rx_cap, link->rx_len + len,
-                    (size_t)t->base.node->max_msg_bytes + ZRPC_MAX_ROUTE + 64) != ZRPC_OK) {
+    if (!link || !data || len == 0) {
         return;
     }
-    memcpy(link->rx + link->rx_len, data, len);
-    link->rx_len += len;
+    if (rx_acc_reserve(&link->rx, len) != ZRPC_OK) {
+        return;
+    }
+    memcpy(link->rx.buf + link->rx.wpos, data, len);
+    link->rx.wpos += len;
     tcp_link_consume(t, link);
 }
 
 /* ---- 出站发送 ---- */
 
-static int tcp_link_flush(zrpc_tcp_transport_t *t, zrpc_tcp_link_t *link) {
+static void tcp_link_flush_tx(zrpc_tcp_transport_t *t, zrpc_tcp_link_t *link) {
     (void)t;
-    if (link->tx_len == 0) {
-        return ZRPC_OK;
+    if (link->inbound || !link->connected || !link->client) {
+        return;
     }
-    if (link->inbound) {
-        /* 服务端会话自带出站队列，交给它排队/发送；失败即丢弃本帧。 */
-        if (link->session) {
-            (void)ztk_tcp_session_send(link->session, link->tx, link->tx_len);
+    while (!zrpc_iobuf_empty(&link->tx)) {
+        ztk_socket_iov iov[ZTK_SOCKET_IOV_MAX];
+        unsigned n = zrpc_iobuf_iovec(&link->tx, iov, ZTK_SOCKET_IOV_MAX, 0);
+        ztk_socket *sock;
+        ztk_ssize_t sent;
+
+        if (n == 0) {
+            break;
         }
-        link->tx_len = 0;
-        return ZRPC_OK;
-    }
-    if (!link->connected || !link->client) {
-        return ZRPC_OK; /* 待连接成功后冲刷 */
-    }
-    {
-        /* 半写保护：按实际写入字节数推进，避免整段重发导致重复数据。 */
-        ztk_ssize_t sent = ztk_tcp_client_send(link->client, link->tx, link->tx_len);
-        if (sent < 0) {
-            if (sent == ZTK_ERR_AGAIN) {
-                return ZRPC_ERR_AGAIN; /* 保留队列，tick 再试 */
-            }
-            return ZRPC_ERR_IO;
+        sock = ztk_tcp_client_socket(link->client);
+        if (!sock) {
+            break;
         }
-        if ((size_t)sent < link->tx_len) {
-            memmove(link->tx, link->tx + (size_t)sent, link->tx_len - (size_t)sent);
-            link->tx_len -= (size_t)sent;
-            return ZRPC_ERR_AGAIN; /* 仍有剩余，tick 再试 */
+        sent = ztk_socket_sendv(sock, iov, n);
+        if (sent > 0) {
+            zrpc_iobuf_consume(&link->tx, (size_t)sent);
+            continue;
         }
+        break; /* EAGAIN / 错误：保留队列，交由 tick 或可写事件续写 */
     }
-    link->tx_len = 0;
-    return ZRPC_OK;
 }
 
-static int tcp_link_queue_and_flush(zrpc_tcp_transport_t *t, zrpc_tcp_link_t *link,
-                                    const uint8_t *frame, size_t len) {
-    int rc;
-    if (link->tx_len + len > (size_t)t->base.node->max_msg_bytes + ZRPC_MAX_ROUTE + 64) {
-        return ZRPC_ERR_TOOBIG;
-    }
-    if (buf_reserve(&link->tx, &link->tx_cap, link->tx_len + len,
-                    (size_t)t->base.node->max_msg_bytes + ZRPC_MAX_ROUTE + 64) != ZRPC_OK) {
-        return ZRPC_ERR_NOMEM;
-    }
-    memcpy(link->tx + link->tx_len, frame, len);
-    link->tx_len += len;
-    rc = tcp_link_flush(t, link);
-    return rc == ZRPC_ERR_AGAIN ? ZRPC_OK : rc;
-}
-
-/* Fast path: keep the borrowed payload out of an intermediate frame copy. */
-static int tcp_sendv_fast(zrpc_tcp_transport_t *t, zrpc_tcp_link_t *link,
-                          const uint8_t *header, size_t header_len, const void *payload,
-                          size_t payload_len) {
-    const void *parts[2];
-    size_t lens[2];
+/*
+ * 发送一帧。快路径直接 sendv(header, payload)，零用户态拷贝；
+ * 半写/积压时只把未写后缀拷进待写队列（一次拷贝），随后尽力冲刷。
+ */
+static int tcp_link_emit(zrpc_tcp_transport_t *t, zrpc_tcp_link_t *link, const uint8_t *header,
+                         size_t header_len, const void *payload, size_t payload_len) {
+    ztk_poller *poller = ztk_poller_current();
     size_t total = header_len + payload_len;
 
-    if (!t || !link || !link->used || link->tx_len != 0 || !header || header_len == 0) {
-        return ZRPC_ERR_AGAIN;
+    if (!t || !link || !link->used || !header || header_len == 0) {
+        return ZRPC_ERR_INVALID;
     }
-    parts[0] = header;
-    lens[0] = header_len;
-    parts[1] = payload;
-    lens[1] = payload_len;
 
+    /* 入站会话自带出站队列（ztk_buf 引用），直接委托，避免二次排队。 */
     if (link->inbound) {
+        const void *parts[2];
+        size_t lens[2];
         ztk_err_t rc;
         if (!link->session) {
-            return ZRPC_ERR_AGAIN;
+            return ZRPC_ERR_STATE;
         }
+        parts[0] = header;
+        lens[0] = header_len;
+        parts[1] = payload;
+        lens[1] = payload_len;
         rc = ztk_tcp_session_sendv(link->session, parts, lens, payload_len ? 2u : 1u);
-        return rc == ZTK_OK ? ZRPC_OK : (rc == ZTK_ERR_AGAIN ? ZRPC_ERR_AGAIN : ZRPC_ERR_IO);
+        if (rc == ZTK_OK) {
+            t->base.node->metrics.tcp_frames_sent++;
+            return ZRPC_OK;
+        }
+        return (rc == ZTK_ERR_AGAIN) ? ZRPC_ERR_AGAIN : ZRPC_ERR_IO;
     }
 
-    if (!link->connected || !link->client) {
+    if (!link->client) {
         return ZRPC_ERR_AGAIN;
     }
+    if (!link->connected) {
+        /* 异步 connect 尚未完成：保留整帧，on_connect 后由 flush_tx 发出。 */
+        if (zrpc_iobuf_append_copy(&link->tx, poller, header, header_len) != 0) {
+            return ZRPC_ERR_NOMEM;
+        }
+        if (payload_len && zrpc_iobuf_append_copy(&link->tx, poller, payload, payload_len) != 0) {
+            return ZRPC_ERR_NOMEM;
+        }
+        return ZRPC_OK;
+    }
+
+    /* 已有积压：整帧入队（拷贝），冲刷由队列驱动。 */
+    if (!zrpc_iobuf_empty(&link->tx)) {
+        if (zrpc_iobuf_append_copy(&link->tx, poller, header, header_len) != 0) {
+            return ZRPC_ERR_NOMEM;
+        }
+        if (payload_len && zrpc_iobuf_append_copy(&link->tx, poller, payload, payload_len) != 0) {
+            return ZRPC_ERR_NOMEM;
+        }
+        tcp_link_flush_tx(t, link);
+        t->base.node->metrics.tcp_frames_sent++;
+        return ZRPC_OK;
+    }
+
+    /* 快路径：一次 sendv / send 写出 header + payload。 */
     {
-        ztk_socket_iov iov[2];
-        iov[0].base = header;
-        iov[0].len = header_len;
-        iov[1].base = payload;
-        iov[1].len = payload_len;
-        ztk_ssize_t sent = ztk_socket_sendv(ztk_tcp_client_socket(link->client), iov,
-                                            payload_len ? 2u : 1u);
+        ztk_socket *sock = ztk_tcp_client_socket(link->client);
+        ztk_ssize_t sent;
+        if (!sock) {
+            return ZRPC_ERR_IO;
+        }
+        if (payload_len) {
+            ztk_socket_iov iov[2];
+            iov[0].base = header;
+            iov[0].len = header_len;
+            iov[1].base = payload;
+            iov[1].len = payload_len;
+            sent = ztk_socket_sendv(sock, iov, 2);
+        } else {
+            sent = ztk_socket_send(sock, header, header_len);
+        }
         if (sent == (ztk_ssize_t)total) {
+            t->base.node->metrics.tcp_frames_sent++;
             return ZRPC_OK;
         }
         if (sent == ZTK_ERR_AGAIN) {
@@ -235,29 +344,27 @@ static int tcp_sendv_fast(zrpc_tcp_transport_t *t, zrpc_tcp_link_t *link,
         } else if (sent < 0) {
             return ZRPC_ERR_IO;
         }
-        if ((size_t)sent < total) {
-            size_t done = (size_t)sent;
-            size_t remaining = total - done;
-            uint8_t *copy = (uint8_t *)malloc(remaining);
-            int rc;
-            if (!copy) {
+        /* 半写：只拷贝未写后缀（一次拷贝，替代原先 malloc+两次 memcpy）。 */
+        if ((size_t)sent < header_len) {
+            size_t hrem = header_len - (size_t)sent;
+            if (zrpc_iobuf_append_copy(&link->tx, poller, header + sent, hrem) != 0) {
                 return ZRPC_ERR_NOMEM;
             }
-            if (done < header_len) {
-                size_t header_remaining = header_len - done;
-                memcpy(copy, header + done, header_remaining);
-                if (payload_len > 0) {
-                    memcpy(copy + header_remaining, payload, payload_len);
-                }
-            } else if (payload_len > 0) {
-                memcpy(copy, (const uint8_t *)payload + (done - header_len), remaining);
+            if (payload_len &&
+                zrpc_iobuf_append_copy(&link->tx, poller, payload, payload_len) != 0) {
+                return ZRPC_ERR_NOMEM;
             }
-            rc = tcp_link_queue_and_flush(t, link, copy, remaining);
-            free(copy);
-            return rc;
+        } else if (payload_len) {
+            size_t off = (size_t)sent - header_len;
+            if (zrpc_iobuf_append_copy(&link->tx, poller, (const uint8_t *)payload + off,
+                                       payload_len - off) != 0) {
+                return ZRPC_ERR_NOMEM;
+            }
         }
+        tcp_link_flush_tx(t, link);
+        t->base.node->metrics.tcp_frames_sent++;
+        return ZRPC_OK;
     }
-    return ZRPC_OK;
 }
 
 /* ---- 连接查找（各自 poller 独占一行，无锁） ---- */
@@ -299,6 +406,8 @@ static zrpc_tcp_link_t *link_find_out(zrpc_tcp_transport_t *t, const char *ip, u
         memset(link, 0, sizeof(*link));
         link->used = 1;
         link->inbound = 0;
+        rx_acc_init(&link->rx);
+        zrpc_iobuf_init(&link->tx);
         zrpc_copy_str(link->ip, sizeof(link->ip), ip, "0.0.0.0");
         link->port = port;
 
@@ -357,6 +466,8 @@ static zrpc_tcp_link_t *link_for_session(zrpc_tcp_transport_t *t, ztk_tcp_sessio
         link->inbound = 1;
         link->connected = 1;
         link->session = session;
+        rx_acc_init(&link->rx);
+        zrpc_iobuf_init(&link->tx);
         sock = ztk_tcp_session_socket(session);
         if (sock && ztk_socket_get_peer(sock, ip, sizeof(ip), &port) == ZTK_OK) {
             zrpc_copy_str(link->ip, sizeof(link->ip), ip, "0.0.0.0");
@@ -403,12 +514,8 @@ static void tcp_srv_on_error(ztk_tcp_session *session, void *user) {
     if (!link) {
         return;
     }
-    if (link->rx) {
-        free(link->rx);
-    }
-    if (link->tx) {
-        free(link->tx);
-    }
+    rx_acc_free(&link->rx);
+    zrpc_iobuf_reset(&link->tx);
     link->used = 0;
 }
 
@@ -423,7 +530,7 @@ static void tcp_client_on_connect(ztk_tcp_client *client, void *user) {
     link = link_for_client(t, client);
     if (link) {
         link->connected = 1;
-        (void)tcp_link_flush(t, link);
+        tcp_link_flush_tx(t, link);
     }
 }
 
@@ -449,12 +556,8 @@ static void tcp_client_on_error(ztk_tcp_client *client, void *user) {
     if (!link) {
         return;
     }
-    if (link->rx) {
-        free(link->rx);
-    }
-    if (link->tx) {
-        free(link->tx);
-    }
+    rx_acc_free(&link->rx);
+    zrpc_iobuf_reset(&link->tx);
     ztk_tcp_client_destroy(client);
     link->client = NULL;
     link->used = 0;
@@ -509,14 +612,8 @@ static void tcp_free_link(zrpc_tcp_link_t *link) {
     if (!link || !link->used) {
         return;
     }
-    if (link->rx) {
-        free(link->rx);
-        link->rx = NULL;
-    }
-    if (link->tx) {
-        free(link->tx);
-        link->tx = NULL;
-    }
+    rx_acc_free(&link->rx);
+    zrpc_iobuf_reset(&link->tx);
     if (!link->inbound && link->client) {
         ztk_tcp_client_destroy(link->client);
         link->client = NULL;
@@ -547,18 +644,12 @@ static void tcp_stop(zrpc_transport_t *base) {
 static int tcp_send_common(zrpc_tcp_transport_t *t, zrpc_tcp_link_t *link, const char *ip,
                            uint16_t port, uint8_t kind, uint32_t msg_id, const char *route,
                            const zrpc_payload_t *payload, const zrpc_stream_meta_t *stream) {
-    zrpc_envelope_t envelope;
-    uint8_t *body;
-    uint8_t *frame;
     size_t route_len = route ? strlen(route) : 0;
     size_t payload_len = (payload && payload->len) ? payload->len : 0;
-    size_t body_len;
-    size_t need;
-    size_t n;
-    int rc;
+    size_t body_len = zrpc_envelope_size(route_len, payload_len);
+    size_t need = ZRPC_TCP_HDR_LEN + body_len;
+    zrpc_envelope_t header_envelope;
 
-    body_len = zrpc_envelope_size(route_len, payload_len);
-    need = ZRPC_TCP_HDR_LEN + body_len;
     if (body_len > (size_t)t->base.node->max_msg_bytes + ZRPC_MAX_ROUTE + ZRPC_ENVELOPE_HDR_LEN ||
         need > (size_t)t->base.node->max_msg_bytes + ZRPC_MAX_ROUTE + 64) {
         return ZRPC_ERR_TOOBIG;
@@ -569,76 +660,56 @@ static int tcp_send_common(zrpc_tcp_transport_t *t, zrpc_tcp_link_t *link, const
             return ZRPC_ERR_NOMEM;
         }
     }
-    if (link->tx_len > 0 &&
-        link->tx_len + need > (size_t)t->base.node->bp_high_water) {
+    if (!zrpc_iobuf_empty(&link->tx) &&
+        zrpc_iobuf_len(&link->tx) + need > (size_t)t->base.node->bp_high_water) {
         t->base.node->metrics.backpressure_events++;
         return ZRPC_ERR_AGAIN;
     }
+
+    memset(&header_envelope, 0, sizeof(header_envelope));
+    header_envelope.kind = kind;
+    header_envelope.encoding = payload ? payload->encoding : 0;
+    header_envelope.request_id = msg_id;
+    header_envelope.route = route;
+    if (stream) {
+        header_envelope.stream_flags = (uint8_t)(ZRPC_STREAM_FLAG_STREAM | stream->flags);
+        header_envelope.stream_id = stream->stream_id;
+        header_envelope.stream_offset = stream->offset;
+        header_envelope.stream_total_size = stream->total_size;
+    }
+    header_envelope.payload = NULL;
+    header_envelope.payload_len = 0;
+
     if (route_len < ZRPC_MAX_ROUTE) {
         uint8_t header[ZRPC_TCP_HDR_LEN + ZRPC_ENVELOPE_HDR_LEN + ZRPC_MAX_ROUTE];
         size_t header_len = ZRPC_TCP_HDR_LEN + ZRPC_ENVELOPE_HDR_LEN + route_len;
-        int fast_rc;
-        zrpc_envelope_t header_envelope;
-        memset(&header_envelope, 0, sizeof(header_envelope));
-        header_envelope.kind = kind;
-        header_envelope.encoding = payload ? payload->encoding : 0;
-        header_envelope.request_id = msg_id;
-        header_envelope.route = route;
-        if (stream) {
-            header_envelope.stream_flags = (uint8_t)(ZRPC_STREAM_FLAG_STREAM | stream->flags);
-            header_envelope.stream_id = stream->stream_id;
-            header_envelope.stream_offset = stream->offset;
-            header_envelope.stream_total_size = stream->total_size;
-        }
-        header_envelope.payload = NULL;
-        header_envelope.payload_len = 0;
         zrpc_put_u32(header, (uint32_t)body_len);
         if (zrpc_envelope_encode(header + ZRPC_TCP_HDR_LEN, sizeof(header) - ZRPC_TCP_HDR_LEN,
                                  &header_envelope) != ZRPC_ENVELOPE_HDR_LEN + route_len) {
             return ZRPC_ERR_INVALID;
         }
-        fast_rc = tcp_sendv_fast(t, link, header, header_len, payload ? payload->data : NULL,
-                                 payload_len);
-        if (fast_rc != ZRPC_ERR_AGAIN) {
-            if (fast_rc == ZRPC_OK) {
-                t->base.node->metrics.tcp_frames_sent++;
-            }
-            return fast_rc;
+        return tcp_link_emit(t, link, header, header_len, payload ? payload->data : NULL,
+                             payload_len);
+    }
+    /* 超长 route（正常不会走到）：用池化 header，避免 body+frame 两次分配。 */
+    {
+        size_t header_len = ZRPC_TCP_HDR_LEN + ZRPC_ENVELOPE_HDR_LEN + route_len;
+        uint8_t *header = (uint8_t *)malloc(header_len);
+        int rc;
+        if (!header) {
+            return ZRPC_ERR_NOMEM;
         }
+        zrpc_put_u32(header, (uint32_t)body_len);
+        if (zrpc_envelope_encode(header + ZRPC_TCP_HDR_LEN, header_len - ZRPC_TCP_HDR_LEN,
+                                 &header_envelope) != ZRPC_ENVELOPE_HDR_LEN + route_len) {
+            free(header);
+            return ZRPC_ERR_INVALID;
+        }
+        rc = tcp_link_emit(t, link, header, header_len, payload ? payload->data : NULL,
+                           payload_len);
+        free(header);
+        return rc;
     }
-    body = (uint8_t *)malloc(body_len);
-    frame = (uint8_t *)malloc(need);
-    if (!body || !frame) {
-        free(body);
-        free(frame);
-        return ZRPC_ERR_NOMEM;
-    }
-    memset(&envelope, 0, sizeof(envelope));
-    envelope.kind = kind;
-    envelope.encoding = payload ? payload->encoding : 0;
-    envelope.request_id = msg_id;
-    envelope.route = route;
-    envelope.payload = payload ? payload->data : NULL;
-    envelope.payload_len = payload_len;
-    if (stream) {
-        envelope.stream_flags = (uint8_t)(ZRPC_STREAM_FLAG_STREAM | stream->flags);
-        envelope.stream_id = stream->stream_id;
-        envelope.stream_offset = stream->offset;
-        envelope.stream_total_size = stream->total_size;
-    }
-    if (zrpc_envelope_encode(body, body_len, &envelope) != body_len) {
-        free(body);
-        free(frame);
-        return ZRPC_ERR_INVALID;
-    }
-    n = zrpc_tcp_build(frame, need, body, body_len);
-    rc = n ? tcp_link_queue_and_flush(t, link, frame, n) : ZRPC_ERR_TOOBIG;
-    if (rc == ZRPC_OK) {
-        t->base.node->metrics.tcp_frames_sent++;
-    }
-    free(body);
-    free(frame);
-    return rc;
 }
 
 static int tcp_send(zrpc_transport_t *base, const char *ip, uint16_t port, uint8_t kind,
@@ -668,8 +739,8 @@ static void tcp_tick_cb(void *user) {
     int i;
     for (i = 0; i < ZRPC_TCP_LINKS_PER_IO; i++) {
         zrpc_tcp_link_t *link = &row[i];
-        if (link->used && !link->inbound && link->tx_len > 0 && link->connected) {
-            (void)tcp_link_flush(t, link);
+        if (link->used && !link->inbound && link->connected && !zrpc_iobuf_empty(&link->tx)) {
+            tcp_link_flush_tx(t, link);
         }
     }
 }

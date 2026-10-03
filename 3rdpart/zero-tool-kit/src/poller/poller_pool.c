@@ -73,6 +73,19 @@ void ztk_poller_pool_destroy(ztk_poller_pool *pool)
         return;
     /* 先停线程并排空 async（含无锁池跨线程 release 回投），再拆本地池 */
     ztk_poller_pool_stop(pool);
+    /*
+     * 停线程后、拆本地池前，先真正排空各 poller 的 pending 任务队列。
+     * 无锁池（thread_safe=0）在非 owner 线程的 release 会经 ztk_poller_async
+     * 回投为延迟任务（pool_release_deferred），该任务持有 pool 指针；若在池
+     * 被 detach 销毁后才排空，会访问已释放的池锁。此处先排空，确保所有回投
+     * 在池仍存活时完成。
+     */
+    if (pool->slots) {
+        for (unsigned i = 0; i < pool->count; ++i) {
+            if (pool->slots[i].poller)
+                ztk_poller_process_pending(pool->slots[i].poller);
+        }
+    }
     ztk_poller_pool_detach_buf_pools(pool);
     if (pool->slots) {
         for (unsigned i = 0; i < pool->count; ++i) {
