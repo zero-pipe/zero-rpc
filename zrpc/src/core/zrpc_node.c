@@ -299,6 +299,21 @@ int zrpc_node_create(const zrpc_node_config_t *cfg, zrpc_node_t **out) {
     }
     node->poller = ztk_poller_pool_at(node->pool, 0);
 
+    /*
+     * 挂载 per-poller 缓冲池，先把底层能力接上，热路径再逐步迁移到
+     * ztk_buf_alloc_local / ztk_buf_pool_acquire。每档设上限，避免无界增长。
+     */
+    {
+        ztk_buf_pool_opts bopts;
+        memset(&bopts, 0, sizeof(bopts));
+        bopts.max_per_bucket = ZRPC_BUF_POOL_MAX_PER_BUCKET;
+        bopts.thread_safe = 0; /* poller 本地，热路径无锁 */
+        if (ztk_poller_pool_attach_buf_pools(node->pool, &bopts) != ZTK_OK) {
+            zrpc_node_destroy(node);
+            return ZRPC_ERR_NOMEM;
+        }
+    }
+
     if (cfg->bindings && cfg->binding_count > 0) {
         size_t i;
         for (i = 0; i < cfg->binding_count; i++) {
@@ -423,7 +438,7 @@ void zrpc_node_destroy(zrpc_node_t *node) {
         int i;
         for (i = 0; i < ZRPC_MAX_RECV_STREAMS; i++) {
             if (node->recv_streams[i].used && node->recv_streams[i].call) {
-                free(node->recv_streams[i].call);
+                zrpc_mem_free(node->recv_streams[i].call);
                 node->recv_streams[i].call = NULL;
                 node->recv_streams[i].used = 0;
             }
@@ -515,7 +530,7 @@ typedef struct zrpc_post_task {
 static void post_trampoline(void *user) {
     zrpc_post_task_t *t = (zrpc_post_task_t *)user;
     t->fn(t->user);
-    free(t);
+    zrpc_mem_free(t);
 }
 
 int zrpc_node_post(zrpc_node_t *node, void (*fn)(void *user), void *user) {
@@ -523,14 +538,15 @@ int zrpc_node_post(zrpc_node_t *node, void (*fn)(void *user), void *user) {
     if (!node || !fn) {
         return ZRPC_ERR_INVALID;
     }
-    t = (zrpc_post_task_t *)calloc(1, sizeof(*t));
+    t = (zrpc_post_task_t *)zrpc_mem_alloc(sizeof(*t));
     if (!t) {
         return ZRPC_ERR_NOMEM;
     }
+    memset(t, 0, sizeof(*t));
     t->fn = fn;
     t->user = user;
     if (ztk_poller_async(node->poller, post_trampoline, t, 1) != ZTK_OK) {
-        free(t);
+        zrpc_mem_free(t);
         return ZRPC_ERR_IO;
     }
     return ZRPC_OK;
@@ -539,7 +555,7 @@ int zrpc_node_post(zrpc_node_t *node, void (*fn)(void *user), void *user) {
 static uint64_t post_delay_cb(void *user) {
     zrpc_post_task_t *t = (zrpc_post_task_t *)user;
     t->fn(t->user);
-    free(t);
+    zrpc_mem_free(t);
     return 0; /* 单次 */
 }
 
@@ -548,14 +564,15 @@ int zrpc_node_post_delay(zrpc_node_t *node, uint64_t delay_ms, void (*fn)(void *
     if (!node || !fn) {
         return ZRPC_ERR_INVALID;
     }
-    t = (zrpc_post_task_t *)calloc(1, sizeof(*t));
+    t = (zrpc_post_task_t *)zrpc_mem_alloc(sizeof(*t));
     if (!t) {
         return ZRPC_ERR_NOMEM;
     }
+    memset(t, 0, sizeof(*t));
     t->fn = fn;
     t->user = user;
     if (ztk_poller_do_delay(node->poller, delay_ms, post_delay_cb, t) == NULL) {
-        free(t);
+        zrpc_mem_free(t);
         return ZRPC_ERR_IO;
     }
     return ZRPC_OK;

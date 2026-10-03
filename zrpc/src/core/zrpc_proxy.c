@@ -275,7 +275,7 @@ static void call_now(zrpc_node_t *node, zrpc_proxy_t *proxy, uint64_t id, const 
     p->len = len;
     p->data = NULL;
     if (len > 0) {
-        p->data = (uint8_t *)malloc(len);
+        p->data = (uint8_t *)zrpc_mem_alloc(len);
         if (p->data) {
             memcpy(p->data, data, len);
         } else {

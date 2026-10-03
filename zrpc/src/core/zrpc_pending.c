@@ -18,7 +18,7 @@ void zrpc_pending_invoke(zrpc_pending_t *p, int status, const zrpc_response_t *r
     p->used = 0;
     p->node = NULL;
     if (p->data) {
-        free(p->data);
+        zrpc_mem_free(p->data);
         p->data = NULL;
     }
     p->has_req = 0;
@@ -50,7 +50,7 @@ void zrpc_pending_release(zrpc_pending_t *p) {
     }
     p->used = 0;
     if (p->data) {
-        free(p->data);
+        zrpc_mem_free(p->data);
         p->data = NULL;
     }
     p->has_req = 0;

@@ -4,6 +4,8 @@ add_library(zrpc STATIC
     src/core/zrpc_proxy.c
     src/core/zrpc_pending.c
     src/core/zrpc_codec.c
+    src/core/zrpc_mem.c
+    src/core/zrpc_iobuf.c
     src/core/zrpc_endpoint.c
     src/message/zrpc_envelope.c
     src/router/zrpc_router.c

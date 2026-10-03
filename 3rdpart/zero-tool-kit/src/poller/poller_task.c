@@ -4,6 +4,17 @@
 #include "ztk/ztk_errno.h"
 #include <stdlib.h>
 
+#if defined(_MSC_VER)
+__declspec(thread) static ztk_poller *g_current_poller;
+#else
+static __thread ztk_poller *g_current_poller;
+#endif
+
+ztk_poller *ztk_poller_current(void)
+{
+    return g_current_poller;
+}
+
 void ztk_poller_task_init(ztk_poller *p)
 {
     if (!p)
@@ -99,14 +110,19 @@ int ztk_poller_is_current_thread(ztk_poller *p)
 
 void ztk_poller_bind_thread(ztk_poller *p)
 {
-    if (p)
+    if (p) {
         p->owner_thread = ztk_thread_self_id();
+        g_current_poller = p;
+    }
 }
 
 void ztk_poller_unbind_thread(ztk_poller *p)
 {
-    if (p)
+    if (p) {
         p->owner_thread = 0;
+        if (g_current_poller == p)
+            g_current_poller = NULL;
+    }
 }
 
 ztk_err_t ztk_poller_async(ztk_poller *p, ztk_poller_task_fn fn, void *user, int may_sync)

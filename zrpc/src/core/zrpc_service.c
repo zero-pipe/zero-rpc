@@ -93,12 +93,13 @@ void zrpc_service_handle_request(zrpc_node_t *node, zrpc_peer_token_t token, con
         return;
     }
     {
-        zrpc_call_t *call = (zrpc_call_t *)calloc(1, sizeof(*call));
+        zrpc_call_t *call = (zrpc_call_t *)zrpc_mem_alloc(sizeof(*call));
         zrpc_request_t req;
         if (!call) {
             send_status(transport, token, ip, port, msg_id, ZRPC_ERR_NOMEM);
             return;
         }
+        memset(call, 0, sizeof(*call));
         call->node = node;
         call->transport = transport;
         call->token = token;
@@ -134,10 +135,11 @@ static zrpc_recv_stream_t *alloc_recv_stream(zrpc_node_t *node, uint32_t request
     for (i = 0; i < ZRPC_MAX_RECV_STREAMS; i++) {
         zrpc_recv_stream_t *stream = &node->recv_streams[i];
         if (!stream->used) {
-            zrpc_call_t *call = (zrpc_call_t *)calloc(1, sizeof(*call));
+            zrpc_call_t *call = (zrpc_call_t *)zrpc_mem_alloc(sizeof(*call));
             if (!call) {
                 return NULL;
             }
+            memset(call, 0, sizeof(*call));
             stream->used = 1;
             stream->request_id = request_id;
             zrpc_copy_str(stream->peer_ip, sizeof(stream->peer_ip), ip, "0.0.0.0");
@@ -177,7 +179,7 @@ void zrpc_service_handle_stream_chunk(zrpc_node_t *node, zrpc_peer_token_t token
 
     if (stream_meta->flags & ZRPC_STREAM_CANCEL) {
         if (state) {
-            free(state->call);
+            zrpc_mem_free(state->call);
             memset(state, 0, sizeof(*state));
         }
         return;
@@ -234,7 +236,7 @@ void zrpc_service_handle_stream_chunk(zrpc_node_t *node, zrpc_peer_token_t token
     method->stream_fn(state->call, &request, &chunk, method->user);
 
     if (stream_meta->flags & ZRPC_STREAM_LAST) {
-        free(state->call);
+        zrpc_mem_free(state->call);
         memset(state, 0, sizeof(*state));
     }
 }
@@ -247,15 +249,46 @@ void zrpc_service_expire_streams(zrpc_node_t *node, uint64_t now_ms) {
     for (i = 0; i < ZRPC_MAX_RECV_STREAMS; i++) {
         zrpc_recv_stream_t *stream = &node->recv_streams[i];
         if (stream->used && now_ms - stream->last_ms > ZRPC_STREAM_IDLE_TIMEOUT_MS) {
-            free(stream->call);
+            zrpc_mem_free(stream->call);
             memset(stream, 0, sizeof(*stream));
         }
+    }
+}
+
+/* 回复只在当前 poller 内同步发送，优先复用本地池中的临时 buffer。 */
+static uint8_t *reply_buf_alloc(size_t need, size_t *cap_out, ztk_buf_pool **pool_out) {
+    ztk_poller *poller = ztk_poller_current();
+    ztk_buf_pool *pool = poller ? ztk_poller_buf_pool(poller) : NULL;
+    void *buf;
+
+    if (pool) {
+        buf = ztk_buf_pool_acquire(pool, need, cap_out);
+        if (buf) {
+            *pool_out = pool;
+            return (uint8_t *)buf;
+        }
+    }
+    *pool_out = NULL;
+    *cap_out = need;
+    return (uint8_t *)malloc(need);
+}
+
+static void reply_buf_release(uint8_t *buf, size_t cap, ztk_buf_pool *pool) {
+    if (!buf) {
+        return;
+    }
+    if (pool) {
+        ztk_buf_pool_release(pool, buf, cap);
+    } else {
+        free(buf);
     }
 }
 
 void zrpc_reply(zrpc_call_t *call, int status, const zrpc_payload_t *payload) {
     zrpc_node_t *node;
     uint8_t *buf;
+    size_t buf_cap = 0;
+    ztk_buf_pool *buf_pool = NULL;
     size_t len = (payload && payload->len) ? payload->len : 0;
     zrpc_payload_t out;
 
@@ -265,12 +298,12 @@ void zrpc_reply(zrpc_call_t *call, int status, const zrpc_payload_t *payload) {
     call->replied = 1;
     node = call->node;
     if (!node || !call->transport) {
-        free(call);
+        zrpc_mem_free(call);
         return;
     }
-    buf = (uint8_t *)malloc(4 + len);
+    buf = reply_buf_alloc(4 + len, &buf_cap, &buf_pool);
     if (!buf) {
-        free(call);
+        zrpc_mem_free(call);
         return;
     }
     zrpc_put_u32(buf, (uint32_t)status);
@@ -282,9 +315,9 @@ void zrpc_reply(zrpc_call_t *call, int status, const zrpc_payload_t *payload) {
     out.encoding = payload ? payload->encoding : 0;
     (void)send_reply(call->transport, call->token, call->peer_ip, call->peer_port, call->msg_id,
                      &out);
-    free(buf);
+    reply_buf_release(buf, buf_cap, buf_pool);
     if (!call->stream_owned) {
-        free(call);
+        zrpc_mem_free(call);
     }
 }
 
@@ -298,6 +331,8 @@ void zrpc_reply_bytes(zrpc_call_t *call, int status, const void *data, size_t le
 
 int zrpc_reply_stream(zrpc_call_t *call, int status, const zrpc_chunk_t *chunk) {
     uint8_t *buf;
+    size_t buf_cap = 0;
+    ztk_buf_pool *buf_pool = NULL;
     zrpc_payload_t payload;
     zrpc_stream_meta_t stream;
     size_t len = chunk ? chunk->len : 0;
@@ -305,7 +340,7 @@ int zrpc_reply_stream(zrpc_call_t *call, int status, const zrpc_chunk_t *chunk) 
     if (!call || !call->node || !call->transport || (len > 0 && !chunk->data)) {
         return ZRPC_ERR_INVALID;
     }
-    buf = (uint8_t *)malloc(4 + len);
+    buf = reply_buf_alloc(4 + len, &buf_cap, &buf_pool);
     if (!buf) {
         return ZRPC_ERR_NOMEM;
     }
@@ -323,11 +358,11 @@ int zrpc_reply_stream(zrpc_call_t *call, int status, const zrpc_chunk_t *chunk) 
     stream.total_size = 0;
     rc = send_reply_stream(call->transport, call->token, call->peer_ip, call->peer_port,
                            call->msg_id, &payload, &stream);
-    free(buf);
+    reply_buf_release(buf, buf_cap, buf_pool);
     if (chunk && (chunk->flags & ZRPC_STREAM_LAST)) {
         call->replied = 1;
         if (!call->stream_owned) {
-            free(call);
+            zrpc_mem_free(call);
         }
     }
     return rc;

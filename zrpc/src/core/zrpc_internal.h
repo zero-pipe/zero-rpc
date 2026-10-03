@@ -18,6 +18,7 @@
 #include "zrpc_tx_ring.h"
 #include "zrpc_util.h"
 #include "zrpc_wire.h"
+#include "zrpc_mem.h"
 
 /* ---- 容量与上限 ---- */
 #define ZRPC_FRAG_DEFAULT 1200 /* UDP 默认每分片 payload 字节 */
@@ -50,6 +51,9 @@
 #define ZRPC_RTX_SLOT_MAX (ZRPC_RTP_HDR_LEN + ZRPC_FRAG_HDR_LEN + ZRPC_FRAG_MAX)
 
 #define ZRPC_TICK_INTERVAL_MS 2
+
+/* per-poller 缓冲池：每档最多缓存的空闲块数，避免池无界增长 */
+#define ZRPC_BUF_POOL_MAX_PER_BUCKET 32
 
 /* ---- 发现的 mesh 对端 ---- */
 typedef struct zrpc_peer {
@@ -228,6 +232,7 @@ struct zrpc_node {
 
 /* node.c */
 uint64_t zrpc_now_ms(void);
+
 void zrpc_node_on_message(zrpc_node_t *node, const char *ip, uint16_t port, zrpc_peer_token_t token,
                           zrpc_transport_t *transport, uint8_t kind, uint32_t msg_id, const char *route,
                           const zrpc_payload_t *payload, const zrpc_stream_meta_t *stream);

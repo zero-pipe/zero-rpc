@@ -64,6 +64,12 @@ ZTK_API void ztk_poller_bind_thread(ztk_poller *p);
 ZTK_API void ztk_poller_unbind_thread(ztk_poller *p);
 ZTK_API int ztk_poller_is_current_thread(ztk_poller *p);
 
+/**
+ * 当前线程绑定的 poller（ztk_poller_run / bind_thread 设置）；未绑定返回 NULL。
+ * 供 poller 本地资源分配使用，避免在回调里逐处传递 poller 句柄。
+ */
+ZTK_API ztk_poller *ztk_poller_current(void);
+
 /** 阻塞循环 poll，*stop_flag 非 0 时退出 */
 ZTK_API void ztk_poller_run(ztk_poller *p, volatile int *stop_flag);
 
