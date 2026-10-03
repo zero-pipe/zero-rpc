@@ -1,4 +1,5 @@
 #include "zrpc_reasm.h"
+#include "zrpc_mem.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -18,11 +19,11 @@ void zrpc_reasm_release(zrpc_reasm_slot_t *slot) {
         return;
     }
     if (slot->buf) {
-        free(slot->buf);
+        zrpc_mem_free(slot->buf);
         slot->buf = NULL;
     }
     if (slot->bits) {
-        free(slot->bits);
+        zrpc_mem_free(slot->bits);
         slot->bits = NULL;
     }
     slot->used = 0;
@@ -73,15 +74,19 @@ zrpc_reasm_slot_t *zrpc_reasm_acquire(zrpc_reasm_t *reasm, uint32_t msg_id, uint
     slot->got = 0;
     slot->created_ms = now_ms;
     slot->base_seq_set = 0;
-    slot->buf = total_len ? (uint8_t *)malloc(total_len) : NULL;
-    slot->bits = (uint8_t *)calloc(1, (frag_count + 7) / 8);
+    slot->buf = total_len ? (uint8_t *)zrpc_mem_alloc(total_len) : NULL;
+    /* bitset 走控制对象池，避免每条消息一次 calloc/free。 */
+    slot->bits = (uint8_t *)zrpc_mem_alloc((frag_count + 7) / 8);
+    if (slot->bits) {
+        memset(slot->bits, 0, (frag_count + 7) / 8);
+    }
     if ((total_len && !slot->buf) || !slot->bits) {
         if (slot->buf) {
-            free(slot->buf);
+            zrpc_mem_free(slot->buf);
             slot->buf = NULL;
         }
         if (slot->bits) {
-            free(slot->bits);
+            zrpc_mem_free(slot->bits);
             slot->bits = NULL;
         }
         slot->used = 0;

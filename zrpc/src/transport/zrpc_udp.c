@@ -171,11 +171,42 @@ static zrpc_session_t *session_for(zrpc_udp_transport_t *udp, int io, ztk_socket
 
 /* ---- 发送 ---- */
 
+/*
+ * 逻辑 envelope 视图：[prefix = envelope 头 + route][payload]。
+ * prefix 常驻栈/池，payload 借用调用方内存，避免整包 envbuf 的分配与拷贝。
+ */
+typedef struct zrpc_env_view {
+    const uint8_t *prefix;
+    size_t prefix_len;
+    const uint8_t *payload;
+    size_t payload_len;
+} zrpc_env_view_t;
+
+/* 从逻辑视图的 off 处拷贝 len 字节到 dst。 */
+static void env_view_copy(const zrpc_env_view_t *v, size_t off, size_t len, uint8_t *dst) {
+    if (off < v->prefix_len) {
+        size_t n = v->prefix_len - off;
+        if (n > len) {
+            n = len;
+        }
+        memcpy(dst, v->prefix + off, n);
+        dst += n;
+        len -= n;
+        off = 0; /* 剩余落在 payload 起始处 */
+    } else {
+        off -= v->prefix_len;
+    }
+    if (len > 0) {
+        memcpy(dst, v->payload + off, len);
+    }
+}
+
 static void emit_frag(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint32_t msg_id,
-                      uint32_t total_len, uint32_t off, uint32_t chunk, const uint8_t *data,
+                      uint32_t total_len, uint32_t off, uint32_t chunk, const zrpc_env_view_t *view,
                       int last, uint64_t now, ztk_udp_dgram_t *msgs, unsigned *nm) {
     zrpc_frag_desc_t d;
     uint8_t *dst;
+    size_t hdr;
     size_t n;
     zrpc_node_t *node = udp->base.node;
     uint32_t stride = ZRPC_RTP_HDR_LEN + ZRPC_FRAG_HDR_LEN + node->frag_bytes;
@@ -196,12 +227,15 @@ static void emit_frag(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint32_t msg
     d.frag_off = off;
     d.frag_len = chunk;
     d.flags = (uint8_t)((off == 0 ? ZRPC_FLAG_FIRST : 0) | (last ? ZRPC_FLAG_LAST : 0));
-    d.chunk = data;
+    d.chunk = NULL;
 
-    n = zrpc_wire_build_data(dst, stride, &d);
-    if (n == 0) {
+    /* 只写分片头，随后从逻辑视图拷贝分片数据（payload 只拷这一次，用于重传环）。 */
+    hdr = zrpc_wire_build_frag_header(dst, stride, &d);
+    if (hdr == 0) {
         return;
     }
+    env_view_copy(view, off, chunk, dst + hdr);
+    n = hdr + chunk;
     zrpc_tx_ring_commit(&s->tx_ring, s->send_seq, (uint32_t)n);
     /* 测试用丢包注入：仍填入重传环（NACK 可重传），但不进本批发送 */
     if (!(node->drop_percent && (sess_rand() % 100u) < node->drop_percent)) {
@@ -226,7 +260,9 @@ static int session_send(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint8_t ki
     size_t len = payload ? payload->len : 0;
     zrpc_node_t *node = udp->base.node;
     zrpc_envelope_t envelope;
-    uint8_t *envbuf;
+    uint8_t prefix[ZRPC_ENVELOPE_HDR_LEN + ZRPC_MAX_ROUTE];
+    zrpc_env_view_t view;
+    size_t prefix_len;
     size_t env_len;
     uint32_t nfrag;
     size_t off = 0;
@@ -252,27 +288,28 @@ static int session_send(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint8_t ki
     if (env_len > (size_t)node->max_msg_bytes + ZRPC_MAX_ROUTE + ZRPC_ENVELOPE_HDR_LEN) {
         return ZRPC_ERR_TOOBIG;
     }
-    envbuf = (uint8_t *)malloc(env_len);
-    if (!envbuf) {
-        return ZRPC_ERR_NOMEM;
-    }
+    /* 仅把 envelope 头 + route 编进栈上前缀；payload 保持借用，不做整包拷贝。 */
     memset(&envelope, 0, sizeof(envelope));
     envelope.kind = kind;
     envelope.encoding = payload ? payload->encoding : 0;
     envelope.request_id = msg_id;
     envelope.route = route;
-    envelope.payload = data;
-    envelope.payload_len = len;
+    envelope.payload = NULL;
+    envelope.payload_len = 0;
     if (stream) {
         envelope.stream_flags = (uint8_t)(ZRPC_STREAM_FLAG_STREAM | stream->flags);
         envelope.stream_id = stream->stream_id;
         envelope.stream_offset = stream->offset;
         envelope.stream_total_size = stream->total_size;
     }
-    if (zrpc_envelope_encode(envbuf, env_len, &envelope) != env_len) {
-        free(envbuf);
+    prefix_len = zrpc_envelope_encode(prefix, sizeof(prefix), &envelope);
+    if (prefix_len != ZRPC_ENVELOPE_HDR_LEN + route_len) {
         return ZRPC_ERR_INVALID;
     }
+    view.prefix = prefix;
+    view.prefix_len = prefix_len;
+    view.payload = data;
+    view.payload_len = len;
 
     nfrag = env_len ? (uint32_t)((env_len + node->frag_bytes - 1) / node->frag_bytes) : 1;
     for (i = 0; i < nfrag; i++) {
@@ -290,13 +327,13 @@ static int session_send(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint8_t ki
                 nm = 0;
             }
             emit_frag(udp, s, msg_id, (uint32_t)env_len, (uint32_t)off, (uint32_t)chunk,
-                      envbuf + off, last, now, msgs, &nm);
+                      &view, last, now, msgs, &nm);
         } else {
             s->txq = (uint8_t *)malloc(env_len);
             if (!s->txq) {
                 break;
             }
-            memcpy(s->txq, envbuf, env_len);
+            env_view_copy(&view, 0, env_len, s->txq);
             s->txq_sent = (uint32_t)off;
             s->txq_total = (uint32_t)env_len;
             s->txq_msgid = msg_id;
@@ -307,7 +344,6 @@ static int session_send(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint8_t ki
     if (nm > 0) {
         (void)ztk_socket_sendto_batch(s->sock, msgs, nm);
     }
-    free(envbuf);
     return ZRPC_OK;
 }
 
@@ -316,10 +352,16 @@ static void session_txq_drain(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint
     unsigned nm = 0;
     uint32_t budget = s->cc_burst;
     zrpc_node_t *node = udp->base.node;
+    zrpc_env_view_t view;
 
     if (!s->txq) {
         return;
     }
+    /* 排空时 txq 已是连续逻辑缓冲：整段作为 prefix，无独立 payload。 */
+    view.prefix = s->txq;
+    view.prefix_len = s->txq_total;
+    view.payload = NULL;
+    view.payload_len = 0;
     while (s->txq_sent < s->txq_total && budget-- > 0) {
         uint32_t off = s->txq_sent;
         uint32_t chunk = s->txq_total - s->txq_sent;
@@ -332,8 +374,7 @@ static void session_txq_drain(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint
             (void)ztk_socket_sendto_batch(s->sock, msgs, nm);
             nm = 0;
         }
-        emit_frag(udp, s, s->txq_msgid, s->txq_total, off, chunk, s->txq + off, last, now, msgs,
-                  &nm);
+        emit_frag(udp, s, s->txq_msgid, s->txq_total, off, chunk, &view, last, now, msgs, &nm);
         s->txq_sent += chunk;
     }
     if (nm > 0) {

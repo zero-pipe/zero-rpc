@@ -50,6 +50,12 @@ typedef struct zrpc_frag_view {
 } zrpc_frag_view_t;
 
 size_t zrpc_wire_build_data(uint8_t *buf, size_t cap, const zrpc_frag_desc_t *desc);
+/*
+ * 只写 RTP + 分片头（不拷贝 payload）。desc->frag_len 仍写入头部，但
+ * desc->chunk 被忽略，调用方随后自行拷贝分片数据到 buf + 返回值处。
+ * 返回写入的头部字节数，0 表示失败。
+ */
+size_t zrpc_wire_build_frag_header(uint8_t *buf, size_t cap, const zrpc_frag_desc_t *desc);
 int zrpc_wire_parse_data(const uint8_t *buf, size_t len, zrpc_frag_view_t *view);
 
 size_t zrpc_wire_build_nack(uint8_t *buf, size_t cap, uint32_t sender_ssrc, uint32_t media_ssrc,

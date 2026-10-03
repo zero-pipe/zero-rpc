@@ -8,14 +8,12 @@ static int seq_diff16(uint16_t seq, uint16_t base) {
     return (int)(int16_t)(uint16_t)(seq - base);
 }
 
-size_t zrpc_wire_build_data(uint8_t *buf, size_t cap, const zrpc_frag_desc_t *d) {
-    size_t need;
+size_t zrpc_wire_build_frag_header(uint8_t *buf, size_t cap, const zrpc_frag_desc_t *d) {
     uint8_t *p;
-    if (!buf || !d || d->frag_len > 0 && !d->chunk) {
+    if (!buf || !d || d->frag_off > d->total_len || d->frag_len > d->total_len - d->frag_off) {
         return 0;
     }
-    need = (size_t)ZRPC_RTP_HDR_LEN + ZRPC_FRAG_HDR_LEN + d->frag_len;
-    if (need > cap || d->frag_off > d->total_len || d->frag_len > d->total_len - d->frag_off) {
+    if (cap < (size_t)ZRPC_RTP_HDR_LEN + ZRPC_FRAG_HDR_LEN) {
         return 0;
     }
     p = buf;
@@ -32,9 +30,26 @@ size_t zrpc_wire_build_data(uint8_t *buf, size_t cap, const zrpc_frag_desc_t *d)
     p[16] = d->flags;
     p[17] = 0;
     zrpc_put_u16(p + 18, 0);
-    p += ZRPC_FRAG_HDR_LEN;
+    return (size_t)ZRPC_RTP_HDR_LEN + ZRPC_FRAG_HDR_LEN;
+}
+
+size_t zrpc_wire_build_data(uint8_t *buf, size_t cap, const zrpc_frag_desc_t *d) {
+    size_t hdr;
+    size_t need;
+
+    if (!buf || !d || (d->frag_len > 0 && !d->chunk)) {
+        return 0;
+    }
+    need = (size_t)ZRPC_RTP_HDR_LEN + ZRPC_FRAG_HDR_LEN + d->frag_len;
+    if (need > cap) {
+        return 0;
+    }
+    hdr = zrpc_wire_build_frag_header(buf, cap, d);
+    if (!hdr) {
+        return 0;
+    }
     if (d->frag_len > 0) {
-        memcpy(p, d->chunk, d->frag_len);
+        memcpy(buf + hdr, d->chunk, d->frag_len);
     }
     return need;
 }
