@@ -33,8 +33,43 @@ static uint64_t now_ns(void) {
 }
 #endif
 
-/* 线性 µs 分辨率延迟直方图上限（超过则并入末桶） */
-#define ZRPC_LAT_MAX_US 65536
+/*
+ * 延迟直方图：小延迟用 1µs 线性桶，大延迟用 log2 分桶，避免高延迟全部被
+ * 合并进单一哨兵值。数组索引与代表值（µs）的映射见 lat_hist_index/key()。
+ */
+#define ZRPC_LAT_LINEAR_MAX 65536 /* [0,65535] 为 1µs 线性桶 */
+#define ZRPC_LAT_LOG_BUCKETS 24   /* 覆盖约 65ms .. 数小时 */
+#define ZRPC_LAT_HIST_SIZE (ZRPC_LAT_LINEAR_MAX + ZRPC_LAT_LOG_BUCKETS)
+
+/* 延迟(µs) -> 直方图桶索引 */
+static int lat_hist_index(uint64_t us) {
+    int b = 0;
+    if (us < ZRPC_LAT_LINEAR_MAX) {
+        return (int)us;
+    }
+    while ((us >> (b + 1)) != 0) {
+        b++;
+    }
+    b -= 16; /* floor(log2(us)) - floor(log2(65536)) */
+    if (b >= ZRPC_LAT_LOG_BUCKETS) {
+        b = ZRPC_LAT_LOG_BUCKETS - 1;
+    }
+    return ZRPC_LAT_LINEAR_MAX + b;
+}
+
+/* 直方图桶索引 -> 代表值(µs)：线性桶取精确值，对数桶取区间中点 */
+static uint64_t lat_hist_key(int idx) {
+    int k;
+    uint64_t lower;
+    uint64_t upper;
+    if (idx < ZRPC_LAT_LINEAR_MAX) {
+        return (uint64_t)idx;
+    }
+    k = idx - ZRPC_LAT_LINEAR_MAX;
+    lower = (uint64_t)1 << (16 + k);
+    upper = (lower << 1) - 1;
+    return lower + (upper - lower) / 2;
+}
 
 typedef struct options {
     const char *config;
@@ -169,7 +204,7 @@ static const uint8_t *g_payload;
 static uint64_t g_start_ns, g_deadline_ns;
 static uint64_t g_attempted, g_succeeded, g_failed, g_response_bytes;
 static uint64_t g_min_ns, g_max_ns, g_sum_ns, g_lat_count;
-static uint64_t g_lat_hist[ZRPC_LAT_MAX_US + 1];
+static uint64_t g_lat_hist[ZRPC_LAT_HIST_SIZE];
 static error_entry_t g_errors[16];
 static int g_error_count;
 static uint64_t g_cur_send_ns;
@@ -185,13 +220,10 @@ static void ed_finish(void) {
 static void ed_resp(int status, const zrpc_response_t *resp, void *user) {
     uint64_t lat = now_ns() - g_cur_send_ns;
     uint64_t us = (lat + 999ull) / 1000ull;
-    uint64_t hidx = us;
+    uint64_t hidx = (uint64_t)lat_hist_index(us);
     int ok;
     (void)user;
 
-    if (hidx > ZRPC_LAT_MAX_US) {
-        hidx = ZRPC_LAT_MAX_US;
-    }
     g_lat_hist[hidx]++;
 
     ok = (status == ZRPC_OK) &&
@@ -504,10 +536,7 @@ int main(int argc, char **argv) {
                 }
                 us = (co.latency_ns + 999ull) / 1000ull;
                 {
-                    uint64_t hidx = us;
-                    if (hidx > ZRPC_LAT_MAX_US) {
-                        hidx = ZRPC_LAT_MAX_US;
-                    }
+                    uint64_t hidx = (uint64_t)lat_hist_index(us);
                     g_lat_hist[hidx]++;
                 }
                 if (co.status == ZRPC_OK && co.verify_ok &&
@@ -595,9 +624,10 @@ int main(int argc, char **argv) {
         fprintf(out, "\"latency_histogram_us\":{");
         {
             int first = 1;
-            for (i = 0; i <= ZRPC_LAT_MAX_US; i++) {
+            for (i = 0; i < ZRPC_LAT_HIST_SIZE; i++) {
                 if (g_lat_hist[i]) {
-                    fprintf(out, "%s\"%d\":%llu", first ? "" : ",", i,
+                    fprintf(out, "%s\"%llu\":%llu", first ? "" : ",",
+                            (unsigned long long)lat_hist_key(i),
                             (unsigned long long)g_lat_hist[i]);
                     first = 0;
                 }
