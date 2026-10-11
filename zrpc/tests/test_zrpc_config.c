@@ -96,12 +96,59 @@ static void test_binding_config(void) {
     CHECK(strcmp(cfg.routes[0].endpoint, "tcp://127.0.0.1:9000") == 0);
 }
 
+/* 新的扁平格式：顶层字段 + URI 端点 + 字符串 peer/binding。 */
+static void test_flat_format(void) {
+    const char *json =
+        "{"
+        "\"name\":\"flat\",\"mode\":\"static\",\"io_threads\":4,"
+        "\"bindings\":[\"tcp://127.0.0.1:5000\",\"udp://127.0.0.1:5001\"],"
+        "\"discovery\":{\"broadcast\":\"127.0.0.1:42000\","
+        "\"peers\":[\"10.0.0.1:42000\",{\"ip\":\"10.0.0.2\",\"port\":42001}]},"
+        "\"routes\":[{\"service\":\"Foo\",\"endpoint\":\"tcp://10.0.0.9:6000\"}]"
+        "}";
+    zrpc_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    CHECK(zrpc_config_load(json, &cfg) == ZRPC_OK);
+    CHECK(strcmp(cfg.name, "flat") == 0);
+    CHECK(cfg.node.mode == ZRPC_MODE_STATIC);
+    CHECK(cfg.node.io_threads == 4);
+    CHECK(cfg.binding_count == 2);
+    CHECK(strcmp(cfg.binding_configs[0].name, "tcp") == 0);
+    CHECK(strcmp(cfg.binding_configs[0].endpoint, "tcp://127.0.0.1:5000") == 0);
+    CHECK(strcmp(cfg.binding_configs[1].name, "udp") == 0);
+    CHECK(strcmp(cfg.discovery_host, "127.0.0.1") == 0);
+    CHECK(cfg.node.discovery_port == 42000);
+    CHECK(cfg.peer_count == 2);
+    CHECK(strcmp(cfg.peers[0].ip, "10.0.0.1") == 0);
+    CHECK(cfg.peers[0].port == 42000);
+    CHECK(strcmp(cfg.peers[1].ip, "10.0.0.2") == 0);
+    CHECK(cfg.peers[1].port == 42001);
+    CHECK(cfg.route_count == 1);
+    CHECK(strcmp(cfg.routes[0].service, "Foo") == 0);
+    CHECK(strcmp(cfg.routes[0].endpoint, "tcp://10.0.0.9:6000") == 0);
+}
+
+/* 扁平顶层字段应覆盖旧的 node 对象。 */
+static void test_flat_precedence(void) {
+    const char *json =
+        "{\"name\":\"flat\",\"mode\":\"static\",\"io_threads\":3,"
+        "\"node\":{\"name\":\"nested\",\"mode\":\"mesh\",\"io_threads\":9}}";
+    zrpc_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    CHECK(zrpc_config_load(json, &cfg) == ZRPC_OK);
+    CHECK(strcmp(cfg.name, "flat") == 0);
+    CHECK(cfg.node.mode == ZRPC_MODE_STATIC);
+    CHECK(cfg.node.io_threads == 3);
+}
+
 int main(void) {
     test_parse();
     test_defaults();
     test_bad_json();
     test_endpoint_model();
     test_binding_config();
+    test_flat_format();
+    test_flat_precedence();
     if (g_fail) {
         printf("zrpc_config: FAIL\n");
         return 1;

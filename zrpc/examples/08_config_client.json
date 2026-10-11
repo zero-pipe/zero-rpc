@@ -1,0 +1,14 @@
+{
+  "name": "echo-client",
+  "mode": "static",
+  "io_threads": 1,
+  "bindings": [
+    "tcp://127.0.0.1:0"
+  ],
+  "routes": [
+    {
+      "service": "EchoService",
+      "endpoint": "tcp://127.0.0.1:42440"
+    }
+  ]
+}

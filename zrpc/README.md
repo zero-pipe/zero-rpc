@@ -108,6 +108,7 @@ service         注册方法；handler 可异步 reply，或用同步风格直�
 - `04_service_table` 共享声明契约。
 - `06_static_route_{server,client}` 静态路由。
 - `07_direct_endpoint_{server,client}` 直连端点。
+- `08_config_{server,client}` 从 JSON 配置创建节点（`bindings` / `routes` 用 URI）。
 
 ## 构建
 
@@ -169,6 +170,8 @@ zrpc_proxy_call(proxy, "echo", "ping", &pl, on_resp, NULL, 1000, NULL);
 ./zrpc_example_05_sync_call           # 客户端（先启动 02）
 ./zrpc_example_06_static_route_server &
 ./zrpc_example_06_static_route_client
+./zrpc_example_08_config_server &       # 读取 08_config_server.json
+./zrpc_example_08_config_client         # 读取 08_config_client.json
 ```
 
 ## payload 与 codec（序列化扩展点）
@@ -191,30 +194,43 @@ zrpc_proxy_call(proxy, "OrderService", "get", &pl, on_resp, NULL, 1000, NULL);
 
 ## JSON 配置
 
+配置是扁平的，端点统一写成 URI，大多数场景一眼就能看懂：
+
 ```json
 {
-  "node": {
-    "name": "srv",
-    "transport": "udp",
-    "bind_host": "0.0.0.0",
-    "data_port": 0,
-    "io_threads": 2,
-    "mode": "mesh",
-    "frag_bytes": 1200,
-    "max_msg_bytes": 1048576
-  },
-  "discovery": {
-    "host": "255.255.255.255",
-    "port": 41953,
-    "hello_interval_ms": 3000,
-    "node_ttl_ms": 9000,
-    "peers": [ { "ip": "127.0.0.1", "port": 41953 } ]
-  },
+  "name": "echo-server",
+  "mode": "static",
+  "io_threads": 2,
+  "bindings": ["tcp://127.0.0.1:42420"],
   "routes": [
-    { "service": "echo", "ip": "127.0.0.1", "port": 9000, "transport": "tcp" }
+    { "service": "EchoService", "endpoint": "tcp://127.0.0.1:42420" }
   ]
 }
 ```
+
+- `bindings`：本节点监听的端点列表，元素是 `scheme://host:port`（端口 0 表示自动分配）。
+- `routes`：静态路由，`service` 指向目标 `endpoint`，跳过服务发现。
+- mesh 模式再加 `discovery` 段：
+
+```json
+{
+  "name": "echo-server",
+  "mode": "mesh",
+  "bindings": ["udp://0.0.0.0:42420"],
+  "discovery": {
+    "broadcast": "255.255.255.255:41953",
+    "hello_interval_ms": 3000,
+    "node_ttl_ms": 9000,
+    "peers": ["127.0.0.1:41953"]
+  }
+}
+```
+
+- `discovery.broadcast` 是 `host:port`，`peers` 是额外的单播 HELLO 目标，元素为 `host:port`。
+- 可选调优字段（顶层）：`transport`、`bind_host`、`data_port`、`frag_bytes`、`max_msg_bytes`、`backpressure_bytes`。
+- 兼容旧格式：字段可放在 `node` 对象里，binding 可用 `transport.bindings`，peer 可用 `{ip,port}`，route 可用 `ip/port/transport`；同时存在时扁平顶层字段优先。
+
+完整可运行见 `examples/08_config_{server,client}.json`。
 
 ```c
 zrpc_config_t cfg;
@@ -222,6 +238,8 @@ zrpc_config_load_file("config.json", &cfg);
 zrpc_node_t *node;
 zrpc_node_create_from_config(&cfg, &node); /* 创建节点并应用 peers / routes */
 ```
+
+注意：`zrpc_config_t` 拥有所有字符串，节点只借用其指针，因此 `cfg` 必须比节点活得更久。
 
 ## 约定
 

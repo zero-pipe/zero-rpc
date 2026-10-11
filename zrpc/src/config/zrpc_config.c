@@ -7,8 +7,21 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void cfg_str(char *dst, size_t cap, const cJSON *obj, const char *key, const char *def) {
-    const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
+/*
+ * 取值辅助：优先读 primary（扁平顶层字段），读不到再回退 fallback（旧的 node 对象）。
+ * primary/fallback 为 NULL 时 cJSON 查找返回 NULL，天然安全。
+ */
+static const cJSON *cfg_pick(const cJSON *primary, const cJSON *fallback, const char *key) {
+    const cJSON *item = cJSON_GetObjectItemCaseSensitive(primary, key);
+    if (item && !cJSON_IsNull(item)) {
+        return item;
+    }
+    return fallback ? cJSON_GetObjectItemCaseSensitive(fallback, key) : NULL;
+}
+
+static void cfg_str2(char *dst, size_t cap, const cJSON *primary, const cJSON *fallback,
+                     const char *key, const char *def) {
+    const cJSON *item = cfg_pick(primary, fallback, key);
     if (cJSON_IsString(item) && item->valuestring && item->valuestring[0]) {
         snprintf(dst, cap, "%s", item->valuestring);
     } else if (def) {
@@ -18,17 +31,26 @@ static void cfg_str(char *dst, size_t cap, const cJSON *obj, const char *key, co
     }
 }
 
-static unsigned cfg_u32(const cJSON *obj, const char *key, unsigned def) {
-    const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
+static void cfg_str(char *dst, size_t cap, const cJSON *obj, const char *key, const char *def) {
+    cfg_str2(dst, cap, obj, NULL, key, def);
+}
+
+static unsigned cfg_u32_2(const cJSON *primary, const cJSON *fallback, const char *key,
+                          unsigned def) {
+    const cJSON *item = cfg_pick(primary, fallback, key);
     if (cJSON_IsNumber(item) && item->valuedouble >= 0) {
         return (unsigned)item->valuedouble;
     }
     return def;
 }
 
-static zrpc_transport_kind_t cfg_transport(const cJSON *obj, const char *key,
-                                           zrpc_transport_kind_t def) {
-    const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
+static unsigned cfg_u32(const cJSON *obj, const char *key, unsigned def) {
+    return cfg_u32_2(obj, NULL, key, def);
+}
+
+static zrpc_transport_kind_t cfg_transport2(const cJSON *primary, const cJSON *fallback,
+                                            const char *key, zrpc_transport_kind_t def) {
+    const cJSON *item = cfg_pick(primary, fallback, key);
     if (cJSON_IsString(item) && item->valuestring) {
         if (strcmp(item->valuestring, "tcp") == 0 || strcmp(item->valuestring, "TCP") == 0) {
             return ZRPC_TRANSPORT_TCP;
@@ -40,8 +62,14 @@ static zrpc_transport_kind_t cfg_transport(const cJSON *obj, const char *key,
     return def;
 }
 
-static zrpc_node_mode_t cfg_mode(const cJSON *obj, const char *key, zrpc_node_mode_t def) {
-    const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
+static zrpc_transport_kind_t cfg_transport(const cJSON *obj, const char *key,
+                                           zrpc_transport_kind_t def) {
+    return cfg_transport2(obj, NULL, key, def);
+}
+
+static zrpc_node_mode_t cfg_mode2(const cJSON *primary, const cJSON *fallback, const char *key,
+                                  zrpc_node_mode_t def) {
+    const cJSON *item = cfg_pick(primary, fallback, key);
     if (cJSON_IsString(item) && item->valuestring) {
         if (strcmp(item->valuestring, "static") == 0 || strcmp(item->valuestring, "STATIC") == 0) {
             return ZRPC_MODE_STATIC;
@@ -53,16 +81,38 @@ static zrpc_node_mode_t cfg_mode(const cJSON *obj, const char *key, zrpc_node_mo
     return def;
 }
 
+/* 解析 "host:port"（含 [ipv6]:port）；成功返回 ZRPC_OK。 */
+static int cfg_host_port(const char *text, char *host, size_t host_cap, uint16_t *port) {
+    zrpc_endpoint_t endpoint;
+    char uri[ZRPC_ENDPOINT_MAX * 2];
+    int n;
+    if (!text || !host || !port) {
+        return ZRPC_ERR_INVALID;
+    }
+    n = snprintf(uri, sizeof(uri), "udp://%s", text);
+    if (n < 0 || (size_t)n >= sizeof(uri) || zrpc_endpoint_parse(uri, &endpoint) != ZRPC_OK) {
+        return ZRPC_ERR_INVALID;
+    }
+    snprintf(host, host_cap, "%s", endpoint.host);
+    *port = endpoint.port;
+    return ZRPC_OK;
+}
+
+/* 配置一个 binding：接受 "scheme://host:port" 字符串或 {name,endpoint} 对象。 */
 static void cfg_binding(zrpc_config_t *out, const cJSON *item) {
     zrpc_binding_endpoint_t *binding;
     if (!out || !item || out->binding_count >= ZRPC_CONFIG_MAX_BINDINGS) {
         return;
     }
     binding = &out->bindings[out->binding_count];
-    cfg_str(binding->name, sizeof(binding->name), item, "name", NULL);
-    cfg_str(binding->endpoint, sizeof(binding->endpoint), item, "endpoint", NULL);
-    if (!binding->endpoint[0] && binding->name[0]) {
-        cfg_str(binding->endpoint, sizeof(binding->endpoint), item, "uri", NULL);
+    if (cJSON_IsString(item) && item->valuestring) {
+        snprintf(binding->endpoint, sizeof(binding->endpoint), "%s", item->valuestring);
+    } else if (cJSON_IsObject(item)) {
+        cfg_str(binding->name, sizeof(binding->name), item, "name", NULL);
+        cfg_str(binding->endpoint, sizeof(binding->endpoint), item, "endpoint", NULL);
+        if (!binding->endpoint[0]) {
+            cfg_str(binding->endpoint, sizeof(binding->endpoint), item, "uri", NULL);
+        }
     }
     if (!binding->endpoint[0]) {
         return;
@@ -84,12 +134,12 @@ static void cfg_binding(zrpc_config_t *out, const cJSON *item) {
 int zrpc_config_load(const char *json, zrpc_config_t *out) {
     cJSON *root;
     const cJSON *node;
+    const cJSON *bindings;
+    const cJSON *transport;
     const cJSON *disc;
     const cJSON *routes;
     const cJSON *peers;
     const cJSON *item;
-    const cJSON *transport;
-    int i;
 
     if (!json || !out) {
         return ZRPC_ERR_INVALID;
@@ -100,39 +150,60 @@ int zrpc_config_load(const char *json, zrpc_config_t *out) {
         return ZRPC_ERR_INVALID;
     }
 
-    /* node */
+    /* 扁平顶层字段优先，兼容旧的 "node" 对象。 */
     node = cJSON_GetObjectItemCaseSensitive(root, "node");
-    cfg_str(out->name, sizeof(out->name), node, "name", "zrpc");
-    cfg_str(out->bind_host, sizeof(out->bind_host), node, "bind_host", "0.0.0.0");
-    out->node.transport = cfg_transport(node, "transport", ZRPC_TRANSPORT_UDP);
-    out->node.mode = cfg_mode(node, "mode", ZRPC_MODE_MESH);
-    out->node.data_port = (uint16_t)cfg_u32(node, "data_port", 0);
-    out->node.io_threads = cfg_u32(node, "io_threads", 0);
-    out->node.frag_bytes = (uint16_t)cfg_u32(node, "frag_bytes", 0);
-    out->node.max_msg_bytes = cfg_u32(node, "max_msg_bytes", 0);
-    out->node.backpressure_bytes = cfg_u32(node, "backpressure_bytes", 0);
+    cfg_str2(out->name, sizeof(out->name), root, node, "name", "zrpc");
+    cfg_str2(out->bind_host, sizeof(out->bind_host), root, node, "bind_host", "0.0.0.0");
+    out->node.transport = cfg_transport2(root, node, "transport", ZRPC_TRANSPORT_UDP);
+    out->node.mode = cfg_mode2(root, node, "mode", ZRPC_MODE_MESH);
+    out->node.data_port = (uint16_t)cfg_u32_2(root, node, "data_port", 0);
+    out->node.io_threads = cfg_u32_2(root, node, "io_threads", 0);
+    out->node.frag_bytes = (uint16_t)cfg_u32_2(root, node, "frag_bytes", 0);
+    out->node.max_msg_bytes = cfg_u32_2(root, node, "max_msg_bytes", 0);
+    out->node.backpressure_bytes = cfg_u32_2(root, node, "backpressure_bytes", 0);
     out->node.name = out->name;
     out->node.bind_host = out->bind_host;
 
-    /* New binding model: transport.bindings or transport.binding. */
-    transport = cJSON_GetObjectItemCaseSensitive(root, "transport");
-    if (cJSON_IsObject(transport)) {
-        const cJSON *bindings = cJSON_GetObjectItemCaseSensitive(transport, "bindings");
-        const cJSON *binding = cJSON_GetObjectItemCaseSensitive(transport, "binding");
-        if (cJSON_IsArray(bindings)) {
-            cJSON_ArrayForEach(item, bindings) {
-                cfg_binding(out, item);
+    /* 新格式使用顶层 bindings；兼容旧格式 transport.bindings / transport.binding。 */
+    bindings = cJSON_GetObjectItemCaseSensitive(root, "bindings");
+    if (cJSON_IsArray(bindings)) {
+        cJSON_ArrayForEach(item, bindings) {
+            cfg_binding(out, item);
+        }
+    } else {
+        transport = cJSON_GetObjectItemCaseSensitive(root, "transport");
+        if (cJSON_IsObject(transport)) {
+            const cJSON *legacy_bindings =
+                cJSON_GetObjectItemCaseSensitive(transport, "bindings");
+            const cJSON *legacy_binding = cJSON_GetObjectItemCaseSensitive(transport, "binding");
+            if (cJSON_IsArray(legacy_bindings)) {
+                cJSON_ArrayForEach(item, legacy_bindings) {
+                    cfg_binding(out, item);
+                }
+            } else if (cJSON_IsObject(legacy_binding)) {
+                cfg_binding(out, legacy_binding);
             }
-        } else if (cJSON_IsObject(binding)) {
-            cfg_binding(out, binding);
         }
     }
 
-    /* discovery */
+    /* discovery：新格式推荐 broadcast: "host:port"，兼容 host/port。 */
     disc = cJSON_GetObjectItemCaseSensitive(root, "discovery");
-    cfg_str(out->discovery_host, sizeof(out->discovery_host), disc, "host", "255.255.255.255");
+    {
+        const cJSON *broadcast = cJSON_GetObjectItemCaseSensitive(disc, "broadcast");
+        uint16_t broadcast_port = 0;
+        char broadcast_host[ZRPC_ENDPOINT_MAX];
+        if (cJSON_IsString(broadcast) && broadcast->valuestring &&
+            cfg_host_port(broadcast->valuestring, broadcast_host, sizeof(broadcast_host),
+                          &broadcast_port) == ZRPC_OK) {
+            snprintf(out->discovery_host, sizeof(out->discovery_host), "%s", broadcast_host);
+            out->node.discovery_port = broadcast_port;
+        } else {
+            cfg_str(out->discovery_host, sizeof(out->discovery_host), disc, "host",
+                    "255.255.255.255");
+            out->node.discovery_port = (uint16_t)cfg_u32(disc, "port", 0);
+        }
+    }
     out->node.discovery_host = out->discovery_host;
-    out->node.discovery_port = (uint16_t)cfg_u32(disc, "port", 0);
     out->node.hello_interval_ms = cfg_u32(disc, "hello_interval_ms", 0);
     out->node.node_ttl_ms = cfg_u32(disc, "node_ttl_ms", 0);
     if (out->binding_count > 0) {
@@ -140,16 +211,25 @@ int zrpc_config_load(const char *json, zrpc_config_t *out) {
         out->node.binding_count = out->binding_count;
     }
 
-    /* discovery.peers */
+    /* discovery.peers：支持 "ip:port" 字符串和 {ip,port} 对象。 */
     peers = cJSON_GetObjectItemCaseSensitive(disc, "peers");
     if (cJSON_IsArray(peers)) {
         cJSON_ArrayForEach(item, peers) {
+            zrpc_peer_endpoint_t *peer;
             if (out->peer_count >= ZRPC_CONFIG_MAX_PEERS) {
                 break;
             }
-            cfg_str(out->peers[out->peer_count].ip, sizeof(out->peers[0].ip), item, "ip", NULL);
-            out->peers[out->peer_count].port = (uint16_t)cfg_u32(item, "port", 0);
-            if (out->peers[out->peer_count].ip[0] && out->peers[out->peer_count].port) {
+            peer = &out->peers[out->peer_count];
+            if (cJSON_IsString(item) && item->valuestring) {
+                if (cfg_host_port(item->valuestring, peer->ip, sizeof(peer->ip), &peer->port) !=
+                    ZRPC_OK) {
+                    continue;
+                }
+            } else {
+                cfg_str(peer->ip, sizeof(peer->ip), item, "ip", NULL);
+                peer->port = (uint16_t)cfg_u32(item, "port", 0);
+            }
+            if (peer->ip[0] && peer->port) {
                 out->peer_count++;
             }
         }
@@ -174,7 +254,6 @@ int zrpc_config_load(const char *json, zrpc_config_t *out) {
             }
         }
     }
-    (void)i;
     cJSON_Delete(root);
     return ZRPC_OK;
 }

@@ -2,30 +2,30 @@
 #define ZRPC_CONFIG_H
 
 /*
- * 简单的 JSON 配置（基于内置 cJSON）。
+ * 简单的 JSON 配置（基于内置 cJSON）。字段是扁平的，端点一律写成 URI：
  *
- * 配置文件示例：
  * {
- *   "node": {
- *     "name": "srv",
- *     "transport": "udp",            // "udp" | "tcp"
- *     "bind_host": "0.0.0.0",
- *     "data_port": 0,
- *     "io_threads": 2,
- *     "mode": "mesh",                // "mesh" | "static"
- *     "frag_bytes": 1200
- *   },
- *   "discovery": {
- *     "host": "255.255.255.255",
- *     "port": 41953,
+ *   "name": "echo-server",
+ *   "mode": "static",                    // "mesh"（默认）| "static"
+ *   "io_threads": 2,
+ *   "bindings": ["tcp://127.0.0.1:42420"],   // 本节点监听的端点
+ *   "discovery": {                       // mesh 模式才用到
+ *     "broadcast": "255.255.255.255:41953",
  *     "hello_interval_ms": 3000,
  *     "node_ttl_ms": 9000,
- *     "peers": [ { "ip": "127.0.0.1", "port": 41953 } ]
+ *     "peers": ["127.0.0.1:41953"]       // 额外的单播 HELLO 目标
  *   },
- *   "routes": [
- *     { "service": "echo", "ip": "127.0.0.1", "port": 9000, "transport": "tcp" }
+ *   "routes": [                          // 静态路由：service -> 目标端点
+ *     { "service": "EchoService", "endpoint": "tcp://127.0.0.1:42420" }
  *   ]
  * }
+ *
+ * 可选的调优字段：transport（默认 binding 的传输）、bind_host、data_port、
+ * frag_bytes、max_msg_bytes、backpressure_bytes。
+ *
+ * 兼容旧格式：字段仍可写在 "node" 对象里，binding 仍可写成
+ * transport.bindings，peer 仍可写成 {ip,port}，route 仍可写成 ip/port/transport。
+ * 两种写法同时存在时，扁平顶层字段优先。
  *
  * zrpc_config_t 拥有所有字符串；node.* 指针指向自身缓冲区，因此 config 必须
  * 比由它创建的节点活得更久。
