@@ -1,4 +1,7 @@
-#include "zrpc_internal.h"
+#include "zrpc_mem.h"
+#include "zrpc_node_access.h"
+
+#include <zrpc/zrpc_node.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -27,7 +30,7 @@ static void pool_probe(void *user) {
     size_t cap_b = 0;
 
     g_task_ok = 0;
-    if (cur != node->poller) {
+    if (cur != zrpc_node_poller(node)) {
         goto done;
     }
     pool = ztk_poller_buf_pool(cur);
@@ -92,10 +95,10 @@ int main(void) {
         return 1;
     }
 
-    n = ztk_poller_pool_size(node->pool);
+    n = ztk_poller_pool_size(zrpc_node_pool(node));
     CHECK(n >= 1);
     for (i = 0; i < n; i++) {
-        ztk_poller *p = ztk_poller_pool_at(node->pool, i);
+        ztk_poller *p = ztk_poller_pool_at(zrpc_node_pool(node), i);
         CHECK(p != NULL);
         CHECK(ztk_poller_buf_pool(p) != NULL);
     }
@@ -104,7 +107,7 @@ int main(void) {
     g_sem = ztk_sem_create(0);
     CHECK(g_sem != NULL);
     if (g_sem) {
-        CHECK(ztk_poller_async(node->poller, pool_probe, node, 0) == ZTK_OK);
+        CHECK(ztk_poller_async(zrpc_node_poller(node), pool_probe, node, 0) == ZTK_OK);
         CHECK(ztk_sem_timedwait(g_sem, 2000) == ZTK_OK);
         CHECK(g_task_ok == 1);
         ztk_sem_destroy(g_sem);

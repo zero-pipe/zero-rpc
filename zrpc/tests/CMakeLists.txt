@@ -45,6 +45,10 @@ target_include_directories(test_zrpc_iobuf PRIVATE
 target_link_libraries(test_zrpc_iobuf PRIVATE zrpc)
 add_test(NAME zrpc_iobuf COMMAND test_zrpc_iobuf)
 
+add_executable(test_zrpc_api test_zrpc_api.c)
+target_link_libraries(test_zrpc_api PRIVATE zrpc)
+add_test(NAME zrpc_api COMMAND test_zrpc_api)
+
 # CTest labels drive gating: `ctest -L unit`, `ctest -L integration`.
 # unit        = pure module / codec / config logic
 # integration = end-to-end loopback / streaming with real threads + sockets
@@ -52,3 +56,4 @@ set_tests_properties(zrpc_wire zrpc_config zrpc_registry zrpc_reliable zrpc_pool
     PROPERTIES LABELS "unit" TIMEOUT 120)
 set_tests_properties(zrpc_loopback zrpc_stream
     PROPERTIES LABELS "integration" TIMEOUT 300)
+set_tests_properties(zrpc_api PROPERTIES LABELS "integration" TIMEOUT 120)
