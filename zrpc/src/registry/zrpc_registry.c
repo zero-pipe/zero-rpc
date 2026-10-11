@@ -1,8 +1,10 @@
+/* 服务实例注册表：自带锁，操作对象是 zrpc_registry_t，不依赖 node。 */
 #include "zrpc_registry.h"
 
-#include "zrpc_internal.h"
+#include "zrpc_util.h"
 
-#include <stdio.h>
+#include <ztk/ztk.h>
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -17,8 +19,8 @@ struct zrpc_registry_instance {
     uint64_t last_seen_ms;
 };
 
-static void registry_remove_node_locked(zrpc_node_t *node, uint32_t node_id) {
-    zrpc_registry_instance_t *instance = node->registry.instances;
+static void registry_remove_node_locked(zrpc_registry_t *registry, uint32_t node_id) {
+    zrpc_registry_instance_t *instance = registry->instances;
     zrpc_registry_instance_t *previous = NULL;
     zrpc_registry_instance_t *next;
     while (instance) {
@@ -27,10 +29,10 @@ static void registry_remove_node_locked(zrpc_node_t *node, uint32_t node_id) {
             if (previous) {
                 previous->next = next;
             } else {
-                node->registry.instances = next;
+                registry->instances = next;
             }
             free(instance);
-            node->registry.generation++;
+            registry->generation++;
         } else {
             previous = instance;
         }
@@ -38,50 +40,50 @@ static void registry_remove_node_locked(zrpc_node_t *node, uint32_t node_id) {
     }
 }
 
-static ztk_mutex *registry_lock(const zrpc_node_t *node) {
-    return node && node->registry.lock ? (ztk_mutex *)node->registry.lock : NULL;
+static ztk_mutex *registry_lock(const zrpc_registry_t *registry) {
+    return registry && registry->lock ? (ztk_mutex *)registry->lock : NULL;
 }
 
-void zrpc_registry_init(zrpc_node_t *node) {
-    if (!node) {
+void zrpc_registry_init(zrpc_registry_t *registry) {
+    if (!registry) {
         return;
     }
-    node->registry.instances = NULL;
-    node->registry.generation = 0;
-    node->registry.next_instance = 0;
-    node->registry.lock = ztk_mutex_create(ZTK_MUTEX_NORMAL);
+    registry->instances = NULL;
+    registry->generation = 0;
+    registry->next_instance = 0;
+    registry->lock = ztk_mutex_create(ZTK_MUTEX_NORMAL);
 }
 
-void zrpc_registry_cleanup(zrpc_node_t *node) {
+void zrpc_registry_cleanup(zrpc_registry_t *registry) {
     zrpc_registry_instance_t *instance;
     zrpc_registry_instance_t *next;
     ztk_mutex *lock;
-    if (!node) {
+    if (!registry) {
         return;
     }
-    lock = registry_lock(node);
+    lock = registry_lock(registry);
     if (lock) {
         ztk_mutex_lock(lock);
     }
-    instance = node->registry.instances;
+    instance = registry->instances;
     while (instance) {
         next = instance->next;
         free(instance);
         instance = next;
     }
-    node->registry.instances = NULL;
-    node->registry.next_instance = 0;
+    registry->instances = NULL;
+    registry->next_instance = 0;
     if (lock) {
         ztk_mutex_unlock(lock);
         ztk_mutex_destroy(lock);
     }
-    node->registry.lock = NULL;
+    registry->lock = NULL;
 }
 
-static zrpc_registry_instance_t *find_instance(zrpc_node_t *node, const char *service,
+static zrpc_registry_instance_t *find_instance(zrpc_registry_t *registry, const char *service,
                                                const char *instance_id) {
     zrpc_registry_instance_t *instance;
-    for (instance = node->registry.instances; instance; instance = instance->next) {
+    for (instance = registry->instances; instance; instance = instance->next) {
         if (strcmp(instance->service, service) == 0 &&
             strcmp(instance->instance_id, instance_id) == 0) {
             return instance;
@@ -90,20 +92,20 @@ static zrpc_registry_instance_t *find_instance(zrpc_node_t *node, const char *se
     return NULL;
 }
 
-int zrpc_registry_upsert(zrpc_node_t *node, const char *service, const char *instance_id,
-                         const zrpc_endpoint_t *endpoints, size_t endpoint_count,
-                         uint32_t node_id, uint64_t last_seen_ms) {
+int zrpc_registry_upsert(zrpc_registry_t *registry, const char *service, const char *instance_id,
+                         const zrpc_endpoint_t *endpoints, size_t endpoint_count, uint32_t node_id,
+                         uint64_t last_seen_ms) {
     zrpc_registry_instance_t *instance;
     ztk_mutex *lock;
-    if (!node || !service || !service[0] || !instance_id || !instance_id[0] ||
-        !endpoints || endpoint_count == 0 || endpoint_count > ZRPC_MAX_BINDINGS) {
+    if (!registry || !service || !service[0] || !instance_id || !instance_id[0] || !endpoints ||
+        endpoint_count == 0 || endpoint_count > ZRPC_MAX_BINDINGS) {
         return ZRPC_ERR_INVALID;
     }
-    lock = registry_lock(node);
+    lock = registry_lock(registry);
     if (lock) {
         ztk_mutex_lock(lock);
     }
-    instance = find_instance(node, service, instance_id);
+    instance = find_instance(registry, service, instance_id);
     if (!instance) {
         instance = (zrpc_registry_instance_t *)calloc(1, sizeof(*instance));
         if (!instance) {
@@ -112,8 +114,8 @@ int zrpc_registry_upsert(zrpc_node_t *node, const char *service, const char *ins
             }
             return ZRPC_ERR_NOMEM;
         }
-        instance->next = node->registry.instances;
-        node->registry.instances = instance;
+        instance->next = registry->instances;
+        registry->instances = instance;
     }
     zrpc_copy_str(instance->service, sizeof(instance->service), service, "");
     zrpc_copy_str(instance->instance_id, sizeof(instance->instance_id), instance_id, "");
@@ -123,51 +125,51 @@ int zrpc_registry_upsert(zrpc_node_t *node, const char *service, const char *ins
     instance->endpoint_count = endpoint_count;
     instance->next_endpoint = 0;
     instance->last_seen_ms = last_seen_ms;
-    node->registry.generation++;
+    registry->generation++;
     if (lock) {
         ztk_mutex_unlock(lock);
     }
     return ZRPC_OK;
 }
 
-void zrpc_registry_remove_node(zrpc_node_t *node, uint32_t node_id) {
+void zrpc_registry_remove_node(zrpc_registry_t *registry, uint32_t node_id) {
     ztk_mutex *lock;
-    if (!node) {
+    if (!registry) {
         return;
     }
-    lock = registry_lock(node);
+    lock = registry_lock(registry);
     if (lock) {
         ztk_mutex_lock(lock);
     }
-    registry_remove_node_locked(node, node_id);
+    registry_remove_node_locked(registry, node_id);
     if (lock) {
         ztk_mutex_unlock(lock);
     }
 }
 
-void zrpc_registry_expire(zrpc_node_t *node, uint64_t now_ms, uint64_t ttl_ms) {
+void zrpc_registry_expire(zrpc_registry_t *registry, uint64_t now_ms, uint64_t ttl_ms) {
     zrpc_registry_instance_t *instance;
     zrpc_registry_instance_t *previous = NULL;
     zrpc_registry_instance_t *next;
     ztk_mutex *lock;
-    if (!node) {
+    if (!registry) {
         return;
     }
-    lock = registry_lock(node);
+    lock = registry_lock(registry);
     if (lock) {
         ztk_mutex_lock(lock);
     }
-    instance = node->registry.instances;
+    instance = registry->instances;
     while (instance) {
         next = instance->next;
         if (now_ms - instance->last_seen_ms > ttl_ms) {
             if (previous) {
                 previous->next = next;
             } else {
-                node->registry.instances = next;
+                registry->instances = next;
             }
             free(instance);
-            node->registry.generation++;
+            registry->generation++;
         } else {
             previous = instance;
         }
@@ -188,11 +190,11 @@ static int instance_has_tcp(const zrpc_registry_instance_t *instance) {
     return 0;
 }
 
-int zrpc_registry_select(zrpc_node_t *node, const char *service, zrpc_endpoint_t *out) {
-    return zrpc_registry_select_prefer(node, service, 0, out);
+int zrpc_registry_select(zrpc_registry_t *registry, const char *service, zrpc_endpoint_t *out) {
+    return zrpc_registry_select_prefer(registry, service, 0, out);
 }
 
-int zrpc_registry_select_prefer(zrpc_node_t *node, const char *service, int prefer_stream,
+int zrpc_registry_select_prefer(zrpc_registry_t *registry, const char *service, int prefer_stream,
                                 zrpc_endpoint_t *out) {
     zrpc_registry_instance_t *instance;
     zrpc_registry_instance_t *selected = NULL;
@@ -200,14 +202,14 @@ int zrpc_registry_select_prefer(zrpc_node_t *node, const char *service, int pref
     size_t target;
     size_t current = 0;
     ztk_mutex *lock;
-    if (!node || !service || !out) {
+    if (!registry || !service || !out) {
         return ZRPC_ERR_INVALID;
     }
-    lock = registry_lock(node);
+    lock = registry_lock(registry);
     if (lock) {
         ztk_mutex_lock(lock);
     }
-    for (instance = node->registry.instances; instance; instance = instance->next) {
+    for (instance = registry->instances; instance; instance = instance->next) {
         if (strcmp(instance->service, service) == 0 && instance->endpoint_count > 0) {
             if (!prefer_stream || instance_has_tcp(instance)) {
                 count++;
@@ -217,7 +219,7 @@ int zrpc_registry_select_prefer(zrpc_node_t *node, const char *service, int pref
     if (count == 0 && prefer_stream) {
         /* Large-payload preference is advisory; fall back to any endpoint. */
         prefer_stream = 0;
-        for (instance = node->registry.instances; instance; instance = instance->next) {
+        for (instance = registry->instances; instance; instance = instance->next) {
             if (strcmp(instance->service, service) == 0 && instance->endpoint_count > 0) {
                 count++;
             }
@@ -229,8 +231,8 @@ int zrpc_registry_select_prefer(zrpc_node_t *node, const char *service, int pref
         }
         return ZRPC_ERR_NOTFOUND;
     }
-    target = node->registry.next_instance++ % count;
-    for (instance = node->registry.instances; instance; instance = instance->next) {
+    target = registry->next_instance++ % count;
+    for (instance = registry->instances; instance; instance = instance->next) {
         if (strcmp(instance->service, service) == 0 && instance->endpoint_count > 0) {
             if (prefer_stream && !instance_has_tcp(instance)) {
                 continue;
@@ -262,22 +264,22 @@ int zrpc_registry_select_prefer(zrpc_node_t *node, const char *service, int pref
     return ZRPC_OK;
 }
 
-int zrpc_registry_replace_node(zrpc_node_t *node, uint32_t node_id, const char *instance_id,
+int zrpc_registry_replace_node(zrpc_registry_t *registry, uint32_t node_id, const char *instance_id,
                                const char *const *services, size_t service_count,
                                const zrpc_endpoint_t *endpoints, size_t endpoint_count,
                                uint64_t last_seen_ms) {
     size_t i;
     int rc = ZRPC_OK;
     ztk_mutex *lock;
-    if (!node || !instance_id || !instance_id[0] || (service_count && !services) ||
+    if (!registry || !instance_id || !instance_id[0] || (service_count && !services) ||
         endpoint_count > ZRPC_MAX_BINDINGS || (service_count && endpoint_count == 0)) {
         return ZRPC_ERR_INVALID;
     }
-    lock = registry_lock(node);
+    lock = registry_lock(registry);
     if (lock) {
         ztk_mutex_lock(lock);
     }
-    registry_remove_node_locked(node, node_id);
+    registry_remove_node_locked(registry, node_id);
     for (i = 0; i < service_count; i++) {
         zrpc_registry_instance_t *instance;
         if (!services[i] || !services[i][0]) {
@@ -294,9 +296,9 @@ int zrpc_registry_replace_node(zrpc_node_t *node, uint32_t node_id, const char *
         memcpy(instance->endpoints, endpoints, endpoint_count * sizeof(endpoints[0]));
         instance->endpoint_count = endpoint_count;
         instance->last_seen_ms = last_seen_ms;
-        instance->next = node->registry.instances;
-        node->registry.instances = instance;
-        node->registry.generation++;
+        instance->next = registry->instances;
+        registry->instances = instance;
+        registry->generation++;
     }
     if (lock) {
         ztk_mutex_unlock(lock);

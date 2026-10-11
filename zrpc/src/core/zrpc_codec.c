@@ -1,5 +1,5 @@
 /* payload codec 注册表（预留给应用层的序列化扩展点）。 */
-#include "zrpc_internal.h"
+#include "zrpc_node_internal.h"
 
 #include <stdlib.h>
 

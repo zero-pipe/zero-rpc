@@ -1,7 +1,16 @@
 add_library(zrpc STATIC
     src/core/zrpc_node.c
+    src/core/zrpc_node_access.c
+    src/core/zrpc_transport_factory.c
+    src/core/zrpc_dispatch.c
     src/core/zrpc_service.c
+    src/core/zrpc_reply.c
     src/core/zrpc_proxy.c
+    src/core/zrpc_stub.c
+    src/core/zrpc_stream.c
+    src/core/zrpc_message_view.c
+    src/core/zrpc_service_table.c
+    src/core/zrpc_sync.c
     src/core/zrpc_pending.c
     src/core/zrpc_codec.c
     src/core/zrpc_mem.c

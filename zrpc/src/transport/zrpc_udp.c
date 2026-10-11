@@ -6,8 +6,11 @@
  */
 #include "zrpc_transport.h"
 
-#include "zrpc_internal.h"
 #include "zrpc_envelope.h"
+#include "zrpc_reasm.h"
+#include "zrpc_rx_window.h"
+#include "zrpc_tx_ring.h"
+#include "zrpc_util.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,7 +24,7 @@
 typedef struct zrpc_session {
     int used;
     int io;
-    zrpc_node_t *node;
+    zrpc_metrics_t *metrics;
     ztk_socket *sock;
     uint32_t peer_ip;
     char peer_ip_s[ZRPC_ENDPOINT_MAX];
@@ -110,7 +113,7 @@ static void session_init(zrpc_udp_transport_t *udp, zrpc_session_t *s, int io, z
     memset(s, 0, sizeof(*s));
     s->used = 1;
     s->io = io;
-    s->node = udp->base.node;
+    s->metrics = udp->base.metrics;
     s->sock = sock;
     zrpc_rx_window_reset(&s->rx_window);
     zrpc_reasm_init(&s->reasm);
@@ -208,8 +211,7 @@ static void emit_frag(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint32_t msg
     uint8_t *dst;
     size_t hdr;
     size_t n;
-    zrpc_node_t *node = udp->base.node;
-    uint32_t stride = ZRPC_RTP_HDR_LEN + ZRPC_FRAG_HDR_LEN + node->frag_bytes;
+    uint32_t stride = ZRPC_RTP_HDR_LEN + ZRPC_FRAG_HDR_LEN + udp->base.frag_bytes;
 
     if (!zrpc_tx_ring_ensure(&s->tx_ring, stride)) {
         return;
@@ -238,7 +240,7 @@ static void emit_frag(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint32_t msg
     n = hdr + chunk;
     zrpc_tx_ring_commit(&s->tx_ring, s->send_seq, (uint32_t)n);
     /* 测试用丢包注入：仍填入重传环（NACK 可重传），但不进本批发送 */
-    if (!(node->drop_percent && (sess_rand() % 100u) < node->drop_percent)) {
+    if (!(udp->base.drop_percent && (sess_rand() % 100u) < udp->base.drop_percent)) {
         msgs[*nm].data = dst;
         msgs[*nm].len = n;
         msgs[*nm].ip = s->peer_ip_s;
@@ -247,7 +249,7 @@ static void emit_frag(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint32_t msg
     }
     s->send_seq++;
     s->tx_pkts++;
-    node->metrics.udp_packets_sent++;
+    udp->base.metrics->udp_packets_sent++;
 }
 
 static int session_send(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint8_t kind, uint32_t msg_id,
@@ -258,7 +260,6 @@ static int session_send(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint8_t ki
     size_t route_len = route ? strlen(route) : 0;
     const uint8_t *data = payload ? (const uint8_t *)payload->data : NULL;
     size_t len = payload ? payload->len : 0;
-    zrpc_node_t *node = udp->base.node;
     zrpc_envelope_t envelope;
     uint8_t prefix[ZRPC_ENVELOPE_HDR_LEN + ZRPC_MAX_ROUTE];
     zrpc_env_view_t view;
@@ -272,7 +273,7 @@ static int session_send(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint8_t ki
     if (!s || !s->used) {
         return ZRPC_ERR_INVALID;
     }
-    if (len > node->max_msg_bytes || route_len >= ZRPC_MAX_ROUTE) {
+    if (len > udp->base.max_msg_bytes || route_len >= ZRPC_MAX_ROUTE) {
         return ZRPC_ERR_TOOBIG;
     }
     if (len > 0 && !data) {
@@ -281,11 +282,11 @@ static int session_send(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint8_t ki
 
     if (s->txq) {
         /* 上一条消息仍在拥塞排空：返回背压，不覆盖，避免隐性丢包。 */
-        node->metrics.backpressure_events++;
+        udp->base.metrics->backpressure_events++;
         return ZRPC_ERR_AGAIN;
     }
     env_len = zrpc_envelope_size(route_len, len);
-    if (env_len > (size_t)node->max_msg_bytes + ZRPC_MAX_ROUTE + ZRPC_ENVELOPE_HDR_LEN) {
+    if (env_len > (size_t)udp->base.max_msg_bytes + ZRPC_MAX_ROUTE + ZRPC_ENVELOPE_HDR_LEN) {
         return ZRPC_ERR_TOOBIG;
     }
     /* 仅把 envelope 头 + route 编进栈上前缀；payload 保持借用，不做整包拷贝。 */
@@ -311,13 +312,13 @@ static int session_send(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint8_t ki
     view.payload = data;
     view.payload_len = len;
 
-    nfrag = env_len ? (uint32_t)((env_len + node->frag_bytes - 1) / node->frag_bytes) : 1;
+    nfrag = env_len ? (uint32_t)((env_len + udp->base.frag_bytes - 1) / udp->base.frag_bytes) : 1;
     for (i = 0; i < nfrag; i++) {
         size_t chunk = env_len - off;
         int last;
 
-        if (chunk > node->frag_bytes) {
-            chunk = node->frag_bytes;
+        if (chunk > udp->base.frag_bytes) {
+            chunk = udp->base.frag_bytes;
         }
         last = (off + chunk) >= env_len;
 
@@ -351,7 +352,6 @@ static void session_txq_drain(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint
     ztk_udp_dgram_t msgs[ZRPC_TX_BATCH_MAX];
     unsigned nm = 0;
     uint32_t budget = s->cc_burst;
-    zrpc_node_t *node = udp->base.node;
     zrpc_env_view_t view;
 
     if (!s->txq) {
@@ -366,8 +366,8 @@ static void session_txq_drain(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint
         uint32_t off = s->txq_sent;
         uint32_t chunk = s->txq_total - s->txq_sent;
         int last;
-        if (chunk > node->frag_bytes) {
-            chunk = node->frag_bytes;
+        if (chunk > udp->base.frag_bytes) {
+            chunk = udp->base.frag_bytes;
         }
         last = (off + chunk) >= s->txq_total;
         if (nm == ZRPC_TX_BATCH_MAX) {
@@ -401,7 +401,7 @@ static int session_on_data(zrpc_udp_transport_t *udp, zrpc_session_t *s, const z
         return ZRPC_ERR_INVALID;
     }
     s->rx_pkts++;
-    node->metrics.udp_packets_received++;
+    udp->base.metrics->udp_packets_received++;
     if (!s->ssrc_remote_known) {
         s->ssrc_remote = v->ssrc;
         s->ssrc_remote_known = 1;
@@ -411,14 +411,15 @@ static int session_on_data(zrpc_udp_transport_t *udp, zrpc_session_t *s, const z
         return ZRPC_OK;
     }
 
-    if (v->total_len > node->max_msg_bytes + ZRPC_MAX_ROUTE + ZRPC_ENVELOPE_HDR_LEN) {
+    if (v->total_len > udp->base.max_msg_bytes + ZRPC_MAX_ROUTE + ZRPC_ENVELOPE_HDR_LEN) {
         return ZRPC_ERR_TOOBIG;
     }
-    if ((v->frag_off % node->frag_bytes) != 0) {
+    if ((v->frag_off % udp->base.frag_bytes) != 0) {
         return ZRPC_ERR_INVALID;
     }
-    frag_count = v->total_len ? (v->total_len + node->frag_bytes - 1) / node->frag_bytes : 1;
-    fidx = v->frag_off / node->frag_bytes;
+    frag_count =
+        v->total_len ? (v->total_len + udp->base.frag_bytes - 1) / udp->base.frag_bytes : 1;
+    fidx = v->frag_off / udp->base.frag_bytes;
     if (fidx >= frag_count || (uint32_t)v->frag_off + v->frag_len > v->total_len) {
         return ZRPC_ERR_INVALID;
     }
@@ -530,8 +531,8 @@ static void session_on_nack(zrpc_udp_transport_t *udp, zrpc_session_t *s, const 
         if (packet) {
             (void)ztk_socket_sendto(s->sock, packet, len, s->peer_ip_s, s->peer_port);
             s->retx++;
-            if (s->node) {
-                s->node->metrics.udp_retransmissions++;
+            if (s->metrics) {
+                s->metrics->udp_retransmissions++;
             }
         }
     }
@@ -542,8 +543,8 @@ static void reasm_on_lost(const zrpc_reasm_slot_t *slot, void *user) {
     (void)slot;
     if (s) {
         s->lost++;
-        if (s->node) {
-            s->node->metrics.udp_reassembly_expired++;
+        if (s->metrics) {
+            s->metrics->udp_reassembly_expired++;
         }
     }
 }
@@ -577,8 +578,8 @@ static void session_tick(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint64_t 
             if (n > 0) {
                 (void)ztk_socket_sendto(s->sock, nack, n, s->peer_ip_s, s->peer_port);
                 s->last_nack_ms = now_ms;
-                if (s->node) {
-                    s->node->metrics.udp_nacks_sent++;
+                if (s->metrics) {
+                    s->metrics->udp_nacks_sent++;
                 }
             }
         }
@@ -664,18 +665,17 @@ static void udp_tick_cb(void *user) {
 
 static int udp_start(zrpc_transport_t *t) {
     zrpc_udp_transport_t *udp = (zrpc_udp_transport_t *)t;
-    zrpc_node_t *node = t->node;
     ztk_socket_callbacks_t cbs;
     uint16_t actual = 0;
     int i;
 
     udp->io_count = 0;
-    for (i = 0; i < (int)node->io_threads && i < ZRPC_IO_MAX; i++) {
+    for (i = 0; i < (int)t->io_threads && i < ZRPC_IO_MAX; i++) {
         ztk_socket *ds = ztk_socket_create();
         if (!ds) {
             break;
         }
-        if (ztk_socket_bind_udp_ex(ds, node->bind_host, t->port, 1, i > 0 ? 1 : 0) != ZTK_OK) {
+        if (ztk_socket_bind_udp_ex(ds, t->bind_host, t->port, 1, i > 0 ? 1 : 0) != ZTK_OK) {
             ztk_socket_destroy(ds);
             break;
         }
@@ -701,7 +701,7 @@ static int udp_start(zrpc_transport_t *t) {
         }
         memset(&cbs, 0, sizeof(cbs));
         cbs.on_readable = data_recv_cb;
-        udp->pollers[i] = ztk_poller_pool_at(node->pool, (unsigned)i);
+        udp->pollers[i] = ztk_poller_pool_at(t->pool, (unsigned)i);
         if (ztk_socket_attach_poller(ds, udp->pollers[i], &cbs, &udp->io_ctx[i]) != ZTK_OK) {
             free(udp->io_ctx[i].rx);
             udp->io_ctx[i].rx = NULL;

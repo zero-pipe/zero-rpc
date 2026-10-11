@@ -1,5 +1,9 @@
-/* 节点：生命周期、传输选择、线程/发现配置，以及消息分发。 */
-#include "zrpc_internal.h"
+/* 节点：生命周期、传输装配、线程/发现配置与阻塞运行（分发见 zrpc_dispatch.c）。 */
+#include "zrpc_node_internal.h"
+
+#include "zrpc_mem.h"
+#include "zrpc_transport_factory.h"
+#include "zrpc_util.h"
 
 #include <signal.h>
 #include <stdio.h>
@@ -21,103 +25,6 @@ static uint32_t zrpc_rand(void) {
     return st;
 }
 
-/* ---- 消息分发 ---- */
-
-static void node_dispatch(zrpc_node_t *node, const char *ip, uint16_t port, zrpc_peer_token_t token,
-                          zrpc_transport_t *transport, uint8_t kind, uint32_t msg_id, const char *route,
-                          const zrpc_payload_t *payload, const zrpc_stream_meta_t *stream) {
-    if (kind == ZRPC_KIND_REQUEST) {
-        if (stream) {
-            zrpc_service_handle_stream_chunk(node, token, ip, transport, port, msg_id, route,
-                                             stream, payload);
-        } else {
-            zrpc_service_handle_request(node, token, ip, transport, port, msg_id, route, payload);
-        }
-        return;
-    }
-    if (kind == ZRPC_KIND_RESPONSE) {
-        zrpc_pending_t *p = zrpc_pending_find(node, msg_id);
-        zrpc_response_t resp;
-        if (!p) {
-            return;
-        }
-        node->metrics.responses_received++;
-        node->metrics.bytes_received += payload ? payload->len : 0;
-        if (p->streaming) {
-            int app_status = 0;
-            zrpc_chunk_t chunk;
-            if (payload && payload->len >= 4 && payload->data) {
-                app_status = (int)zrpc_get_u32((const uint8_t *)payload->data);
-            }
-            chunk.data = (payload && payload->len >= 4) ? (const uint8_t *)payload->data + 4 : NULL;
-            chunk.len = (payload && payload->len >= 4) ? payload->len - 4 : 0;
-            chunk.encoding = payload ? payload->encoding : 0;
-            chunk.offset = stream ? stream->offset : p->expected_offset;
-            chunk.flags = stream ? stream->flags : 0;
-            if (p->chunk_cb) {
-                p->chunk_cb(app_status, &chunk, p->stream_user);
-            }
-            p->expected_offset = chunk.offset + chunk.len;
-            if (chunk.flags & ZRPC_STREAM_LAST) {
-                zrpc_stream_done_fn done = p->done_cb;
-                void *stream_user = p->stream_user;
-                p->chunk_cb = NULL;
-                p->done_cb = NULL;
-                if (done) {
-                    done(app_status, stream_user);
-                }
-                zrpc_pending_release(p);
-            }
-            return;
-        }
-        if (!payload || payload->len < 4 || !payload->data) {
-            zrpc_pending_invoke(p, ZRPC_ERR_INVALID, NULL);
-            return;
-        }
-        resp.status = (int)zrpc_get_u32((const uint8_t *)payload->data);
-        resp.payload.data = (const uint8_t *)payload->data + 4;
-        resp.payload.len = payload->len - 4;
-        resp.payload.encoding = payload->encoding;
-        zrpc_pending_invoke(p, ZRPC_OK, &resp);
-        return;
-    }
-    /* EVENT: 预留，忽略 */
-}
-
-void zrpc_node_on_message(zrpc_node_t *node, const char *ip, uint16_t port, zrpc_peer_token_t token,
-                          zrpc_transport_t *transport, uint8_t kind, uint32_t msg_id, const char *route,
-                          const zrpc_payload_t *payload, const zrpc_stream_meta_t *stream) {
-    if (!node) {
-        return;
-    }
-    node_dispatch(node, ip, port, token, transport, kind, msg_id, route, payload, stream);
-}
-
-int zrpc_node_send(zrpc_node_t *node, const char *ip, uint16_t port, uint8_t kind, uint32_t msg_id,
-                   zrpc_transport_kind_t transport_kind, const char *scheme, const char *route,
-                   const zrpc_payload_t *payload, const zrpc_stream_meta_t *stream) {
-    size_t i;
-    if (!node || !ip || !port) {
-        return ZRPC_ERR_INVALID;
-    }
-    for (i = 0; i < node->transport_count; i++) {
-        zrpc_transport_t *transport = node->transports[i];
-        if (!transport) {
-            continue;
-        }
-        if (scheme && scheme[0] && strcmp(transport->scheme, scheme) != 0) {
-            continue;
-        }
-        if ((!scheme || !scheme[0]) && transport->kind != transport_kind) {
-            continue;
-        }
-        if (transport->provider || transport->ops) {
-            return zrpc_transport_send(transport, ip, port, kind, msg_id, route, payload, stream);
-        }
-    }
-    return ZRPC_ERR_NOTFOUND;
-}
-
 /* ---- 定时器 ---- */
 
 static void hello_timer_cb(void *user) {
@@ -137,81 +44,6 @@ static void node_timer_cb(void *user) {
     zrpc_pending_tick(node, now);
 }
 
-static zrpc_transport_t *create_transport(zrpc_transport_kind_t kind) {
-    return kind == ZRPC_TRANSPORT_TCP ? zrpc_tcp_transport_create() : zrpc_udp_transport_create();
-}
-
-/* 自定义 provider 收到消息后，适配回 node 的统一分发入口。 */
-static void provider_on_receive(void *receiver, void *reply_token, const char *peer_host,
-                                uint16_t peer_port, const zrpc_transport_message_t *message) {
-    zrpc_transport_t *transport = (zrpc_transport_t *)receiver;
-    if (!transport || !transport->node || !message) {
-        return;
-    }
-    zrpc_node_on_message(transport->node, peer_host, peer_port, reply_token, transport,
-                         message->kind, message->request_id, message->route, &message->payload,
-                         (message->stream.flags & ZRPC_STREAM_FIRST) ||
-                                 (message->stream.flags & ZRPC_STREAM_LAST) ||
-                                 (message->stream.flags & ZRPC_STREAM_CANCEL) ||
-                                 message->stream.stream_id
-                             ? &message->stream
-                             : NULL);
-}
-
-static int node_add_transport(zrpc_node_t *node, const char *scheme, const char *host,
-                              uint16_t port) {
-    zrpc_transport_t *transport;
-    zrpc_transport_kind_t kind;
-    const zrpc_transport_provider_t *provider;
-    char endpoint[ZRPC_ENDPOINT_MAX + ZRPC_SCHEME_MAX + 16];
-    if (!node || !scheme || !host || !host[0] || node->transport_count >= ZRPC_MAX_BINDINGS) {
-        return ZRPC_ERR_INVALID;
-    }
-    kind = zrpc_transport_kind_from_scheme(scheme);
-    provider = zrpc_transport_provider_find(scheme);
-    if (kind != ZRPC_TRANSPORT_TCP && kind != ZRPC_TRANSPORT_UDP && !provider) {
-        return ZRPC_ERR_NOTFOUND; /* 未注册的 scheme */
-    }
-    transport = provider ? (zrpc_transport_t *)calloc(1, sizeof(*transport)) : create_transport(kind);
-    if (!transport) {
-        return ZRPC_ERR_NOMEM;
-    }
-    transport->node = node;
-    zrpc_copy_str(transport->scheme, sizeof(transport->scheme), scheme, "udp");
-    zrpc_copy_str(transport->bind_host, sizeof(transport->bind_host), host, "0.0.0.0");
-    transport->port = port;
-    if (provider) {
-        zrpc_transport_provider_options_t options;
-        zrpc_transport_instance_t *instance = NULL;
-        int n = snprintf(endpoint, sizeof(endpoint), "%s://%s:%u", scheme, host, (unsigned)port);
-        if (n < 0 || (size_t)n >= sizeof(endpoint)) {
-            free(transport);
-            return ZRPC_ERR_TOOBIG;
-        }
-        transport->kind = ZRPC_TRANSPORT_CUSTOM;
-        transport->provider = provider;
-        memset(&options, 0, sizeof(options));
-        options.scheme = scheme;
-        options.endpoint = endpoint;
-        options.receiver = transport;
-        options.on_receive = provider_on_receive;
-        if (provider->ops->create(&options, &instance) != ZRPC_OK || !instance) {
-            free(transport);
-            return ZRPC_ERR_IO;
-        }
-        transport->provider_instance = instance;
-    }
-    if (zrpc_transport_start(transport) != ZRPC_OK) {
-        zrpc_transport_destroy(transport);
-        return ZRPC_ERR_IO;
-    }
-    node->transports[node->transport_count++] = transport;
-    if (!node->transport) {
-        node->transport = transport;
-    }
-    return ZRPC_OK;
-}
-
 /* ---- 公共 API ---- */
 
 int zrpc_node_create(const zrpc_node_config_t *cfg, zrpc_node_t **out) {
@@ -226,6 +58,10 @@ int zrpc_node_create(const zrpc_node_config_t *cfg, zrpc_node_t **out) {
     node = (zrpc_node_t *)calloc(1, sizeof(*node));
     if (!node) {
         return ZRPC_ERR_NOMEM;
+    }
+    if (cfg->service_table && zrpc_install_service_table(cfg->service_table) != ZRPC_OK) {
+        free(node);
+        return ZRPC_ERR_INVALID;
     }
     node->cfg = *cfg;
     zrpc_copy_str(node->name, sizeof(node->name), cfg->name, "zrpc");
@@ -275,8 +111,8 @@ int zrpc_node_create(const zrpc_node_config_t *cfg, zrpc_node_t **out) {
         node->node_id = 1;
     }
     node->next_request_id = 1;
-    zrpc_route_init(node);
-    zrpc_registry_init(node);
+    zrpc_route_init(&node->routes);
+    zrpc_registry_init(&node->registry);
     node->registry_backend = (cfg->mode == ZRPC_MODE_MESH) ? zrpc_registry_backend_mesh() : NULL;
     node->id_lock = ztk_mutex_create(ZTK_MUTEX_NORMAL);
     if (!node->id_lock) {
@@ -323,14 +159,15 @@ int zrpc_node_create(const zrpc_node_config_t *cfg, zrpc_node_t **out) {
                 zrpc_node_destroy(node);
                 return ZRPC_ERR_INVALID;
             }
-            if (node_add_transport(node, endpoint.scheme, endpoint.host, endpoint.port) != ZRPC_OK) {
+            if (zrpc_node_transport_add(node, endpoint.scheme, endpoint.host, endpoint.port) !=
+                ZRPC_OK) {
                 zrpc_node_destroy(node);
                 return ZRPC_ERR_IO;
             }
         }
     } else {
         const char *scheme = cfg->transport == ZRPC_TRANSPORT_TCP ? "tcp" : "udp";
-        if (node_add_transport(node, scheme, node->bind_host, cfg->data_port) != ZRPC_OK) {
+        if (zrpc_node_transport_add(node, scheme, node->bind_host, cfg->data_port) != ZRPC_OK) {
             zrpc_node_destroy(node);
             return ZRPC_ERR_IO;
         }
@@ -390,8 +227,14 @@ void zrpc_node_destroy(zrpc_node_t *node) {
     if (node->registry_backend && node->registry_backend->ops->stop) {
         node->registry_backend->ops->stop(node);
     }
-    zrpc_route_cleanup(node);
-    zrpc_registry_cleanup(node);
+    {
+        int i;
+        for (i = 0; i < ZRPC_PENDING_MAX; i++) {
+            zrpc_pending_release(&node->pending[i]);
+        }
+    }
+    zrpc_route_cleanup(&node->routes);
+    zrpc_registry_cleanup(&node->registry);
     {
         size_t i;
         for (i = 0; i < node->transport_count; i++) {
@@ -414,6 +257,9 @@ void zrpc_node_destroy(zrpc_node_t *node) {
             zrpc_method_t *m = svc->methods;
             while (m) {
                 zrpc_method_t *mn = m->next;
+                if (m->owns_user) {
+                    free(m->user);
+                }
                 free(m);
                 m = mn;
             }
@@ -486,11 +332,11 @@ int zrpc_node_add_discovery_peer(zrpc_node_t *node, const char *ip, uint16_t dis
         return ZRPC_ERR_INVALID;
     }
     for (i = 0; i < ZRPC_DISC_TARGET_MAX; i++) {
-        if (!node->disc_targets[i].used) {
-            node->disc_targets[i].used = 1;
-            zrpc_copy_str(node->disc_targets[i].ip, sizeof(node->disc_targets[i].ip), ip,
+        if (!node->discovery.targets[i].used) {
+            node->discovery.targets[i].used = 1;
+            zrpc_copy_str(node->discovery.targets[i].ip, sizeof(node->discovery.targets[i].ip), ip,
                           "127.0.0.1");
-            node->disc_targets[i].port = discovery_port;
+            node->discovery.targets[i].port = discovery_port;
             if (node->registry_backend && node->registry_backend->ops->announce) {
                 node->registry_backend->ops->announce(node, 0);
             }
@@ -502,11 +348,11 @@ int zrpc_node_add_discovery_peer(zrpc_node_t *node, const char *ip, uint16_t dis
 
 int zrpc_node_add_static_route(zrpc_node_t *node, const char *service, const char *ip,
                                uint16_t port, zrpc_transport_kind_t transport) {
-    return zrpc_route_set(node, service, ip, port, transport);
+    return zrpc_route_set(&node->routes, service, ip, port, transport);
 }
 
 int zrpc_node_add_static_endpoint(zrpc_node_t *node, const char *service, const char *endpoint) {
-    return zrpc_route_add_endpoint(node, service, endpoint, 1);
+    return zrpc_route_add_endpoint(&node->routes, service, endpoint, 1);
 }
 
 void zrpc_node_metrics(const zrpc_node_t *node, zrpc_metrics_t *out) {
@@ -590,12 +436,13 @@ int zrpc_node_wait_for_service(zrpc_node_t *node, const char *service, uint64_t 
     }
     deadline = zrpc_now_ms() + (timeout_ms ? timeout_ms : ZRPC_DEFAULT_TIMEOUT_MS);
     for (;;) {
-        if (zrpc_route_lookup(node, service, ip, sizeof(ip), &port, NULL, NULL, 0) == ZRPC_OK) {
+        if (zrpc_route_lookup(&node->routes, service, ip, sizeof(ip), &port, NULL, NULL, 0) ==
+            ZRPC_OK) {
             return ZRPC_OK;
         }
         {
             zrpc_endpoint_t endpoint;
-            if (zrpc_registry_select(node, service, &endpoint) == ZRPC_OK) {
+            if (zrpc_registry_select(&node->registry, service, &endpoint) == ZRPC_OK) {
                 return ZRPC_OK;
             }
         }

@@ -1,7 +1,10 @@
 /* pending：客户端未完成调用的关联表（request_id -> 回调/超时）。
  * 仅在节点 poller 线程上访问；超时由 node 定时器触发。
  */
-#include "zrpc_internal.h"
+#include "zrpc_pending.h"
+
+#include "zrpc_mem.h"
+#include "zrpc_node_internal.h"
 
 #include <stdlib.h>
 

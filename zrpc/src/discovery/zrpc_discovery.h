@@ -8,15 +8,47 @@
  */
 
 #include <zrpc/zrpc_types.h>
+#include <zrpc/zrpc_endpoint.h>
 
 #include <stddef.h>
 #include <stdint.h>
+
+#include <ztk/ztk.h>
+
+#include "zrpc_caps.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 typedef struct zrpc_node zrpc_node_t;
+
+/* 发现的 mesh 对端。 */
+typedef struct zrpc_peer {
+    int used;
+    uint32_t ip;
+    char ip_s[ZRPC_ENDPOINT_MAX];
+    zrpc_endpoint_t endpoints[ZRPC_MAX_BINDINGS];
+    size_t endpoint_count;
+    uint32_t node_id;
+    uint64_t last_seen_ms;
+    int service_count;
+    char services[ZRPC_PEER_MAX_SERVICES][ZRPC_SERVICE_NAME_MAX];
+} zrpc_peer_t;
+
+/* 显式发现目标（单播 HELLO）。 */
+typedef struct zrpc_disc_target {
+    int used;
+    char ip[ZRPC_ENDPOINT_MAX];
+    uint16_t port;
+} zrpc_disc_target_t;
+
+/* 发现子系统自有状态：由 node 内嵌，模块内聚访问。 */
+typedef struct zrpc_discovery_state {
+    ztk_socket *sock;
+    zrpc_peer_t peers[ZRPC_MAX_PEERS];
+    zrpc_disc_target_t targets[ZRPC_DISC_TARGET_MAX];
+} zrpc_discovery_state_t;
 
 int zrpc_discovery_init(zrpc_node_t *node);
 void zrpc_discovery_shutdown(zrpc_node_t *node);

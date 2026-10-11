@@ -16,9 +16,9 @@
  */
 #include "zrpc_transport.h"
 
-#include "zrpc_internal.h"
 #include "zrpc_envelope.h"
 #include "zrpc_iobuf.h"
+#include "zrpc_util.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -184,8 +184,7 @@ static void tcp_link_dispatch(zrpc_tcp_transport_t *t, zrpc_tcp_link_t *link, co
 }
 
 static void tcp_link_consume(zrpc_tcp_transport_t *t, zrpc_tcp_link_t *link) {
-    zrpc_node_t *node = t->base.node;
-    size_t max_frame = (size_t)node->max_msg_bytes + ZRPC_MAX_ROUTE + 64;
+    size_t max_frame = (size_t)t->base.max_msg_bytes + ZRPC_MAX_ROUTE + 64;
     zrpc_rx_acc_t *a = &link->rx;
 
     for (;;) {
@@ -206,7 +205,7 @@ static void tcp_link_consume(zrpc_tcp_transport_t *t, zrpc_tcp_link_t *link) {
             return;
         }
         if (zrpc_tcp_parse(a->buf + a->rpos, frame, &body, &body_len) == 1) {
-            node->metrics.tcp_frames_received++;
+            t->base.metrics->tcp_frames_received++;
             tcp_link_dispatch(t, link, body, body_len);
         }
         a->rpos += frame;
@@ -285,7 +284,7 @@ static int tcp_link_emit(zrpc_tcp_transport_t *t, zrpc_tcp_link_t *link, const u
         lens[1] = payload_len;
         rc = ztk_tcp_session_sendv(link->session, parts, lens, payload_len ? 2u : 1u);
         if (rc == ZTK_OK) {
-            t->base.node->metrics.tcp_frames_sent++;
+            t->base.metrics->tcp_frames_sent++;
             return ZRPC_OK;
         }
         return (rc == ZTK_ERR_AGAIN) ? ZRPC_ERR_AGAIN : ZRPC_ERR_IO;
@@ -314,7 +313,7 @@ static int tcp_link_emit(zrpc_tcp_transport_t *t, zrpc_tcp_link_t *link, const u
             return ZRPC_ERR_NOMEM;
         }
         tcp_link_flush_tx(t, link);
-        t->base.node->metrics.tcp_frames_sent++;
+        t->base.metrics->tcp_frames_sent++;
         return ZRPC_OK;
     }
 
@@ -336,7 +335,7 @@ static int tcp_link_emit(zrpc_tcp_transport_t *t, zrpc_tcp_link_t *link, const u
             sent = ztk_socket_send(sock, header, header_len);
         }
         if (sent == (ztk_ssize_t)total) {
-            t->base.node->metrics.tcp_frames_sent++;
+            t->base.metrics->tcp_frames_sent++;
             return ZRPC_OK;
         }
         if (sent == ZTK_ERR_AGAIN) {
@@ -362,7 +361,7 @@ static int tcp_link_emit(zrpc_tcp_transport_t *t, zrpc_tcp_link_t *link, const u
             }
         }
         tcp_link_flush_tx(t, link);
-        t->base.node->metrics.tcp_frames_sent++;
+        t->base.metrics->tcp_frames_sent++;
         return ZRPC_OK;
     }
 }
@@ -416,7 +415,7 @@ static zrpc_tcp_link_t *link_find_out(zrpc_tcp_transport_t *t, const char *ip, u
         ops.on_recv = tcp_client_on_recv;
         ops.on_error = tcp_client_on_error;
         memset(&copts, 0, sizeof(copts));
-        copts.poller = t->base.node->poller;
+        copts.poller = t->base.poller;
         copts.ops = &ops;
         copts.user = t;
         link->client = ztk_tcp_client_create(&copts);
@@ -567,28 +566,27 @@ static void tcp_client_on_error(ztk_tcp_client *client, void *user) {
 
 static int tcp_start(zrpc_transport_t *base) {
     zrpc_tcp_transport_t *t = (zrpc_tcp_transport_t *)base;
-    zrpc_node_t *node = base->node;
     ztk_tcp_server_opts_t opts;
     ztk_tcp_session_ops_t sops;
     unsigned n;
     unsigned i;
 
-    n = ztk_poller_pool_size(node->pool);
+    n = ztk_poller_pool_size(base->pool);
     if (n > ZRPC_IO_MAX) {
         n = ZRPC_IO_MAX;
     }
     t->io_count = (int)n;
     for (i = 0; i < n; i++) {
-        t->pollers[i] = ztk_poller_pool_at(node->pool, i);
+        t->pollers[i] = ztk_poller_pool_at(base->pool, i);
     }
 
     memset(&sops, 0, sizeof(sops));
     sops.on_recv = tcp_srv_on_recv;
     sops.on_error = tcp_srv_on_error;
     memset(&opts, 0, sizeof(opts));
-    opts.host = node->bind_host;
+    opts.host = base->bind_host;
     opts.port = base->port;
-    opts.poller_pool = node->pool;
+    opts.poller_pool = base->pool;
     opts.session_ops = &sops;
     opts.session_user = t;
     opts.session_create_user = NULL;
@@ -604,7 +602,7 @@ static int tcp_start(zrpc_transport_t *base) {
         return ZRPC_ERR_IO;
     }
     base->port = ztk_tcp_server_port(t->server);
-    t->tick_timer = ztk_timer_start(node->poller, ZRPC_TICK_INTERVAL_MS, 1, tcp_tick_cb, t);
+    t->tick_timer = ztk_timer_start(base->poller, ZRPC_TICK_INTERVAL_MS, 1, tcp_tick_cb, t);
     return ZRPC_OK;
 }
 
@@ -650,8 +648,8 @@ static int tcp_send_common(zrpc_tcp_transport_t *t, zrpc_tcp_link_t *link, const
     size_t need = ZRPC_TCP_HDR_LEN + body_len;
     zrpc_envelope_t header_envelope;
 
-    if (body_len > (size_t)t->base.node->max_msg_bytes + ZRPC_MAX_ROUTE + ZRPC_ENVELOPE_HDR_LEN ||
-        need > (size_t)t->base.node->max_msg_bytes + ZRPC_MAX_ROUTE + 64) {
+    if (body_len > (size_t)t->base.max_msg_bytes + ZRPC_MAX_ROUTE + ZRPC_ENVELOPE_HDR_LEN ||
+        need > (size_t)t->base.max_msg_bytes + ZRPC_MAX_ROUTE + 64) {
         return ZRPC_ERR_TOOBIG;
     }
     if (!link) {
@@ -661,8 +659,8 @@ static int tcp_send_common(zrpc_tcp_transport_t *t, zrpc_tcp_link_t *link, const
         }
     }
     if (!zrpc_iobuf_empty(&link->tx) &&
-        zrpc_iobuf_len(&link->tx) + need > (size_t)t->base.node->bp_high_water) {
-        t->base.node->metrics.backpressure_events++;
+        zrpc_iobuf_len(&link->tx) + need > (size_t)t->base.bp_high_water) {
+        t->base.metrics->backpressure_events++;
         return ZRPC_ERR_AGAIN;
     }
 

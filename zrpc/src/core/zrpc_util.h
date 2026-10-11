@@ -6,6 +6,9 @@
 
 /* 小工具：跨模块共享的内联辅助（避免多文件重复定义）。 */
 
+/* 单调毫秒时钟（实现于 node.c）。 */
+uint64_t zrpc_now_ms(void);
+
 static inline void zrpc_put_u16(uint8_t *p, uint16_t v) {
     p[0] = (uint8_t)(v >> 8);
     p[1] = (uint8_t)(v & 0xff);

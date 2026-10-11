@@ -11,9 +11,14 @@
  */
 
 #include <zrpc/zrpc_types.h>
+#include <zrpc/zrpc_metrics.h>
 #include <zrpc/zrpc_transport_provider.h>
 
+#include <ztk/ztk.h>
+
 #include <stdint.h>
+
+#include "zrpc_caps.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -50,7 +55,26 @@ struct zrpc_transport {
     uint16_t port;
     const zrpc_transport_provider_t *provider;
     zrpc_transport_instance_t *provider_instance;
+
+    /*
+     * 运行期配置快照：由 node 在建立传输时填充。传输层只读这些字段，
+     * 不穿透 struct zrpc_node 内部，从而与 core 解耦。
+     */
+    uint16_t frag_bytes;
+    uint32_t max_msg_bytes;
+    uint32_t bp_high_water;
+    uint8_t drop_percent;
+    unsigned io_threads;
+    ztk_poller_pool *pool;
+    ztk_poller *poller;
+    zrpc_metrics_t *metrics;
 };
+
+/* 传输层把收到的完整消息上抛给 core 的回调（实现于 node.c）。 */
+void zrpc_node_on_message(zrpc_node_t *node, const char *ip, uint16_t port, zrpc_peer_token_t token,
+                          zrpc_transport_t *transport, uint8_t kind, uint32_t msg_id,
+                          const char *route, const zrpc_payload_t *payload,
+                          const zrpc_stream_meta_t *stream);
 
 /* 具体驱动工厂（返回已初始化 ops/kind 的对象，未 start）。 */
 zrpc_transport_t *zrpc_udp_transport_create(void);

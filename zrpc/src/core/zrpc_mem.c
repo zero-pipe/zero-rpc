@@ -8,7 +8,9 @@
  *     投递延迟归还任务而在池销毁后触发悬垂。
  * 池块本身由 malloc 支撑，因此跨线程直接 free 始终安全，只是放弃该次复用。
  */
-#include "zrpc_internal.h"
+#include "zrpc_mem.h"
+
+#include <ztk/ztk.h>
 
 #include <stdlib.h>
 #include <string.h>
