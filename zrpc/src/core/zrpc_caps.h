@@ -45,6 +45,9 @@
 #define ZRPC_MAX_FRAGMENTS (ZRPC_MAX_MSG / ZRPC_FRAG_MIN)
 #define ZRPC_RTX_SLOT_MAX (ZRPC_RTP_HDR_LEN + ZRPC_FRAG_HDR_LEN + ZRPC_FRAG_MAX)
 
+/* ---- RTCP 报告 ---- */
+#define ZRPC_RTCP_INTERVAL_MS 1000 /* SR/RR 上报周期 */
+
 /* ---- 周期 ---- */
 #define ZRPC_TICK_INTERVAL_MS 2
 

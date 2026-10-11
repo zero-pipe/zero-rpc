@@ -185,6 +185,28 @@ static int run_case(zrpc_transport_kind_t kind, const char *label) {
         }
     }
 
+    /* RTCP：UDP 会话应在周期内双向交换 SR（本端发送方，故发 SR；对端也发 SR）。 */
+    if (kind == ZRPC_TRANSPORT_UDP) {
+        zrpc_metrics_t m;
+        int waited = 0;
+        int ok = 0;
+        memset(&m, 0, sizeof(m));
+        while (waited < 4000) {
+            zrpc_node_metrics(client, &m);
+            if (m.rtcp_sr_sent > 0 && m.rtcp_sr_received > 0) {
+                ok = 1;
+                break;
+            }
+            ztk_sleep_ms(200);
+            waited += 200;
+        }
+        if (!ok) {
+            printf("[%s] rtcp sr not exchanged: sent=%llu recv=%llu\n", label,
+                   (unsigned long long)m.rtcp_sr_sent, (unsigned long long)m.rtcp_sr_received);
+            failed = 1;
+        }
+    }
+
 cleanup:
     if (proxy) {
         zrpc_proxy_destroy(proxy);

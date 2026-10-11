@@ -646,7 +646,10 @@ int main(int argc, char **argv) {
                     "\"udp_packets_sent\":%llu,\"udp_packets_received\":%llu,"
                     "\"udp_retransmissions\":%llu,\"udp_nacks_sent\":%llu,"
                     "\"udp_reassembly_expired\":%llu,\"tcp_frames_sent\":%llu,"
-                    "\"tcp_frames_received\":%llu}}\n",
+                    "\"tcp_frames_received\":%llu,"
+                    "\"rtcp_sr_sent\":%llu,\"rtcp_rr_sent\":%llu,"
+                    "\"rtcp_sr_received\":%llu,\"rtcp_rr_received\":%llu,"
+                    "\"rtcp_rtt_ms\":%u,\"rtcp_jitter_ms\":%u,\"rtcp_remote_lost\":%d}}\n",
                     (unsigned long long)metrics.requests_sent,
                     (unsigned long long)metrics.responses_received,
                     (unsigned long long)metrics.requests_failed,
@@ -660,7 +663,14 @@ int main(int argc, char **argv) {
                     (unsigned long long)metrics.udp_nacks_sent,
                     (unsigned long long)metrics.udp_reassembly_expired,
                     (unsigned long long)metrics.tcp_frames_sent,
-                    (unsigned long long)metrics.tcp_frames_received);
+                    (unsigned long long)metrics.tcp_frames_received,
+                    (unsigned long long)metrics.rtcp_sr_sent,
+                    (unsigned long long)metrics.rtcp_rr_sent,
+                    (unsigned long long)metrics.rtcp_sr_received,
+                    (unsigned long long)metrics.rtcp_rr_received,
+                    (unsigned)metrics.rtcp_rtt_ms,
+                    (unsigned)metrics.rtcp_jitter_ms,
+                    (int)metrics.rtcp_remote_lost);
         }
     }
 

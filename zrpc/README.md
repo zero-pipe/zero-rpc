@@ -13,7 +13,7 @@
 - **只提供异步接口**：`zrpc_proxy_call(...)` 发送后立即返回，结果通过回调送达；无阻塞/同步等待 API。
 - **不新增线程**：全部运行在 ZTK 的 `ztk_poller_pool` 线程上；回调都在 poller 线程触发（禁止阻塞）。
 - **可组合传输**：node 管理一个或多个 binding；每个 binding 用 `scheme://host:port` 标识。
-  `UDP` 走 RTP + 分片/重组 + NACK/RTX；`TCP` 走基于 `ztk_tcp_server/ztk_tcp_client` 的长度前缀分帧。
+  `UDP` 走 RTP + 分片/重组 + NACK/RTX + RTCP(SR/RR)；`TCP` 走基于 `ztk_tcp_server/ztk_tcp_client` 的长度前缀分帧。
 - **路由**：静态路由（显式登记 `service -> endpoint`）与 **mesh 服务发现**（UDP 广播 HELLO/BYE）统一进路由表。
 - **payload 对框架透明**：框架只透传字节 + `encoding` 标签；序列化/反序列化通过可插拔 `zrpc_codec_t` 留给应用层。
 - **简单 JSON 配置**：内置 cJSON，`zrpc_config_load[_file]` 一行加载。
@@ -73,7 +73,7 @@ zrpc/
     message/          provider-neutral RPC envelope 编解码
     transport/        传输 facade + provider SPI + UDP/TCP 驱动 + framing
       只读 zrpc_transport_t 上的配置快照，不穿透 node 内部
-      zrpc_framing    RTP/分片/NACK 与 TCP 长度前缀分帧
+      zrpc_framing    RTP/分片/NACK、RTCP SR/RR/SDES 与 TCP 长度前缀分帧
       zrpc_rx_window  UDP 接收窗口与缺口检测
       zrpc_reasm      UDP 分片重组
       zrpc_tx_ring    UDP RTX 重传环

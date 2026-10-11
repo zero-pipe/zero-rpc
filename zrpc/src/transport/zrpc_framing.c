@@ -157,6 +157,184 @@ int zrpc_frame_parse_nack(const uint8_t *buf, size_t len, uint32_t *sender_ssrc,
     return (int)n;
 }
 
+/* ---- RTCP SR/RR/SDES ---- */
+
+static void put_report_block(uint8_t *p, const zrpc_rtcp_report_block_t *rb) {
+    zrpc_put_u32(p, rb->ssrc);
+    p[4] = rb->fraction_lost;
+    p[5] = (uint8_t)((uint32_t)rb->cumulative_lost >> 16);
+    p[6] = (uint8_t)((uint32_t)rb->cumulative_lost >> 8);
+    p[7] = (uint8_t)(uint32_t)rb->cumulative_lost;
+    zrpc_put_u32(p + 8, rb->ext_highest_seq);
+    zrpc_put_u32(p + 12, rb->jitter);
+    zrpc_put_u32(p + 16, rb->lsr);
+    zrpc_put_u32(p + 20, rb->dlsr);
+}
+
+static void get_report_block(const uint8_t *p, zrpc_rtcp_report_block_t *rb) {
+    uint32_t raw;
+    rb->ssrc = zrpc_get_u32(p);
+    rb->fraction_lost = p[4];
+    raw = zrpc_get_u32(p + 4) & 0x00ffffffu;
+    if (raw & 0x00800000u) {
+        raw |= 0xff000000u; /* 24 位有符号扩展 */
+    }
+    rb->cumulative_lost = (int32_t)raw;
+    rb->ext_highest_seq = zrpc_get_u32(p + 8);
+    rb->jitter = zrpc_get_u32(p + 12);
+    rb->lsr = zrpc_get_u32(p + 16);
+    rb->dlsr = zrpc_get_u32(p + 20);
+}
+
+size_t zrpc_frame_build_sr(uint8_t *buf, size_t cap, uint32_t ssrc, uint32_t ntp_msw,
+                           uint32_t ntp_lsw, uint32_t rtp_ts, uint32_t packet_count,
+                           uint32_t octet_count, const zrpc_rtcp_report_block_t *rb, int rb_count) {
+    size_t need;
+    int i;
+    if (!buf || rb_count < 0 || rb_count > 31 || (rb_count > 0 && !rb)) {
+        return 0;
+    }
+    need = 28u + (size_t)rb_count * 24u;
+    if (cap < need) {
+        return 0;
+    }
+    buf[0] = (uint8_t)((2u << 6) | (uint8_t)(rb_count & 0x1f));
+    buf[1] = ZRPC_RTCP_SR;
+    zrpc_put_u16(buf + 2, (uint16_t)(need / 4u - 1u));
+    zrpc_put_u32(buf + 4, ssrc);
+    zrpc_put_u32(buf + 8, ntp_msw);
+    zrpc_put_u32(buf + 12, ntp_lsw);
+    zrpc_put_u32(buf + 16, rtp_ts);
+    zrpc_put_u32(buf + 20, packet_count);
+    zrpc_put_u32(buf + 24, octet_count);
+    for (i = 0; i < rb_count; i++) {
+        put_report_block(buf + 28 + (size_t)i * 24u, &rb[i]);
+    }
+    return need;
+}
+
+size_t zrpc_frame_build_rr(uint8_t *buf, size_t cap, uint32_t ssrc,
+                           const zrpc_rtcp_report_block_t *rb, int rb_count) {
+    size_t need;
+    int i;
+    if (!buf || rb_count < 0 || rb_count > 31 || (rb_count > 0 && !rb)) {
+        return 0;
+    }
+    need = 8u + (size_t)rb_count * 24u;
+    if (cap < need) {
+        return 0;
+    }
+    buf[0] = (uint8_t)((2u << 6) | (uint8_t)(rb_count & 0x1f));
+    buf[1] = ZRPC_RTCP_RR;
+    zrpc_put_u16(buf + 2, (uint16_t)(need / 4u - 1u));
+    zrpc_put_u32(buf + 4, ssrc);
+    for (i = 0; i < rb_count; i++) {
+        put_report_block(buf + 8 + (size_t)i * 24u, &rb[i]);
+    }
+    return need;
+}
+
+size_t zrpc_frame_build_sdes_cname(uint8_t *buf, size_t cap, uint32_t ssrc, const char *cname) {
+    size_t clen;
+    size_t chunk;
+    size_t pad;
+    size_t need;
+    size_t i;
+    uint8_t *p;
+    if (!buf) {
+        return 0;
+    }
+    if (!cname) {
+        cname = "";
+    }
+    clen = strlen(cname);
+    if (clen > 255) {
+        clen = 255;
+    }
+    chunk = 4u + 2u + clen;
+    pad = (4u - (chunk & 3u)) & 3u;
+    chunk += pad;
+    need = 4u + chunk;
+    if (cap < need) {
+        return 0;
+    }
+    buf[0] = (uint8_t)((2u << 6) | 1u); /* SC = 1 个 SSRC 块 */
+    buf[1] = ZRPC_RTCP_SDES;
+    zrpc_put_u16(buf + 2, (uint16_t)(need / 4u - 1u));
+    p = buf + 4;
+    zrpc_put_u32(p, ssrc);
+    p[4] = ZRPC_RTCP_SDES_CNAME;
+    p[5] = (uint8_t)clen;
+    memcpy(p + 6, cname, clen);
+    for (i = 0; i < pad; i++) {
+        p[6 + clen + i] = 0;
+    }
+    return need;
+}
+
+int zrpc_frame_parse_sr(const uint8_t *buf, size_t len, zrpc_rtcp_sr_t *out) {
+    int cnt;
+    int i;
+    size_t need;
+    if (!buf || !out || len < 4) {
+        return 0;
+    }
+    if ((buf[0] >> 6) != 2 || buf[1] != ZRPC_RTCP_SR) {
+        return 0;
+    }
+    if (len < 28) {
+        return -1;
+    }
+    cnt = buf[0] & 0x1f;
+    if (cnt > 31) {
+        cnt = 31;
+    }
+    need = 28u + (size_t)cnt * 24u;
+    if (len < need) {
+        return -1;
+    }
+    out->ssrc = zrpc_get_u32(buf + 4);
+    out->ntp_msw = zrpc_get_u32(buf + 8);
+    out->ntp_lsw = zrpc_get_u32(buf + 12);
+    out->rtp_ts = zrpc_get_u32(buf + 16);
+    out->packet_count = zrpc_get_u32(buf + 20);
+    out->octet_count = zrpc_get_u32(buf + 24);
+    out->rb_count = cnt;
+    for (i = 0; i < cnt; i++) {
+        get_report_block(buf + 28 + (size_t)i * 24u, &out->rb[i]);
+    }
+    return 1;
+}
+
+int zrpc_frame_parse_rr(const uint8_t *buf, size_t len, zrpc_rtcp_rr_t *out) {
+    int cnt;
+    int i;
+    size_t need;
+    if (!buf || !out || len < 4) {
+        return 0;
+    }
+    if ((buf[0] >> 6) != 2 || buf[1] != ZRPC_RTCP_RR) {
+        return 0;
+    }
+    if (len < 8) {
+        return -1;
+    }
+    cnt = buf[0] & 0x1f;
+    if (cnt > 31) {
+        cnt = 31;
+    }
+    need = 8u + (size_t)cnt * 24u;
+    if (len < need) {
+        return -1;
+    }
+    out->ssrc = zrpc_get_u32(buf + 4);
+    out->rb_count = cnt;
+    for (i = 0; i < cnt; i++) {
+        get_report_block(buf + 8 + (size_t)i * 24u, &out->rb[i]);
+    }
+    return 1;
+}
+
 size_t zrpc_tcp_frame_size(const uint8_t *buf, size_t len) {
     uint32_t body_len;
     if (!buf || len < ZRPC_TCP_HDR_LEN) {

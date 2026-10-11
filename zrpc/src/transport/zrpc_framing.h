@@ -18,6 +18,42 @@ extern "C" {
 #define ZRPC_RTCP_RTPFB 205
 #define ZRPC_RTCP_FMT_NACK 1
 
+/* RTCP packet types (RFC 3550) */
+#define ZRPC_RTCP_SR 200
+#define ZRPC_RTCP_RR 201
+#define ZRPC_RTCP_SDES 202
+#define ZRPC_RTCP_SDES_CNAME 1
+
+/* 单个接收报告块（RFC 3550 §6.4.1）。 */
+typedef struct zrpc_rtcp_report_block {
+    uint32_t ssrc;
+    uint8_t fraction_lost;
+    int32_t cumulative_lost; /* 24 位有符号，已做符号扩展 */
+    uint32_t ext_highest_seq;
+    uint32_t jitter;
+    uint32_t lsr;
+    uint32_t dlsr;
+} zrpc_rtcp_report_block_t;
+
+/* Sender Report。 */
+typedef struct zrpc_rtcp_sr {
+    uint32_t ssrc;
+    uint32_t ntp_msw;
+    uint32_t ntp_lsw;
+    uint32_t rtp_ts;
+    uint32_t packet_count;
+    uint32_t octet_count;
+    int rb_count;
+    zrpc_rtcp_report_block_t rb[31];
+} zrpc_rtcp_sr_t;
+
+/* Receiver Report。 */
+typedef struct zrpc_rtcp_rr {
+    uint32_t ssrc;
+    int rb_count;
+    zrpc_rtcp_report_block_t rb[31];
+} zrpc_rtcp_rr_t;
+
 #define ZRPC_FLAG_FIRST 0x01
 #define ZRPC_FLAG_LAST 0x02
 
@@ -62,6 +98,16 @@ size_t zrpc_frame_build_nack(uint8_t *buf, size_t cap, uint32_t sender_ssrc, uin
                             const uint16_t *seqs, size_t count);
 int zrpc_frame_parse_nack(const uint8_t *buf, size_t len, uint32_t *sender_ssrc, uint32_t *media_ssrc,
                          uint16_t *out_seqs, size_t out_cap);
+
+/* RTCP 报告编解码：build 返回写入字节数（0 失败）；parse 返回 1 成功、0 非本类型、-1 非法。 */
+size_t zrpc_frame_build_sr(uint8_t *buf, size_t cap, uint32_t ssrc, uint32_t ntp_msw,
+                           uint32_t ntp_lsw, uint32_t rtp_ts, uint32_t packet_count,
+                           uint32_t octet_count, const zrpc_rtcp_report_block_t *rb, int rb_count);
+size_t zrpc_frame_build_rr(uint8_t *buf, size_t cap, uint32_t ssrc,
+                           const zrpc_rtcp_report_block_t *rb, int rb_count);
+size_t zrpc_frame_build_sdes_cname(uint8_t *buf, size_t cap, uint32_t ssrc, const char *cname);
+int zrpc_frame_parse_sr(const uint8_t *buf, size_t len, zrpc_rtcp_sr_t *out);
+int zrpc_frame_parse_rr(const uint8_t *buf, size_t len, zrpc_rtcp_rr_t *out);
 
 /* TCP: big-endian u32 body length + opaque envelope bytes. */
 #define ZRPC_TCP_HDR_LEN 4

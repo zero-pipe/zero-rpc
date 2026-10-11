@@ -56,6 +56,27 @@ typedef struct zrpc_session {
     uint64_t tx_pkts;
     uint64_t retx;
     uint64_t lost;
+
+    /* RTCP 报告状态（RFC 3550 SR/RR） */
+    uint64_t rtcp_last_send_ms;
+    uint32_t rtcp_pkt_count;      /* 本端发出的 RTP 包数（供 SR） */
+    uint32_t rtcp_octet_count;    /* 本端发出的 RTP payload 字节数（供 SR） */
+    uint32_t rtcp_last_rtp_ts;    /* 最近发送的 RTP 时间戳 */
+    uint64_t rtcp_last_rtp_wall;  /* 该时间戳对应的墙钟毫秒 */
+    uint32_t rtcp_last_sr_ntp;    /* 本端最近发出 SR 的 NTP middle32 */
+    int rx_max_seq_set;
+    uint16_t rx_max_seq;
+    uint32_t rx_cycles;           /* 序号回绕计数 */
+    uint32_t rx_received;
+    uint32_t rx_expected_prior;   /* 上次报告时的期望包数 */
+    uint32_t rx_received_prior;   /* 上次报告时的实收包数 */
+    double jitter;                /* 接收抖动估计（毫秒） */
+    int have_transit;
+    int64_t transit_prev;
+    uint32_t last_rx_sr_ntp;      /* 对端最近 SR 的 NTP middle32 */
+    uint64_t last_rx_sr_ms;       /* 收到该 SR 的本端单调时刻 */
+    int have_last_rx_sr;
+    uint32_t last_rtt_ms;         /* 由对端报告块测得 */
 } zrpc_session_t;
 
 typedef struct zrpc_udp_io_ctx {
@@ -126,6 +147,7 @@ static void session_init(zrpc_udp_transport_t *udp, zrpc_session_t *s, int io, z
         s->ssrc_local = 1;
     }
     s->last_use_ms = now_ms;
+    s->rtcp_last_send_ms = now_ms;
 }
 
 /*
@@ -250,6 +272,11 @@ static void emit_frag(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint32_t msg
     s->send_seq++;
     s->tx_pkts++;
     udp->base.metrics->udp_packets_sent++;
+    /* RTCP Sender Report 的收发计数与时间戳映射 */
+    s->rtcp_pkt_count++;
+    s->rtcp_octet_count += chunk;
+    s->rtcp_last_rtp_ts = d.ts;
+    s->rtcp_last_rtp_wall = ztk_wall_ms();
 }
 
 static int session_send(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint8_t kind, uint32_t msg_id,
@@ -411,6 +438,33 @@ static int session_on_data(zrpc_udp_transport_t *udp, zrpc_session_t *s, const z
         return ZRPC_OK;
     }
 
+    /* RTCP 接收统计：扩展最高序号 + 抖动估计（RFC 3550 A.8）。 */
+    s->rx_received++;
+    if (!s->rx_max_seq_set) {
+        s->rx_max_seq = v->seq;
+        s->rx_max_seq_set = 1;
+    } else if ((int16_t)(v->seq - s->rx_max_seq) > 0) {
+        if (v->seq < s->rx_max_seq) {
+            s->rx_cycles += 65536u; /* 序号回绕 */
+        }
+        s->rx_max_seq = v->seq;
+    }
+    {
+        int64_t transit = (int64_t)now_ms - (int64_t)v->ts;
+        if (s->have_transit) {
+            int64_t d = transit - s->transit_prev;
+            if (d < 0) {
+                d = -d;
+            }
+            s->jitter += ((double)d - s->jitter) / 16.0;
+            if (s->metrics) {
+                s->metrics->rtcp_jitter_ms = (uint32_t)s->jitter;
+            }
+        }
+        s->transit_prev = transit;
+        s->have_transit = 1;
+    }
+
     if (v->total_len > udp->base.max_msg_bytes + ZRPC_MAX_ROUTE + ZRPC_ENVELOPE_HDR_LEN) {
         return ZRPC_ERR_TOOBIG;
     }
@@ -538,6 +592,146 @@ static void session_on_nack(zrpc_udp_transport_t *udp, zrpc_session_t *s, const 
     }
 }
 
+/* ---- RTCP 报告（RFC 3550 SR/RR） ---- */
+
+static uint32_t ntp_msw(uint64_t wall_ms) {
+    return (uint32_t)(wall_ms / 1000ull + 2208988800ull); /* 自 1900 起的秒 */
+}
+
+static uint32_t ntp_lsw(uint64_t wall_ms) {
+    return (uint32_t)(((wall_ms % 1000ull) * 4294967296ull) / 1000ull);
+}
+
+/* NTP 时间戳的中间 32 位：秒低 16 位 + 小数高 16 位（用于 LSR/DLSR）。 */
+static uint32_t ntp_middle32(uint32_t msw, uint32_t lsw) {
+    return (uint32_t)(((msw & 0xffffu) << 16) | (lsw >> 16));
+}
+
+static void fill_report_block(const zrpc_session_t *s, zrpc_rtcp_report_block_t *rb, uint64_t now_ms) {
+    uint32_t ext = s->rx_max_seq_set ? (s->rx_cycles + (uint32_t)s->rx_max_seq) : 0u;
+    uint32_t expected = s->rx_max_seq_set ? (ext + 1u) : 0u;
+    uint32_t expected_i = expected - s->rx_expected_prior;
+    uint32_t received_i = s->rx_received - s->rx_received_prior;
+    int32_t lost_i = (int32_t)expected_i - (int32_t)received_i;
+    int32_t cum = (int32_t)expected - (int32_t)s->rx_received;
+
+    rb->ssrc = s->ssrc_remote;
+    rb->fraction_lost = 0;
+    if (expected_i != 0 && lost_i > 0) {
+        rb->fraction_lost = (uint8_t)(((uint32_t)lost_i << 8) / expected_i);
+    }
+    if (cum < -0x800000) {
+        cum = -0x800000;
+    } else if (cum > 0x7fffff) {
+        cum = 0x7fffff;
+    }
+    rb->cumulative_lost = cum;
+    rb->ext_highest_seq = ext;
+    rb->jitter = (uint32_t)s->jitter;
+    rb->lsr = s->have_last_rx_sr ? s->last_rx_sr_ntp : 0u;
+    rb->dlsr = s->have_last_rx_sr
+                   ? (uint32_t)(((now_ms - s->last_rx_sr_ms) * 65536ull) / 1000ull)
+                   : 0u;
+}
+
+/* 从对端报告块中提取关于本端流（ssrc_local）的丢包/抖动/RTT。 */
+static void apply_report_blocks(zrpc_session_t *s, const zrpc_rtcp_report_block_t *rb, int n) {
+    uint32_t now32 = ntp_middle32(ntp_msw(ztk_wall_ms()), ntp_lsw(ztk_wall_ms()));
+    int i;
+    for (i = 0; i < n; i++) {
+        if (rb[i].ssrc != s->ssrc_local) {
+            continue;
+        }
+        if (s->metrics) {
+            s->metrics->rtcp_remote_lost = rb[i].cumulative_lost;
+        }
+        if (rb[i].lsr != 0) {
+            /* RTT = now - LSR - DLSR，单位 1/65536 秒。 */
+            uint32_t d = now32 - rb[i].lsr - rb[i].dlsr;
+            uint32_t rtt_ms = (uint32_t)(((uint64_t)d * 1000ull) >> 16);
+            s->last_rtt_ms = rtt_ms;
+            if (s->metrics) {
+                s->metrics->rtcp_rtt_ms = rtt_ms;
+            }
+        }
+    }
+}
+
+static void session_on_rtcp(zrpc_udp_transport_t *udp, zrpc_session_t *s, const uint8_t *buf,
+                            size_t n, uint64_t now_ms) {
+    (void)udp;
+    if (!s || !buf || n < 4) {
+        return;
+    }
+    if (buf[1] == ZRPC_RTCP_SR) {
+        zrpc_rtcp_sr_t sr;
+        if (zrpc_frame_parse_sr(buf, n, &sr) == 1) {
+            if (s->metrics) {
+                s->metrics->rtcp_sr_received++;
+            }
+            s->ssrc_remote = sr.ssrc;
+            s->ssrc_remote_known = 1;
+            s->last_rx_sr_ntp = ntp_middle32(sr.ntp_msw, sr.ntp_lsw);
+            s->last_rx_sr_ms = now_ms;
+            s->have_last_rx_sr = 1;
+            apply_report_blocks(s, sr.rb, sr.rb_count);
+        }
+    } else if (buf[1] == ZRPC_RTCP_RR) {
+        zrpc_rtcp_rr_t rr;
+        if (zrpc_frame_parse_rr(buf, n, &rr) == 1) {
+            if (s->metrics) {
+                s->metrics->rtcp_rr_received++;
+            }
+            if (!s->ssrc_remote_known) {
+                s->ssrc_remote = rr.ssrc;
+                s->ssrc_remote_known = 1;
+            }
+            apply_report_blocks(s, rr.rb, rr.rb_count);
+        }
+    }
+}
+
+/* 周期发送复合 RTCP 包：本端有发送记录则 SR，否则 RR；尾部附 SDES CNAME。 */
+static void session_send_rtcp(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint64_t now_ms) {
+    uint8_t buf[256];
+    zrpc_rtcp_report_block_t rb;
+    int have_rx = s->ssrc_remote_known && s->rx_pkts > 0;
+    size_t n = 0;
+    size_t total;
+    (void)udp;
+
+    memset(&rb, 0, sizeof(rb));
+    if (have_rx) {
+        fill_report_block(s, &rb, now_ms);
+    }
+    if (s->rtcp_pkt_count > 0) {
+        uint32_t msw = ntp_msw(s->rtcp_last_rtp_wall);
+        uint32_t lsw = ntp_lsw(s->rtcp_last_rtp_wall);
+        n = zrpc_frame_build_sr(buf, sizeof(buf), s->ssrc_local, msw, lsw, s->rtcp_last_rtp_ts,
+                                s->rtcp_pkt_count, s->rtcp_octet_count, have_rx ? &rb : NULL,
+                                have_rx ? 1 : 0);
+        if (n > 0) {
+            s->rtcp_last_sr_ntp = ntp_middle32(msw, lsw);
+            if (s->metrics) {
+                s->metrics->rtcp_sr_sent++;
+            }
+        }
+    } else {
+        n = zrpc_frame_build_rr(buf, sizeof(buf), s->ssrc_local, have_rx ? &rb : NULL,
+                                have_rx ? 1 : 0);
+        if (n > 0 && s->metrics) {
+            s->metrics->rtcp_rr_sent++;
+        }
+    }
+    if (n == 0) {
+        return;
+    }
+    total = n + zrpc_frame_build_sdes_cname(buf + n, sizeof(buf) - n, s->ssrc_local, "zrpc");
+    (void)ztk_socket_sendto(s->sock, buf, total, s->peer_ip_s, s->peer_port);
+    s->rx_expected_prior = s->rx_max_seq_set ? (s->rx_cycles + s->rx_max_seq + 1u) : 0u;
+    s->rx_received_prior = s->rx_received;
+}
+
 static void reasm_on_lost(const zrpc_reasm_slot_t *slot, void *user) {
     zrpc_session_t *s = (zrpc_session_t *)user;
     (void)slot;
@@ -587,6 +781,12 @@ static void session_tick(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint64_t 
         s->first_gap_ms = 0;
     }
 
+    if ((s->rx_pkts > 0 || s->tx_pkts > 0) &&
+        now_ms - s->rtcp_last_send_ms >= ZRPC_RTCP_INTERVAL_MS) {
+        session_send_rtcp(udp, s, now_ms);
+        s->rtcp_last_send_ms = now_ms;
+    }
+
     zrpc_reasm_expire(&s->reasm, now_ms, ZRPC_REASM_TIMEOUT_MS, reasm_on_lost, s);
 }
 
@@ -621,6 +821,13 @@ static void data_recv_cb(ztk_socket *sock, void *user) {
             uint8_t *buf = (uint8_t *)recvs[i].data;
             size_t n = recvs[i].len;
             if (n < 2) {
+                continue;
+            }
+            if (buf[1] == ZRPC_RTCP_SR || buf[1] == ZRPC_RTCP_RR) {
+                zrpc_session_t *s = session_for(udp, io, sock, recvs[i].ip, recvs[i].port, now);
+                if (s) {
+                    session_on_rtcp(udp, s, buf, n, now);
+                }
                 continue;
             }
             if ((buf[1] & 0x7f) == ZRPC_RTCP_RTPFB) {

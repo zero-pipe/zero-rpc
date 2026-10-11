@@ -120,12 +120,83 @@ static void test_parse_rejects_rtcp(void) {
     CHECK(zrpc_frame_parse_data(rtcp, sizeof(rtcp), &view) == 0);
 }
 
+static void test_rtcp_sr_roundtrip(void) {
+    uint8_t buf[256];
+    zrpc_rtcp_report_block_t rb;
+    zrpc_rtcp_sr_t sr;
+    size_t n;
+
+    memset(&rb, 0, sizeof(rb));
+    rb.ssrc = 0x01020304u;
+    rb.fraction_lost = 7;
+    rb.cumulative_lost = -3;
+    rb.ext_highest_seq = 0x0a0b0c0du;
+    rb.jitter = 1234;
+    rb.lsr = 0x11223344u;
+    rb.dlsr = 0x55667788u;
+
+    n = zrpc_frame_build_sr(buf, sizeof(buf), 0xdeadbeefu, 0x11111111u, 0x22222222u, 0x33333333u,
+                            100, 2000, &rb, 1);
+    CHECK(n == 52);
+    memset(&sr, 0, sizeof(sr));
+    CHECK(zrpc_frame_parse_sr(buf, n, &sr) == 1);
+    CHECK(sr.ssrc == 0xdeadbeefu);
+    CHECK(sr.ntp_msw == 0x11111111u && sr.ntp_lsw == 0x22222222u);
+    CHECK(sr.rtp_ts == 0x33333333u);
+    CHECK(sr.packet_count == 100 && sr.octet_count == 2000);
+    CHECK(sr.rb_count == 1);
+    CHECK(sr.rb[0].ssrc == 0x01020304u);
+    CHECK(sr.rb[0].fraction_lost == 7);
+    CHECK(sr.rb[0].cumulative_lost == -3);
+    CHECK(sr.rb[0].ext_highest_seq == 0x0a0b0c0du);
+    CHECK(sr.rb[0].jitter == 1234);
+    CHECK(sr.rb[0].lsr == 0x11223344u);
+    CHECK(sr.rb[0].dlsr == 0x55667788u);
+}
+
+static void test_rtcp_rr_roundtrip(void) {
+    uint8_t buf[128];
+    zrpc_rtcp_report_block_t rb;
+    zrpc_rtcp_rr_t rr;
+    size_t n;
+
+    memset(&rb, 0, sizeof(rb));
+    rb.ssrc = 0x01010101u;
+    rb.cumulative_lost = 5;
+    n = zrpc_frame_build_rr(buf, sizeof(buf), 0x0f0f0f0fu, &rb, 1);
+    CHECK(n == 32);
+    memset(&rr, 0, sizeof(rr));
+    CHECK(zrpc_frame_parse_rr(buf, n, &rr) == 1);
+    CHECK(rr.ssrc == 0x0f0f0f0fu);
+    CHECK(rr.rb_count == 1);
+    CHECK(rr.rb[0].ssrc == 0x01010101u);
+    CHECK(rr.rb[0].cumulative_lost == 5);
+}
+
+static void test_rtcp_sdes_and_dispatch(void) {
+    uint8_t buf[128];
+    zrpc_frag_view_t view;
+    size_t n;
+
+    n = zrpc_frame_build_sdes_cname(buf, sizeof(buf), 0xabcdef01u, "zrpc");
+    CHECK(n == 16); /* 4 头 + 4 ssrc + 2 项头 + 4 名 + 2 填充 */
+    CHECK(zrpc_frame_parse_data(buf, n, &view) == 0); /* SDES 不是数据包 */
+
+    memset(buf, 0, sizeof(buf));
+    buf[0] = (uint8_t)(2u << 6);
+    buf[1] = ZRPC_RTCP_SR;
+    CHECK(zrpc_frame_parse_sr(buf, 3, NULL) == 0);
+}
+
 int main(void) {
     test_envelope_roundtrip();
     test_udp_fragment_roundtrip();
     test_tcp_opaque_frame();
     test_nack_roundtrip();
     test_parse_rejects_rtcp();
+    test_rtcp_sr_roundtrip();
+    test_rtcp_rr_roundtrip();
+    test_rtcp_sdes_and_dispatch();
     if (g_fail) {
         printf("zrpc_framing: FAIL\n");
         return 1;
