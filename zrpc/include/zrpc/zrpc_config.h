@@ -21,7 +21,8 @@
  * }
  *
  * 可选的调优字段：transport（默认 binding 的传输）、bind_host、data_port、
- * frag_bytes、max_msg_bytes、backpressure_bytes。
+ * frag_bytes、max_msg_bytes、backpressure_bytes、rtcp_interval_ms、rtcp。
+ * "rtcp": false 关闭 RTCP 报告；rtcp_interval_ms 为 0 时用默认 1000ms。
  *
  * 兼容旧格式：字段仍可写在 "node" 对象里，binding 仍可写成
  * transport.bindings，peer 仍可写成 {ip,port}，route 仍可写成 ip/port/transport。

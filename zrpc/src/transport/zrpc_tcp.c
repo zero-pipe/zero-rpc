@@ -748,6 +748,7 @@ static const zrpc_transport_ops_t g_tcp_ops = {
     tcp_stop,
     tcp_send,
     tcp_reply,
+    NULL, /* TCP 不使用 RTP/RTCP，无按对端 RTCP 统计 */
 };
 
 zrpc_transport_t *zrpc_tcp_transport_create(void) {

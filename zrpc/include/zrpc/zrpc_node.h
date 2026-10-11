@@ -40,6 +40,8 @@ typedef struct zrpc_node_config {
     uint16_t frag_bytes;               /* UDP 每分片 payload 字节（0 = 1200），TCP 忽略 */
     uint32_t max_msg_bytes;            /* 单条 envelope 上限，0 = 默认 1 MiB */
     uint32_t backpressure_bytes;       /* 单 link 出站队列高水位，0 = 默认 4 MiB */
+    uint32_t rtcp_interval_ms;         /* UDP RTCP SR/RR 上报间隔，0 = 默认 1000ms */
+    int rtcp_disabled;                 /* 非 0 关闭 RTCP 报告 */
 
     /* New transport model. If non-empty, every binding is started. */
     const zrpc_binding_config_t *bindings;
@@ -63,6 +65,10 @@ uint16_t zrpc_node_discovery_port(const zrpc_node_t *node);
 size_t zrpc_node_binding_count(const zrpc_node_t *node);
 int zrpc_node_binding_endpoint(const zrpc_node_t *node, size_t index, char *out, size_t cap);
 void zrpc_node_metrics(const zrpc_node_t *node, zrpc_metrics_t *out);
+
+/* 查询某对端（ip:port）的 RTCP 统计；无此对端返回 ZRPC_ERR_NOTFOUND。 */
+int zrpc_node_rtcp_peer(const zrpc_node_t *node, const char *ip, uint16_t port,
+                        zrpc_rtcp_peer_stats_t *out);
 
 /* 显式加入一个发现对端（单播 HELLO 目标）；用于定向发现/测试。 */
 int zrpc_node_add_discovery_peer(zrpc_node_t *node, const char *ip, uint16_t discovery_port);

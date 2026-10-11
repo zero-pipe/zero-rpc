@@ -22,6 +22,7 @@ extern "C" {
 #define ZRPC_RTCP_SR 200
 #define ZRPC_RTCP_RR 201
 #define ZRPC_RTCP_SDES 202
+#define ZRPC_RTCP_BYE 203
 #define ZRPC_RTCP_SDES_CNAME 1
 
 /* 单个接收报告块（RFC 3550 §6.4.1）。 */
@@ -106,8 +107,10 @@ size_t zrpc_frame_build_sr(uint8_t *buf, size_t cap, uint32_t ssrc, uint32_t ntp
 size_t zrpc_frame_build_rr(uint8_t *buf, size_t cap, uint32_t ssrc,
                            const zrpc_rtcp_report_block_t *rb, int rb_count);
 size_t zrpc_frame_build_sdes_cname(uint8_t *buf, size_t cap, uint32_t ssrc, const char *cname);
+size_t zrpc_frame_build_bye(uint8_t *buf, size_t cap, uint32_t ssrc);
 int zrpc_frame_parse_sr(const uint8_t *buf, size_t len, zrpc_rtcp_sr_t *out);
 int zrpc_frame_parse_rr(const uint8_t *buf, size_t len, zrpc_rtcp_rr_t *out);
+int zrpc_frame_parse_bye(const uint8_t *buf, size_t len, uint32_t *ssrc);
 
 /* TCP: big-endian u32 body length + opaque envelope bytes. */
 #define ZRPC_TCP_HDR_LEN 4

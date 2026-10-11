@@ -77,6 +77,11 @@ typedef struct zrpc_session {
     uint64_t last_rx_sr_ms;       /* 收到该 SR 的本端单调时刻 */
     int have_last_rx_sr;
     uint32_t last_rtt_ms;         /* 由对端报告块测得 */
+    int32_t rtcp_remote_lost;     /* 对端报告的本端流累计丢包 */
+    uint64_t rtcp_sr_sent;        /* 本会话 SR/RR 收发明细（供按对端查询） */
+    uint64_t rtcp_rr_sent;
+    uint64_t rtcp_sr_received;
+    uint64_t rtcp_rr_received;
 } zrpc_session_t;
 
 typedef struct zrpc_udp_io_ctx {
@@ -128,6 +133,8 @@ static void session_cleanup(zrpc_session_t *s) {
     zrpc_reasm_reset(&s->reasm);
     zrpc_rx_window_reset(&s->rx_window);
 }
+
+static void session_send_bye(zrpc_udp_transport_t *udp, zrpc_session_t *s);
 
 static void session_init(zrpc_udp_transport_t *udp, zrpc_session_t *s, int io, ztk_socket *sock,
                          const char *ip_s, uint16_t port, uint64_t now_ms) {
@@ -187,6 +194,7 @@ static zrpc_session_t *session_for(zrpc_udp_transport_t *udp, int io, ztk_socket
         int slot = free_slot >= 0 ? free_slot : lru_slot;
         zrpc_session_t *s = &udp->sessions[io][slot];
         if (free_slot < 0) {
+            session_send_bye(udp, s); /* 淘汰前通知对端 */
             session_cleanup(s); /* 释放被淘汰会话的动态缓冲 */
         }
         session_init(udp, s, io, sock, ip_s, port, now_ms);
@@ -642,6 +650,7 @@ static void apply_report_blocks(zrpc_session_t *s, const zrpc_rtcp_report_block_
         if (rb[i].ssrc != s->ssrc_local) {
             continue;
         }
+        s->rtcp_remote_lost = rb[i].cumulative_lost;
         if (s->metrics) {
             s->metrics->rtcp_remote_lost = rb[i].cumulative_lost;
         }
@@ -666,6 +675,7 @@ static void session_on_rtcp(zrpc_udp_transport_t *udp, zrpc_session_t *s, const 
     if (buf[1] == ZRPC_RTCP_SR) {
         zrpc_rtcp_sr_t sr;
         if (zrpc_frame_parse_sr(buf, n, &sr) == 1) {
+            s->rtcp_sr_received++;
             if (s->metrics) {
                 s->metrics->rtcp_sr_received++;
             }
@@ -679,6 +689,7 @@ static void session_on_rtcp(zrpc_udp_transport_t *udp, zrpc_session_t *s, const 
     } else if (buf[1] == ZRPC_RTCP_RR) {
         zrpc_rtcp_rr_t rr;
         if (zrpc_frame_parse_rr(buf, n, &rr) == 1) {
+            s->rtcp_rr_received++;
             if (s->metrics) {
                 s->metrics->rtcp_rr_received++;
             }
@@ -712,6 +723,7 @@ static void session_send_rtcp(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint
                                 have_rx ? 1 : 0);
         if (n > 0) {
             s->rtcp_last_sr_ntp = ntp_middle32(msw, lsw);
+            s->rtcp_sr_sent++;
             if (s->metrics) {
                 s->metrics->rtcp_sr_sent++;
             }
@@ -719,8 +731,11 @@ static void session_send_rtcp(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint
     } else {
         n = zrpc_frame_build_rr(buf, sizeof(buf), s->ssrc_local, have_rx ? &rb : NULL,
                                 have_rx ? 1 : 0);
-        if (n > 0 && s->metrics) {
-            s->metrics->rtcp_rr_sent++;
+        if (n > 0) {
+            s->rtcp_rr_sent++;
+            if (s->metrics) {
+                s->metrics->rtcp_rr_sent++;
+            }
         }
     }
     if (n == 0) {
@@ -730,6 +745,24 @@ static void session_send_rtcp(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint
     (void)ztk_socket_sendto(s->sock, buf, total, s->peer_ip_s, s->peer_port);
     s->rx_expected_prior = s->rx_max_seq_set ? (s->rx_cycles + s->rx_max_seq + 1u) : 0u;
     s->rx_received_prior = s->rx_received;
+}
+
+/* 会话结束时尽力发送 RTCP BYE，通知对端本端要离开。 */
+static void session_send_bye(zrpc_udp_transport_t *udp, zrpc_session_t *s) {
+    uint8_t buf[16];
+    size_t n;
+    (void)udp;
+    if (!s || !s->sock) {
+        return;
+    }
+    n = zrpc_frame_build_bye(buf, sizeof(buf), s->ssrc_local);
+    if (n == 0) {
+        return;
+    }
+    (void)ztk_socket_sendto(s->sock, buf, n, s->peer_ip_s, s->peer_port);
+    if (s->metrics) {
+        s->metrics->rtcp_bye_sent++;
+    }
 }
 
 static void reasm_on_lost(const zrpc_reasm_slot_t *slot, void *user) {
@@ -781,8 +814,9 @@ static void session_tick(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint64_t 
         s->first_gap_ms = 0;
     }
 
-    if ((s->rx_pkts > 0 || s->tx_pkts > 0) &&
-        now_ms - s->rtcp_last_send_ms >= ZRPC_RTCP_INTERVAL_MS) {
+    if (!udp->base.rtcp_disabled && (s->rx_pkts > 0 || s->tx_pkts > 0) &&
+        now_ms - s->rtcp_last_send_ms >=
+            (udp->base.rtcp_interval_ms ? udp->base.rtcp_interval_ms : ZRPC_RTCP_INTERVAL_MS)) {
         session_send_rtcp(udp, s, now_ms);
         s->rtcp_last_send_ms = now_ms;
     }
@@ -827,6 +861,17 @@ static void data_recv_cb(ztk_socket *sock, void *user) {
                 zrpc_session_t *s = session_for(udp, io, sock, recvs[i].ip, recvs[i].port, now);
                 if (s) {
                     session_on_rtcp(udp, s, buf, n, now);
+                }
+                continue;
+            }
+            if (buf[1] == ZRPC_RTCP_BYE) {
+                zrpc_session_t *s = session_for(udp, io, sock, recvs[i].ip, recvs[i].port, now);
+                if (s) {
+                    s->ssrc_remote_known = 0;
+                    s->have_last_rx_sr = 0;
+                    if (s->metrics) {
+                        s->metrics->rtcp_bye_received++;
+                    }
                 }
                 continue;
             }
@@ -937,6 +982,17 @@ static void udp_stop(zrpc_transport_t *t) {
             udp->tick_timers[i] = NULL;
         }
     }
+    /* socket 仍在：先尽力通知所有对端本端离开。 */
+    for (i = 0; i < ZRPC_IO_MAX; i++) {
+        if (!udp->socks[i]) {
+            continue;
+        }
+        for (j = 0; j < ZRPC_PEERS_PER_IO; j++) {
+            if (udp->sessions[i][j].used) {
+                session_send_bye(udp, &udp->sessions[i][j]);
+            }
+        }
+    }
     for (i = 0; i < ZRPC_IO_MAX; i++) {
         if (udp->socks[i]) {
             ztk_socket_detach_poller(udp->socks[i]);
@@ -988,11 +1044,40 @@ static int udp_reply(zrpc_transport_t *t, zrpc_peer_token_t token, const char *i
     return session_send(udp, s, kind, msg_id, route, payload, stream);
 }
 
+static int udp_rtcp_peer(zrpc_transport_t *t, const char *ip, uint16_t port,
+                         zrpc_rtcp_peer_stats_t *out) {
+    zrpc_udp_transport_t *udp = (zrpc_udp_transport_t *)t;
+    int io;
+    int i;
+    if (!udp || !ip || !out) {
+        return -1;
+    }
+    for (io = 0; io < udp->io_count; io++) {
+        for (i = 0; i < ZRPC_PEERS_PER_IO; i++) {
+            zrpc_session_t *s = &udp->sessions[io][i];
+            if (s->used && s->peer_port == port && strcmp(s->peer_ip_s, ip) == 0) {
+                out->ssrc_local = s->ssrc_local;
+                out->ssrc_remote = s->ssrc_remote;
+                out->rtt_ms = s->last_rtt_ms;
+                out->jitter_ms = (uint32_t)s->jitter;
+                out->remote_lost = s->rtcp_remote_lost;
+                out->sr_sent = s->rtcp_sr_sent;
+                out->rr_sent = s->rtcp_rr_sent;
+                out->sr_received = s->rtcp_sr_received;
+                out->rr_received = s->rtcp_rr_received;
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
 static const zrpc_transport_ops_t g_udp_ops = {
     udp_start,
     udp_stop,
     udp_send,
     udp_reply,
+    udp_rtcp_peer,
 };
 
 zrpc_transport_t *zrpc_udp_transport_create(void) {

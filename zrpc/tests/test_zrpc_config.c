@@ -141,6 +141,22 @@ static void test_flat_precedence(void) {
     CHECK(cfg.node.io_threads == 3);
 }
 
+static void test_rtcp_config(void) {
+    zrpc_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    CHECK(zrpc_config_load("{\"name\":\"r\",\"rtcp_interval_ms\":2000}", &cfg) == ZRPC_OK);
+    CHECK(cfg.node.rtcp_interval_ms == 2000);
+    CHECK(cfg.node.rtcp_disabled == 0);
+
+    memset(&cfg, 0, sizeof(cfg));
+    CHECK(zrpc_config_load("{\"name\":\"r\",\"rtcp\":false}", &cfg) == ZRPC_OK);
+    CHECK(cfg.node.rtcp_disabled == 1);
+
+    memset(&cfg, 0, sizeof(cfg));
+    CHECK(zrpc_config_load("{\"name\":\"r\",\"rtcp\":true}", &cfg) == ZRPC_OK);
+    CHECK(cfg.node.rtcp_disabled == 0);
+}
+
 int main(void) {
     test_parse();
     test_defaults();
@@ -149,6 +165,7 @@ int main(void) {
     test_binding_config();
     test_flat_format();
     test_flat_precedence();
+    test_rtcp_config();
     if (g_fail) {
         printf("zrpc_config: FAIL\n");
         return 1;

@@ -57,6 +57,8 @@ int zrpc_node_transport_add(zrpc_node_t *node, const char *scheme, const char *h
     transport->max_msg_bytes = node->max_msg_bytes;
     transport->bp_high_water = node->bp_high_water;
     transport->drop_percent = node->drop_percent;
+    transport->rtcp_interval_ms = node->rtcp_interval_ms;
+    transport->rtcp_disabled = node->rtcp_disabled;
     transport->io_threads = node->io_threads;
     transport->pool = node->pool;
     transport->poller = node->poller;

@@ -161,6 +161,13 @@ int zrpc_config_load(const char *json, zrpc_config_t *out) {
     out->node.frag_bytes = (uint16_t)cfg_u32_2(root, node, "frag_bytes", 0);
     out->node.max_msg_bytes = cfg_u32_2(root, node, "max_msg_bytes", 0);
     out->node.backpressure_bytes = cfg_u32_2(root, node, "backpressure_bytes", 0);
+    out->node.rtcp_interval_ms = cfg_u32_2(root, node, "rtcp_interval_ms", 0);
+    {
+        const cJSON *rtcp = cfg_pick(root, node, "rtcp");
+        if (cJSON_IsBool(rtcp)) {
+            out->node.rtcp_disabled = cJSON_IsTrue(rtcp) ? 0 : 1;
+        }
+    }
     out->node.name = out->name;
     out->node.bind_host = out->bind_host;
 

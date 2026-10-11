@@ -204,6 +204,21 @@ static int run_case(zrpc_transport_kind_t kind, const char *label) {
             printf("[%s] rtcp sr not exchanged: sent=%llu recv=%llu\n", label,
                    (unsigned long long)m.rtcp_sr_sent, (unsigned long long)m.rtcp_sr_received);
             failed = 1;
+        } else {
+            char ep[128];
+            zrpc_endpoint_t e;
+            zrpc_rtcp_peer_stats_t peer;
+            if (zrpc_node_binding_endpoint(server, 0, ep, sizeof(ep)) == ZRPC_OK &&
+                zrpc_endpoint_parse(ep, &e) == ZRPC_OK &&
+                zrpc_node_rtcp_peer(client, e.host, e.port, &peer) == ZRPC_OK) {
+                if (peer.sr_sent == 0) {
+                    printf("[%s] rtcp peer stats empty\n", label);
+                    failed = 1;
+                }
+            } else {
+                printf("[%s] rtcp peer query failed\n", label);
+                failed = 1;
+            }
         }
     }
 

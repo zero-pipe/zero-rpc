@@ -44,6 +44,10 @@ typedef struct zrpc_transport_ops {
     int (*reply)(zrpc_transport_t *t, zrpc_peer_token_t token, const char *ip, uint16_t port,
                  uint8_t kind, uint32_t msg_id, const char *route, const zrpc_payload_t *payload,
                  const zrpc_stream_meta_t *stream);
+
+    /* 查询某对端的 RTCP 统计（可选）：1 = 找到，0 = 无此对端，<0 = 出错。 */
+    int (*rtcp_peer)(zrpc_transport_t *t, const char *ip, uint16_t port,
+                     zrpc_rtcp_peer_stats_t *out);
 } zrpc_transport_ops_t;
 
 struct zrpc_transport {
@@ -64,6 +68,8 @@ struct zrpc_transport {
     uint32_t max_msg_bytes;
     uint32_t bp_high_water;
     uint8_t drop_percent;
+    uint32_t rtcp_interval_ms;
+    int rtcp_disabled;
     unsigned io_threads;
     ztk_poller_pool *pool;
     ztk_poller *poller;

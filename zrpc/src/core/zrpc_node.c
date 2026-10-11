@@ -95,6 +95,8 @@ int zrpc_node_create(const zrpc_node_config_t *cfg, zrpc_node_t **out) {
     }
     node->bp_high_water = cfg->backpressure_bytes ? cfg->backpressure_bytes
                                                   : ZRPC_BACKPRESSURE_DEFAULT;
+    node->rtcp_interval_ms = cfg->rtcp_interval_ms ? cfg->rtcp_interval_ms : ZRPC_RTCP_INTERVAL_MS;
+    node->rtcp_disabled = cfg->rtcp_disabled;
     {
         const char *dp = getenv("ZRPC_DROP_PERCENT");
         int v = dp ? atoi(dp) : 0;
@@ -364,6 +366,23 @@ void zrpc_node_metrics(const zrpc_node_t *node, zrpc_metrics_t *out) {
         return;
     }
     *out = node->metrics;
+}
+
+int zrpc_node_rtcp_peer(const zrpc_node_t *node, const char *ip, uint16_t port,
+                        zrpc_rtcp_peer_stats_t *out) {
+    size_t i;
+    if (!node || !ip || !out) {
+        return ZRPC_ERR_INVALID;
+    }
+    memset(out, 0, sizeof(*out));
+    for (i = 0; i < node->transport_count; i++) {
+        zrpc_transport_t *t = node->transports[i];
+        if (t && t->ops && t->ops->rtcp_peer && t->ops->rtcp_peer(t, ip, port, out) == 1) {
+            return ZRPC_OK;
+        }
+    }
+    memset(out, 0, sizeof(*out));
+    return ZRPC_ERR_NOTFOUND;
 }
 
 /* ---- 在 poller 线程投递任务 ---- */

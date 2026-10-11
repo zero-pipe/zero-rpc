@@ -47,6 +47,8 @@ struct zrpc_node {
     uint32_t max_msg_bytes;
     uint32_t bp_high_water;
     uint8_t drop_percent; /* 测试用：UDP 出站丢包百分比 */
+    uint32_t rtcp_interval_ms;
+    int rtcp_disabled;
 
     ztk_poller_pool *pool;
     ztk_poller *poller; /* io 0，用于发现/客户端调用 */

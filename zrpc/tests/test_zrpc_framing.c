@@ -188,6 +188,18 @@ static void test_rtcp_sdes_and_dispatch(void) {
     CHECK(zrpc_frame_parse_sr(buf, 3, NULL) == 0);
 }
 
+static void test_rtcp_bye_roundtrip(void) {
+    uint8_t buf[16];
+    uint32_t ssrc = 0;
+    size_t n;
+
+    n = zrpc_frame_build_bye(buf, sizeof(buf), 0x0badf00du);
+    CHECK(n == 8);
+    CHECK(zrpc_frame_parse_bye(buf, n, &ssrc) == 1);
+    CHECK(ssrc == 0x0badf00du);
+    CHECK(zrpc_frame_parse_bye(buf, 4, NULL) == 0);
+}
+
 int main(void) {
     test_envelope_roundtrip();
     test_udp_fragment_roundtrip();
@@ -197,6 +209,7 @@ int main(void) {
     test_rtcp_sr_roundtrip();
     test_rtcp_rr_roundtrip();
     test_rtcp_sdes_and_dispatch();
+    test_rtcp_bye_roundtrip();
     if (g_fail) {
         printf("zrpc_framing: FAIL\n");
         return 1;

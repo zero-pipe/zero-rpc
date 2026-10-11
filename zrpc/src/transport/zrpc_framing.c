@@ -272,6 +272,17 @@ size_t zrpc_frame_build_sdes_cname(uint8_t *buf, size_t cap, uint32_t ssrc, cons
     return need;
 }
 
+size_t zrpc_frame_build_bye(uint8_t *buf, size_t cap, uint32_t ssrc) {
+    if (!buf || cap < 8) {
+        return 0;
+    }
+    buf[0] = (uint8_t)((2u << 6) | 1u); /* SC = 1 个 SSRC */
+    buf[1] = ZRPC_RTCP_BYE;
+    zrpc_put_u16(buf + 2, 1); /* 2 个 32 位字 - 1 */
+    zrpc_put_u32(buf + 4, ssrc);
+    return 8;
+}
+
 int zrpc_frame_parse_sr(const uint8_t *buf, size_t len, zrpc_rtcp_sr_t *out) {
     int cnt;
     int i;
@@ -331,6 +342,19 @@ int zrpc_frame_parse_rr(const uint8_t *buf, size_t len, zrpc_rtcp_rr_t *out) {
     out->rb_count = cnt;
     for (i = 0; i < cnt; i++) {
         get_report_block(buf + 8 + (size_t)i * 24u, &out->rb[i]);
+    }
+    return 1;
+}
+
+int zrpc_frame_parse_bye(const uint8_t *buf, size_t len, uint32_t *ssrc) {
+    if (!buf || len < 8) {
+        return 0;
+    }
+    if ((buf[0] >> 6) != 2 || buf[1] != ZRPC_RTCP_BYE) {
+        return 0;
+    }
+    if (ssrc) {
+        *ssrc = zrpc_get_u32(buf + 4);
     }
     return 1;
 }
