@@ -32,7 +32,7 @@ typedef struct zrpc_stub_resend_task {
     uint64_t id;
 } zrpc_stub_resend_task_t;
 
-static uint8_t stub_wire_kind(zrpc_stub_kind_t kind) {
+static uint8_t stub_msg_kind(zrpc_stub_kind_t kind) {
     return kind == ZRPC_STUB_EVENT ? ZRPC_KIND_EVENT : ZRPC_KIND_REQUEST;
 }
 
@@ -51,7 +51,7 @@ static int stub_default_send(zrpc_stub_t *stub, const char *service, const char 
     if (n < 0 || (size_t)n >= sizeof(route)) {
         return ZRPC_ERR_INVALID;
     }
-    return zrpc_node_send(node, target->ip, target->port, stub_wire_kind(kind),
+    return zrpc_node_send(node, target->ip, target->port, stub_msg_kind(kind),
                           (uint32_t)request_id, target->transport, target->scheme, route, payload,
                           NULL);
 }

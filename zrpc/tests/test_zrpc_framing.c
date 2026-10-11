@@ -1,5 +1,5 @@
 #include "zrpc_envelope.h"
-#include "zrpc_wire.h"
+#include "zrpc_framing.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -67,9 +67,9 @@ static void test_udp_fragment_roundtrip(void) {
     desc.frag_len = sizeof(chunk);
     desc.flags = ZRPC_FLAG_FIRST | ZRPC_FLAG_LAST;
     desc.chunk = chunk;
-    n = zrpc_wire_build_data(buf, sizeof(buf), &desc);
+    n = zrpc_frame_build_data(buf, sizeof(buf), &desc);
     CHECK(n > 0);
-    CHECK(zrpc_wire_parse_data(buf, n, &view) == 1);
+    CHECK(zrpc_frame_parse_data(buf, n, &view) == 1);
     CHECK(view.marker == 1);
     CHECK(view.seq == 0x1234);
     CHECK(view.ssrc == 0x0a0b0c0du);
@@ -101,9 +101,9 @@ static void test_nack_roundtrip(void) {
     size_t n;
     int c;
 
-    n = zrpc_wire_build_nack(buf, sizeof(buf), 0x11111111u, 0x22222222u, seqs, 4);
+    n = zrpc_frame_build_nack(buf, sizeof(buf), 0x11111111u, 0x22222222u, seqs, 4);
     CHECK(n > 0);
-    c = zrpc_wire_parse_nack(buf, n, NULL, NULL, out, 64);
+    c = zrpc_frame_parse_nack(buf, n, NULL, NULL, out, 64);
     CHECK(c == 4);
     CHECK(out[0] == 100);
     CHECK(out[1] == 101);
@@ -117,7 +117,7 @@ static void test_parse_rejects_rtcp(void) {
     memset(rtcp, 0, sizeof(rtcp));
     rtcp[0] = (uint8_t)(2u << 6);
     rtcp[1] = ZRPC_RTCP_RTPFB;
-    CHECK(zrpc_wire_parse_data(rtcp, sizeof(rtcp), &view) == 0);
+    CHECK(zrpc_frame_parse_data(rtcp, sizeof(rtcp), &view) == 0);
 }
 
 int main(void) {
@@ -127,9 +127,9 @@ int main(void) {
     test_nack_roundtrip();
     test_parse_rejects_rtcp();
     if (g_fail) {
-        printf("zrpc_wire: FAIL\n");
+        printf("zrpc_framing: FAIL\n");
         return 1;
     }
-    printf("zrpc_wire: OK\n");
+    printf("zrpc_framing: OK\n");
     return 0;
 }

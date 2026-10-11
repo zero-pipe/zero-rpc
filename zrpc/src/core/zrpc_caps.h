@@ -7,7 +7,7 @@
  * 单独成头，使传输层等模块无需引入 node 内部结构即可拿到这些常量。
  */
 
-#include "zrpc_wire.h" /* ZRPC_RTP_HDR_LEN / ZRPC_FRAG_HDR_LEN */
+#include "zrpc_framing.h" /* ZRPC_RTP_HDR_LEN / ZRPC_FRAG_HDR_LEN */
 
 /* ---- 消息与路由 ---- */
 #define ZRPC_MAX_ROUTE 128

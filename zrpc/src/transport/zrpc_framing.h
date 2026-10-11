@@ -1,5 +1,5 @@
-#ifndef ZRPC_WIRE_H
-#define ZRPC_WIRE_H
+#ifndef ZRPC_FRAMING_H
+#define ZRPC_FRAMING_H
 
 /* Transport framing only. RPC envelope bytes are opaque here. */
 
@@ -49,18 +49,18 @@ typedef struct zrpc_frag_view {
     const uint8_t *chunk;
 } zrpc_frag_view_t;
 
-size_t zrpc_wire_build_data(uint8_t *buf, size_t cap, const zrpc_frag_desc_t *desc);
+size_t zrpc_frame_build_data(uint8_t *buf, size_t cap, const zrpc_frag_desc_t *desc);
 /*
  * 只写 RTP + 分片头（不拷贝 payload）。desc->frag_len 仍写入头部，但
  * desc->chunk 被忽略，调用方随后自行拷贝分片数据到 buf + 返回值处。
  * 返回写入的头部字节数，0 表示失败。
  */
-size_t zrpc_wire_build_frag_header(uint8_t *buf, size_t cap, const zrpc_frag_desc_t *desc);
-int zrpc_wire_parse_data(const uint8_t *buf, size_t len, zrpc_frag_view_t *view);
+size_t zrpc_frame_build_frag_header(uint8_t *buf, size_t cap, const zrpc_frag_desc_t *desc);
+int zrpc_frame_parse_data(const uint8_t *buf, size_t len, zrpc_frag_view_t *view);
 
-size_t zrpc_wire_build_nack(uint8_t *buf, size_t cap, uint32_t sender_ssrc, uint32_t media_ssrc,
+size_t zrpc_frame_build_nack(uint8_t *buf, size_t cap, uint32_t sender_ssrc, uint32_t media_ssrc,
                             const uint16_t *seqs, size_t count);
-int zrpc_wire_parse_nack(const uint8_t *buf, size_t len, uint32_t *sender_ssrc, uint32_t *media_ssrc,
+int zrpc_frame_parse_nack(const uint8_t *buf, size_t len, uint32_t *sender_ssrc, uint32_t *media_ssrc,
                          uint16_t *out_seqs, size_t out_cap);
 
 /* TCP: big-endian u32 body length + opaque envelope bytes. */
@@ -73,4 +73,4 @@ int zrpc_tcp_parse(const uint8_t *buf, size_t len, const uint8_t **body, size_t 
 }
 #endif
 
-#endif /* ZRPC_WIRE_H */
+#endif /* ZRPC_FRAMING_H */

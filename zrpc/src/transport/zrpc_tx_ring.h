@@ -8,7 +8,7 @@
 #define ZRPC_RTX_RING 128
 #endif
 
-/* One retained outbound datagram (for NACK-triggered retransmission). */
+/* One retained sent datagram (for NACK-triggered retransmission). */
 typedef struct zrpc_tx_slot {
     int used;
     uint16_t seq;

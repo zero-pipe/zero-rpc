@@ -21,7 +21,7 @@ add_library(zrpc STATIC
     src/registry/zrpc_registry.c
     src/discovery/zrpc_discovery.c
     src/config/zrpc_config.c
-    src/transport/zrpc_wire.c
+    src/transport/zrpc_framing.c
     src/transport/zrpc_transport.c
     src/transport/zrpc_provider.c
     src/transport/zrpc_rx_window.c

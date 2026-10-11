@@ -73,11 +73,12 @@ zrpc/
     message/          provider-neutral RPC envelope 编解码
     transport/        传输 facade + provider SPI + UDP/TCP 驱动 + framing
       只读 zrpc_transport_t 上的配置快照，不穿透 node 内部
+      zrpc_framing    RTP/分片/NACK 与 TCP 长度前缀分帧
       zrpc_rx_window  UDP 接收窗口与缺口检测
       zrpc_reasm      UDP 分片重组
       zrpc_tx_ring    UDP RTX 重传环
     config/           JSON 配置解析
-  tests/              wire / loopback(udp+tcp) / config / registry
+  tests/              framing / loopback(udp+tcp) / config / registry
   tools/              压测 server / loadgen
   examples/           编号示例（对齐 fastcall-c：node / service / proxy / stub / table / 路由）
 ```

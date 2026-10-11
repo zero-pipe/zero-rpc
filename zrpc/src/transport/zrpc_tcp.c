@@ -35,14 +35,14 @@ typedef struct zrpc_rx_acc {
 /* 一条 TCP 连接：入站（服务端会话）或出站（客户端连接）。 */
 typedef struct zrpc_tcp_link {
     int used;
-    int inbound;
+    int server_side;
     char ip[ZRPC_ENDPOINT_MAX];
     uint16_t port;
-    ztk_tcp_session *session; /* inbound */
-    ztk_tcp_client *client;   /* outbound */
+    ztk_tcp_session *session; /* 服务端侧：accept 得到 */
+    ztk_tcp_client *client;   /* 客户端侧：connect 发起 */
     int connected;
     zrpc_rx_acc_t rx; /* 接收累积 */
-    zrpc_iobuf_t tx;  /* 出站待写队列（仅 outbound 使用） */
+    zrpc_iobuf_t tx;  /* 出站待写队列（仅客户端侧使用） */
 } zrpc_tcp_link_t;
 
 typedef struct zrpc_tcp_transport {
@@ -232,7 +232,7 @@ static void tcp_link_on_bytes(zrpc_tcp_transport_t *t, zrpc_tcp_link_t *link, co
 
 static void tcp_link_flush_tx(zrpc_tcp_transport_t *t, zrpc_tcp_link_t *link) {
     (void)t;
-    if (link->inbound || !link->connected || !link->client) {
+    if (link->server_side || !link->connected || !link->client) {
         return;
     }
     while (!zrpc_iobuf_empty(&link->tx)) {
@@ -271,7 +271,7 @@ static int tcp_link_emit(zrpc_tcp_transport_t *t, zrpc_tcp_link_t *link, const u
     }
 
     /* 入站会话自带出站队列（ztk_buf 引用），直接委托，避免二次排队。 */
-    if (link->inbound) {
+    if (link->server_side) {
         const void *parts[2];
         size_t lens[2];
         ztk_err_t rc;
@@ -388,7 +388,7 @@ static zrpc_tcp_link_t *link_find_out(zrpc_tcp_transport_t *t, const char *ip, u
     int free_slot = -1;
     for (i = 0; i < ZRPC_TCP_LINKS_PER_IO; i++) {
         zrpc_tcp_link_t *link = &row[i];
-        if (link->used && !link->inbound && link->port == port && strcmp(link->ip, ip) == 0) {
+        if (link->used && !link->server_side && link->port == port && strcmp(link->ip, ip) == 0) {
             return link;
         }
         if (!link->used && free_slot < 0) {
@@ -404,7 +404,7 @@ static zrpc_tcp_link_t *link_find_out(zrpc_tcp_transport_t *t, const char *ip, u
         ztk_tcp_client_opts_t copts;
         memset(link, 0, sizeof(*link));
         link->used = 1;
-        link->inbound = 0;
+        link->server_side = 0;
         rx_acc_init(&link->rx);
         zrpc_iobuf_init(&link->tx);
         zrpc_copy_str(link->ip, sizeof(link->ip), ip, "0.0.0.0");
@@ -445,7 +445,7 @@ static zrpc_tcp_link_t *link_for_session(zrpc_tcp_transport_t *t, ztk_tcp_sessio
     row = t->links[io];
     for (i = 0; i < ZRPC_TCP_LINKS_PER_IO; i++) {
         zrpc_tcp_link_t *link = &row[i];
-        if (link->used && link->inbound && link->session == session) {
+        if (link->used && link->server_side && link->session == session) {
             return link;
         }
         if (!link->used && free_slot < 0) {
@@ -462,7 +462,7 @@ static zrpc_tcp_link_t *link_for_session(zrpc_tcp_transport_t *t, ztk_tcp_sessio
         uint16_t port = 0;
         memset(link, 0, sizeof(*link));
         link->used = 1;
-        link->inbound = 1;
+        link->server_side = 1;
         link->connected = 1;
         link->session = session;
         rx_acc_init(&link->rx);
@@ -482,7 +482,7 @@ static zrpc_tcp_link_t *link_for_client(zrpc_tcp_transport_t *t, ztk_tcp_client 
     zrpc_tcp_link_t *row = t->links[0];
     int i;
     for (i = 0; i < ZRPC_TCP_LINKS_PER_IO; i++) {
-        if (row[i].used && !row[i].inbound && row[i].client == client) {
+        if (row[i].used && !row[i].server_side && row[i].client == client) {
             return &row[i];
         }
     }
@@ -612,7 +612,7 @@ static void tcp_free_link(zrpc_tcp_link_t *link) {
     }
     rx_acc_free(&link->rx);
     zrpc_iobuf_reset(&link->tx);
-    if (!link->inbound && link->client) {
+    if (!link->server_side && link->client) {
         ztk_tcp_client_destroy(link->client);
         link->client = NULL;
     }
@@ -737,7 +737,7 @@ static void tcp_tick_cb(void *user) {
     int i;
     for (i = 0; i < ZRPC_TCP_LINKS_PER_IO; i++) {
         zrpc_tcp_link_t *link = &row[i];
-        if (link->used && !link->inbound && link->connected && !zrpc_iobuf_empty(&link->tx)) {
+        if (link->used && !link->server_side && link->connected && !zrpc_iobuf_empty(&link->tx)) {
             tcp_link_flush_tx(t, link);
         }
     }

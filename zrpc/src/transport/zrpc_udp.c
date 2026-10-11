@@ -232,7 +232,7 @@ static void emit_frag(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint32_t msg
     d.chunk = NULL;
 
     /* 只写分片头，随后从逻辑视图拷贝分片数据（payload 只拷这一次，用于重传环）。 */
-    hdr = zrpc_wire_build_frag_header(dst, stride, &d);
+    hdr = zrpc_frame_build_frag_header(dst, stride, &d);
     if (hdr == 0) {
         return;
     }
@@ -573,7 +573,7 @@ static void session_tick(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint64_t 
         }
         if (now_ms - s->last_nack_ms >= ZRPC_NACK_INTERVAL_MS) {
             uint8_t nack[256];
-            size_t n = zrpc_wire_build_nack(nack, sizeof(nack), s->ssrc_local, s->ssrc_remote,
+            size_t n = zrpc_frame_build_nack(nack, sizeof(nack), s->ssrc_local, s->ssrc_remote,
                                             missing, mn);
             if (n > 0) {
                 (void)ztk_socket_sendto(s->sock, nack, n, s->peer_ip_s, s->peer_port);
@@ -625,7 +625,7 @@ static void data_recv_cb(ztk_socket *sock, void *user) {
             }
             if ((buf[1] & 0x7f) == ZRPC_RTCP_RTPFB) {
                 uint16_t seqs[ZRPC_MAX_NACK_SEQS];
-                int c = zrpc_wire_parse_nack(buf, n, NULL, NULL, seqs, ZRPC_MAX_NACK_SEQS);
+                int c = zrpc_frame_parse_nack(buf, n, NULL, NULL, seqs, ZRPC_MAX_NACK_SEQS);
                 if (c > 0) {
                     zrpc_session_t *s = session_for(udp, io, sock, recvs[i].ip, recvs[i].port, now);
                     if (s) {
@@ -636,7 +636,7 @@ static void data_recv_cb(ztk_socket *sock, void *user) {
             }
             {
                 zrpc_frag_view_t v;
-                int r = zrpc_wire_parse_data(buf, n, &v);
+                int r = zrpc_frame_parse_data(buf, n, &v);
                 if (r == 1) {
                     zrpc_session_t *s = session_for(udp, io, sock, recvs[i].ip, recvs[i].port, now);
                     if (s) {

@@ -1,9 +1,9 @@
-add_executable(test_zrpc_wire test_zrpc_wire.c)
-target_include_directories(test_zrpc_wire PRIVATE
+add_executable(test_zrpc_framing test_zrpc_framing.c)
+target_include_directories(test_zrpc_framing PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/transport
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/message)
-target_link_libraries(test_zrpc_wire PRIVATE zrpc)
-add_test(NAME zrpc_wire COMMAND test_zrpc_wire)
+target_link_libraries(test_zrpc_framing PRIVATE zrpc)
+add_test(NAME zrpc_framing COMMAND test_zrpc_framing)
 
 add_executable(test_zrpc_loopback test_zrpc_loopback.c)
 target_link_libraries(test_zrpc_loopback PRIVATE zrpc)
@@ -52,7 +52,7 @@ add_test(NAME zrpc_api COMMAND test_zrpc_api)
 # CTest labels drive gating: `ctest -L unit`, `ctest -L integration`.
 # unit        = pure module / codec / config logic
 # integration = end-to-end loopback / streaming with real threads + sockets
-set_tests_properties(zrpc_wire zrpc_config zrpc_registry zrpc_reliable zrpc_pool zrpc_iobuf
+set_tests_properties(zrpc_framing zrpc_config zrpc_registry zrpc_reliable zrpc_pool zrpc_iobuf
     PROPERTIES LABELS "unit" TIMEOUT 120)
 set_tests_properties(zrpc_loopback zrpc_stream
     PROPERTIES LABELS "integration" TIMEOUT 300)

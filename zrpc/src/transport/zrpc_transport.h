@@ -40,7 +40,7 @@ typedef struct zrpc_transport_ops {
                 const char *route, const zrpc_payload_t *payload,
                 const zrpc_stream_meta_t *stream);
 
-    /* 回复：优先使用 inbound 回调给出的 peer_token（回程通道），token 为空时回退到 ip:port。 */
+    /* 回复：优先使用 接收（recv）回调给出的 peer_token（回程通道），token 为空时回退到 ip:port。 */
     int (*reply)(zrpc_transport_t *t, zrpc_peer_token_t token, const char *ip, uint16_t port,
                  uint8_t kind, uint32_t msg_id, const char *route, const zrpc_payload_t *payload,
                  const zrpc_stream_meta_t *stream);

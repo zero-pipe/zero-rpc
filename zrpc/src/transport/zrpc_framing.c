@@ -1,4 +1,4 @@
-#include "zrpc_wire.h"
+#include "zrpc_framing.h"
 
 #include "zrpc_util.h"
 
@@ -8,7 +8,7 @@ static int seq_diff16(uint16_t seq, uint16_t base) {
     return (int)(int16_t)(uint16_t)(seq - base);
 }
 
-size_t zrpc_wire_build_frag_header(uint8_t *buf, size_t cap, const zrpc_frag_desc_t *d) {
+size_t zrpc_frame_build_frag_header(uint8_t *buf, size_t cap, const zrpc_frag_desc_t *d) {
     uint8_t *p;
     if (!buf || !d || d->frag_off > d->total_len || d->frag_len > d->total_len - d->frag_off) {
         return 0;
@@ -33,7 +33,7 @@ size_t zrpc_wire_build_frag_header(uint8_t *buf, size_t cap, const zrpc_frag_des
     return (size_t)ZRPC_RTP_HDR_LEN + ZRPC_FRAG_HDR_LEN;
 }
 
-size_t zrpc_wire_build_data(uint8_t *buf, size_t cap, const zrpc_frag_desc_t *d) {
+size_t zrpc_frame_build_data(uint8_t *buf, size_t cap, const zrpc_frag_desc_t *d) {
     size_t hdr;
     size_t need;
 
@@ -44,7 +44,7 @@ size_t zrpc_wire_build_data(uint8_t *buf, size_t cap, const zrpc_frag_desc_t *d)
     if (need > cap) {
         return 0;
     }
-    hdr = zrpc_wire_build_frag_header(buf, cap, d);
+    hdr = zrpc_frame_build_frag_header(buf, cap, d);
     if (!hdr) {
         return 0;
     }
@@ -54,7 +54,7 @@ size_t zrpc_wire_build_data(uint8_t *buf, size_t cap, const zrpc_frag_desc_t *d)
     return need;
 }
 
-int zrpc_wire_parse_data(const uint8_t *buf, size_t len, zrpc_frag_view_t *v) {
+int zrpc_frame_parse_data(const uint8_t *buf, size_t len, zrpc_frag_view_t *v) {
     const uint8_t *p;
     uint8_t pt;
     size_t body;
@@ -91,7 +91,7 @@ int zrpc_wire_parse_data(const uint8_t *buf, size_t len, zrpc_frag_view_t *v) {
     return 1;
 }
 
-size_t zrpc_wire_build_nack(uint8_t *buf, size_t cap, uint32_t sender_ssrc, uint32_t media_ssrc,
+size_t zrpc_frame_build_nack(uint8_t *buf, size_t cap, uint32_t sender_ssrc, uint32_t media_ssrc,
                             const uint16_t *seqs, size_t count) {
     size_t i = 0;
     uint8_t *p;
@@ -127,7 +127,7 @@ size_t zrpc_wire_build_nack(uint8_t *buf, size_t cap, uint32_t sender_ssrc, uint
     return total;
 }
 
-int zrpc_wire_parse_nack(const uint8_t *buf, size_t len, uint32_t *sender_ssrc, uint32_t *media_ssrc,
+int zrpc_frame_parse_nack(const uint8_t *buf, size_t len, uint32_t *sender_ssrc, uint32_t *media_ssrc,
                          uint16_t *out_seqs, size_t out_cap) {
     size_t off;
     size_t n = 0;
