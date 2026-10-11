@@ -9,6 +9,7 @@
  */
 
 #include <zrpc/zrpc_types.h>
+#include <zrpc/zrpc_message_view.h>
 
 #include <stddef.h>
 
@@ -16,20 +17,14 @@
 extern "C" {
 #endif
 
-typedef struct zrpc_request {
-    const char *service;
-    const char *method;
-    zrpc_payload_t payload; /* 对框架透明的业务字节 */
-    const char *peer_ip;
-    uint16_t peer_port;
-} zrpc_request_t;
-
-typedef struct zrpc_response {
-    int status;             /* 应用定义，0 建议表示成功 */
-    zrpc_payload_t payload;
-} zrpc_response_t;
-
 typedef void (*zrpc_handler_fn)(zrpc_call_t *call, const zrpc_request_t *req, void *user);
+
+/*
+ * 同步风格 handler：返回值即应用状态码；把响应写进 resp view，框架在返回后
+ * 自动回复（回复本身仍是异步发送）。resp 拥有自己的缓冲，调用方无需管理。
+ */
+typedef int (*zrpc_sync_handler_fn)(const zrpc_request_t *req, zrpc_message_view_t *resp,
+                                    void *user);
 
 /*
  * 流式请求回调。框架按到达顺序逐个 chunk 调用；chunk 仅在本次回调内有效。
@@ -48,6 +43,9 @@ int zrpc_reply_stream(zrpc_call_t *call, int status, const zrpc_chunk_t *chunk);
 int zrpc_service_create(zrpc_node_t *node, const char *service_name, zrpc_service_t **out);
 void zrpc_service_destroy(zrpc_service_t *svc);
 int zrpc_service_add_method(zrpc_service_t *svc, const char *method, zrpc_handler_fn fn, void *user);
+/* 注册同步风格方法（handler 返回后框架自动回复）。 */
+int zrpc_service_add_sync_method(zrpc_service_t *svc, const char *method,
+                                 zrpc_sync_handler_fn fn, void *user);
 int zrpc_service_add_stream_method(zrpc_service_t *svc, const char *method,
                                    zrpc_chunk_handler_fn fn, void *user);
 

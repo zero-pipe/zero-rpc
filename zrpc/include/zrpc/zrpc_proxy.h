@@ -21,11 +21,6 @@ typedef struct zrpc_proxy_options {
     uint32_t prefer_stream_threshold; /* 0=disabled; larger payloads prefer TCP */
 } zrpc_proxy_options_t;
 
-/* 客户端响应回调。status：ZRPC_OK 或错误码；resp 仅在回调内有效。 */
-typedef void (*zrpc_response_fn)(int status, const zrpc_response_t *resp, void *user);
-typedef void (*zrpc_response_chunk_fn)(int status, const zrpc_chunk_t *chunk, void *user);
-typedef void (*zrpc_stream_done_fn)(int status, void *user);
-
 int zrpc_proxy_create(zrpc_node_t *node, const zrpc_proxy_options_t *options, zrpc_proxy_t **out);
 void zrpc_proxy_destroy(zrpc_proxy_t *proxy);
 

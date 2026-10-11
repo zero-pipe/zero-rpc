@@ -58,7 +58,7 @@ typedef struct zrpc_stream_meta {
     uint64_t total_size;
 } zrpc_stream_meta_t;
 
-/* 传输种类。节点创建时二选一，同一节点使用同一种传输。 */
+/* 传输种类。默认 binding 使用 UDP；显式 bindings 可按 scheme 选择不同传输。 */
 typedef enum zrpc_transport_kind {
     ZRPC_TRANSPORT_UDP = 0,
     ZRPC_TRANSPORT_TCP = 1,
@@ -85,6 +85,31 @@ typedef struct zrpc_payload {
     size_t len;
     uint8_t encoding;
 } zrpc_payload_t;
+
+/*
+ * 请求/响应视图（对框架不透明）。请求带有路由与对端信息；响应带有应用状态码
+ * 与 payload。两者共享同一个 zrpc_payload_t 视图，对齐 fastcall-c 的
+ * fc_message_view 设计。
+ *
+ * 生命周期：回调参数里的视图（含 payload）仅在本次回调内有效。
+ */
+typedef struct zrpc_request {
+    const char *service;
+    const char *method;
+    zrpc_payload_t payload; /* 对框架透明的业务字节 */
+    const char *peer_ip;
+    uint16_t peer_port;
+} zrpc_request_t;
+
+typedef struct zrpc_response {
+    int status;             /* 应用定义，0 建议表示成功 */
+    zrpc_payload_t payload;
+} zrpc_response_t;
+
+/* 客户端响应回调。status：ZRPC_OK 或错误码；resp 仅在回调内有效。 */
+typedef void (*zrpc_response_fn)(int status, const zrpc_response_t *resp, void *user);
+typedef void (*zrpc_response_chunk_fn)(int status, const zrpc_chunk_t *chunk, void *user);
+typedef void (*zrpc_stream_done_fn)(int status, void *user);
 
 /* 默认发现端口（广播） */
 #ifndef ZRPC_DISCOVERY_PORT

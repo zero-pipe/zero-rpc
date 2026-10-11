@@ -17,9 +17,13 @@
 #include <zrpc/zrpc_endpoint.h>
 #include <zrpc/zrpc_transport_provider.h>
 #include <zrpc/zrpc_codec.h>
+#include <zrpc/zrpc_message_view.h>
+#include <zrpc/zrpc_service_table.h>
 #include <zrpc/zrpc_node.h>
 #include <zrpc/zrpc_service.h>
 #include <zrpc/zrpc_proxy.h>
+#include <zrpc/zrpc_stub.h>
+#include <zrpc/zrpc_sync.h>
 #include <zrpc/zrpc_config.h>
 
 #endif /* ZRPC_H */

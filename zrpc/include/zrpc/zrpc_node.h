@@ -6,12 +6,13 @@
  *
  * 一个节点持有：
  *   - 一个 ztk_poller_pool（IO 线程池，不创建自有线程）；
- *   - 一种传输（UDP 或 TCP，见 zrpc_node_config_t.transport）；
+ *   - 一个或多个 binding；未显式配置 bindings 时使用 transport 配置创建一个 binding；
  *   - 可选的服务发现（MESH）与路由表。
  */
 
 #include <zrpc/zrpc_types.h>
 #include <zrpc/zrpc_metrics.h>
+#include <zrpc/zrpc_service_table.h>
 
 #include <stdint.h>
 #include <stddef.h>
@@ -43,6 +44,13 @@ typedef struct zrpc_node_config {
     /* New transport model. If non-empty, every binding is started. */
     const zrpc_binding_config_t *bindings;
     size_t binding_count;
+
+    /*
+     * Optional shared service declaration table (see zrpc_service_table.h).
+     * When non-NULL it is installed by zrpc_node_create(); the caller must keep
+     * it alive (use ZRPC_SERVICE_DEFINE so it has static storage).
+     */
+    const zrpc_service_table_t *service_table;
 } zrpc_node_config_t;
 
 int zrpc_node_create(const zrpc_node_config_t *cfg, zrpc_node_t **out);
