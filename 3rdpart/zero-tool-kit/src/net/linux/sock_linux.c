@@ -9,6 +9,7 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
@@ -80,6 +81,41 @@ static ztk_err_t set_nodelay(int fd)
     return setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &v, sizeof(v)) == 0 ? ZTK_OK : ZTK_ERR_PLATFORM;
 }
 
+/* Optional SO_SNDBUF/SO_RCVBUF override, read once per socket from the
+ * environment (0 or unset = keep the kernel default). Values are clamped by
+ * net.core.{w,r}mem_max as usual. */
+static void set_sockbuf_from_env(int fd, int opt, const char *name)
+{
+    const char *value = getenv(name);
+    char *end = NULL;
+    long size;
+
+    if (!value || value[0] == '\0') {
+        return;
+    }
+    size = strtol(value, &end, 10);
+    if (end == value || size <= 0 || size > 1073741824L) {
+        return;
+    }
+    {
+        int v = (int)size;
+        (void)setsockopt(fd, SOL_SOCKET, opt, &v, sizeof(v));
+    }
+}
+
+/* Optional TCP_QUICKACK (env ZTK_TCP_QUICKACK=1). Disables delayed ACKs on
+ * this socket to cut spurious RTO on the peer under load. */
+static void set_quickack_from_env(int fd)
+{
+    const char *value = getenv("ZTK_TCP_QUICKACK");
+    int on = 1;
+
+    if (!value || value[0] != '1') {
+        return;
+    }
+    (void)setsockopt(fd, IPPROTO_TCP, TCP_QUICKACK, &on, sizeof(on));
+}
+
 ztk_err_t ztk_sockplat_init(void)
 {
     return ZTK_OK;
@@ -104,6 +140,9 @@ ztk_err_t ztk_sockplat_apply_tcp_client_opts(int fd)
     if (set_cloexec(fd) != ZTK_OK)
         return ZTK_ERR_PLATFORM;
     set_nodelay(fd);
+    set_sockbuf_from_env(fd, SO_SNDBUF, "ZTK_TCP_SNDBUF");
+    set_sockbuf_from_env(fd, SO_RCVBUF, "ZTK_TCP_RCVBUF");
+    set_quickack_from_env(fd);
     return ZTK_OK;
 }
 

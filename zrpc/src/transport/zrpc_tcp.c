@@ -602,7 +602,7 @@ static int tcp_start(zrpc_transport_t *base) {
         return ZRPC_ERR_IO;
     }
     base->port = ztk_tcp_server_port(t->server);
-    t->tick_timer = ztk_timer_start(base->poller, ZRPC_TICK_INTERVAL_MS, 1, tcp_tick_cb, t);
+    t->tick_timer = ztk_timer_start(base->poller, zrpc_tick_interval_ms(), 1, tcp_tick_cb, t);
     return ZRPC_OK;
 }
 

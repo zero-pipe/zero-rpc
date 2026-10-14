@@ -65,7 +65,7 @@ int zrpc_frame_parse_data(const uint8_t *buf, size_t len, zrpc_frag_view_t *v) {
         return -1;
     }
     pt = (uint8_t)(buf[1] & 0x7f);
-    if (pt != ZRPC_PT_DATA && pt != ZRPC_PT_RTX) {
+    if (pt != ZRPC_PT_DATA && pt != ZRPC_PT_RTX && pt != ZRPC_PT_FEC) {
         return 0; /* RTCP or other non-data packet */
     }
     if (len < (size_t)ZRPC_RTP_HDR_LEN + ZRPC_FRAG_HDR_LEN) {

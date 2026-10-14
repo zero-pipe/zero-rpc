@@ -96,7 +96,7 @@ int main(int argc, char **argv) {
     node_cfg.bind_host = "127.0.0.1";
     node_cfg.discovery_host = "127.0.0.1";
     node_cfg.discovery_port = ZRPC_DISCOVERY_PORT;
-    node_cfg.io_threads = 2;
+    node_cfg.io_threads = 0; /* 0 = auto (hardware_concurrency); O1: was 2 */
 
     for (index = 1; index < argc; ++index) {
         if (strcmp(argv[index], "--config") == 0 && index + 1 < argc) {

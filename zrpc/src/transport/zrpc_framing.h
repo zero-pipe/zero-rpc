@@ -15,6 +15,7 @@ extern "C" {
 #define ZRPC_FRAG_HDR_LEN 20
 #define ZRPC_PT_DATA 96
 #define ZRPC_PT_RTX 97
+#define ZRPC_PT_FEC 98
 #define ZRPC_RTCP_RTPFB 205
 #define ZRPC_RTCP_FMT_NACK 1
 

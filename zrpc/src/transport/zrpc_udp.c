@@ -34,6 +34,9 @@ typedef struct zrpc_session {
     uint32_t ssrc_remote;
     int ssrc_remote_known;
     uint16_t send_seq;
+    uint64_t last_rx_data_ms; /* recv-side: last time peer data arrived (sender RTO) */
+    uint16_t acked_upto;      /* highest send seq inferred received by peer */
+    uint8_t rto_attempts;     /* idle-RTO retransmit rounds; reset on peer data */
 
     zrpc_rx_window_t rx_window;
     uint64_t last_nack_ms;
@@ -56,6 +59,13 @@ typedef struct zrpc_session {
     uint64_t tx_pkts;
     uint64_t retx;
     uint64_t lost;
+
+    /* 整包 XOR 前向纠错（env ZRPC_FEC=1）：缓存最近一个 FEC 包以重建单个丢失分片 */
+    uint16_t fec_seq; /* FEC 包独立序号（不占用数据序号空间） */
+    uint8_t *fec_rx_buf;
+    uint32_t fec_rx_len;
+    uint32_t fec_rx_msgid;
+    int fec_rx_valid;
 
     /* RTCP 报告状态（RFC 3550 SR/RR） */
     uint64_t rtcp_last_send_ms;
@@ -130,6 +140,10 @@ static void session_cleanup(zrpc_session_t *s) {
         s->txq = NULL;
         s->txq_sent = 0;
     }
+    if (s->fec_rx_buf) {
+        free(s->fec_rx_buf);
+        s->fec_rx_buf = NULL;
+    }
     zrpc_reasm_reset(&s->reasm);
     zrpc_rx_window_reset(&s->rx_window);
 }
@@ -154,6 +168,7 @@ static void session_init(zrpc_udp_transport_t *udp, zrpc_session_t *s, int io, z
         s->ssrc_local = 1;
     }
     s->last_use_ms = now_ms;
+    s->last_rx_data_ms = now_ms;
     s->rtcp_last_send_ms = now_ms;
 }
 
@@ -269,6 +284,7 @@ static void emit_frag(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint32_t msg
     env_view_copy(view, off, chunk, dst + hdr);
     n = hdr + chunk;
     zrpc_tx_ring_commit(&s->tx_ring, s->send_seq, (uint32_t)n);
+    zrpc_tx_ring_mark_sent(&s->tx_ring, s->send_seq, now);
     /* 测试用丢包注入：仍填入重传环（NACK 可重传），但不进本批发送 */
     if (!(udp->base.drop_percent && (sess_rand() % 100u) < udp->base.drop_percent)) {
         msgs[*nm].data = dst;
@@ -285,6 +301,147 @@ static void emit_frag(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint32_t msg
     s->rtcp_octet_count += chunk;
     s->rtcp_last_rtp_ts = d.ts;
     s->rtcp_last_rtp_wall = ztk_wall_ms();
+}
+
+/* ---- 整包 XOR 前向纠错（env ZRPC_FEC=1，默认关） ----
+ * 发送端为每个多分片消息额外发 1 个 XOR 校验包；接收端若该消息恰好缺 1 个分片，
+ * 可用校验包 XOR 其余已收分片重建它，省掉一次 NACK/RTX 往返。 */
+
+static int session_on_data(zrpc_udp_transport_t *udp, zrpc_session_t *s, const zrpc_frag_view_t *v,
+                           uint64_t now_ms);
+
+static int udp_fec_enabled(void) {
+    static int inited = 0;
+    static int on = 0;
+    if (!inited) {
+        const char *e = getenv("ZRPC_FEC");
+        on = (e && e[0] == '1') ? 1 : 0;
+        inited = 1;
+    }
+    return on;
+}
+
+static void send_fec(zrpc_udp_transport_t *udp, zrpc_session_t *s, const zrpc_env_view_t *view,
+                     size_t env_len, uint32_t msg_id) {
+    uint8_t parity[ZRPC_FRAG_MAX];
+    uint8_t pkt[ZRPC_RTP_HDR_LEN + ZRPC_FRAG_HDR_LEN + ZRPC_FRAG_MAX];
+    size_t frag = udp->base.frag_bytes;
+    size_t parity_len = env_len < frag ? env_len : frag;
+    size_t p, hdr;
+    zrpc_frag_desc_t d;
+
+    if (frag == 0 || parity_len == 0) {
+        return;
+    }
+    memset(parity, 0, parity_len);
+    for (p = 0; p < env_len; p++) {
+        uint8_t b = (p < view->prefix_len) ? view->prefix[p] : view->payload[p - view->prefix_len];
+        parity[p % frag] ^= b;
+    }
+    memset(&d, 0, sizeof(d));
+    d.pt = ZRPC_PT_FEC;
+    d.seq = s->fec_seq++;
+    d.ts = (uint32_t)zrpc_now_ms();
+    d.ssrc = s->ssrc_local;
+    d.msg_id = msg_id;
+    d.total_len = (uint32_t)env_len;
+    d.frag_off = 0;
+    d.frag_len = (uint32_t)parity_len;
+    hdr = zrpc_frame_build_frag_header(pkt, sizeof(pkt), &d);
+    if (hdr == 0) {
+        return;
+    }
+    memcpy(pkt + hdr, parity, parity_len);
+    (void)ztk_socket_sendto(s->sock, pkt, hdr + parity_len, s->peer_ip_s, s->peer_port);
+}
+
+static void fec_try_reconstruct(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint32_t msg_id,
+                                uint64_t now_ms) {
+    zrpc_reasm_slot_t *slot;
+    uint32_t frag = udp->base.frag_bytes;
+    uint32_t total, frag_count, m = 0, idx, k;
+    uint8_t acc[ZRPC_FRAG_MAX];
+    int missing = -1;
+    zrpc_frag_view_t v2;
+
+    if (!udp_fec_enabled() || !s->fec_rx_valid || s->fec_rx_msgid != msg_id || !s->fec_rx_buf ||
+        frag == 0) {
+        return;
+    }
+    slot = zrpc_reasm_find(&s->reasm, msg_id);
+    if (!slot || !slot->buf) {
+        return;
+    }
+    total = slot->total_len;
+    frag_count = (total + frag - 1) / frag;
+    if (frag_count != slot->frag_count || slot->got + 1 != frag_count) {
+        return; /* 只处理恰好缺 1 片 */
+    }
+    for (idx = 0; idx < frag_count; idx++) {
+        if (!(slot->bits[idx >> 3] & (uint8_t)(1u << (idx & 7)))) {
+            missing = (int)idx;
+            break;
+        }
+    }
+    if (missing < 0) {
+        return;
+    }
+    m = (uint32_t)missing;
+    memcpy(acc, s->fec_rx_buf, s->fec_rx_len);
+    for (idx = 0; idx < frag_count; idx++) {
+        uint32_t off, len;
+        if (idx == m || !(slot->bits[idx >> 3] & (uint8_t)(1u << (idx & 7)))) {
+            continue;
+        }
+        off = idx * frag;
+        len = (total - off) < frag ? (total - off) : frag;
+        if (len > s->fec_rx_len) {
+            len = s->fec_rx_len;
+        }
+        for (k = 0; k < len; k++) {
+            acc[k] ^= slot->buf[off + k];
+        }
+    }
+    {
+        uint32_t off = m * frag;
+        uint32_t len = (total - off) < frag ? (total - off) : frag;
+        memset(&v2, 0, sizeof(v2));
+        v2.marker = (m + 1 == frag_count) ? 1 : 0;
+        v2.pt = ZRPC_PT_DATA;
+        v2.seq = (uint16_t)(slot->base_seq + m);
+        v2.ssrc = s->ssrc_remote;
+        v2.msg_id = msg_id;
+        v2.total_len = total;
+        v2.frag_off = off;
+        v2.frag_len = len;
+        v2.chunk = acc;
+        s->fec_rx_valid = 0; /* 已消费 */
+        if (s->metrics) {
+            s->metrics->udp_retransmissions++; /* FEC 重建计一次恢复 */
+        }
+        (void)session_on_data(udp, s, &v2, now_ms);
+    }
+}
+
+static void fec_on_parity(zrpc_udp_transport_t *udp, zrpc_session_t *s, const zrpc_frag_view_t *v,
+                          uint64_t now_ms) {
+    if (!udp_fec_enabled()) {
+        return;
+    }
+    if (!s->fec_rx_buf) {
+        s->fec_rx_buf = (uint8_t *)malloc(udp->base.frag_bytes);
+        if (!s->fec_rx_buf) {
+            return;
+        }
+    }
+    if (v->frag_len == 0 || v->frag_len > udp->base.frag_bytes) {
+        return;
+    }
+    memcpy(s->fec_rx_buf, v->chunk, v->frag_len);
+    s->fec_rx_len = v->frag_len;
+    s->fec_rx_msgid = v->msg_id;
+    s->fec_rx_valid = 1;
+    fec_try_reconstruct(udp, s, v->msg_id, now_ms);
 }
 
 static int session_send(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint8_t kind, uint32_t msg_id,
@@ -380,6 +537,9 @@ static int session_send(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint8_t ki
     if (nm > 0) {
         (void)ztk_socket_sendto_batch(s->sock, msgs, nm);
     }
+    if (nfrag >= 2 && s->txq == NULL && udp_fec_enabled()) {
+        send_fec(udp, s, &view, env_len, msg_id);
+    }
     return ZRPC_OK;
 }
 
@@ -435,7 +595,16 @@ static int session_on_data(zrpc_udp_transport_t *udp, zrpc_session_t *s, const z
     if (!s || !v) {
         return ZRPC_ERR_INVALID;
     }
+    if (v->pt == ZRPC_PT_FEC) {
+        fec_on_parity(udp, s, v, now_ms);
+        return ZRPC_OK;
+    }
     s->rx_pkts++;
+    /* Peer data arrived: everything we sent so far was received, and we are
+     * no longer idling, so reset the sender-side RTO state. */
+    s->last_rx_data_ms = now_ms;
+    s->acked_upto = s->send_seq;
+    s->rto_attempts = 0;
     udp->base.metrics->udp_packets_received++;
     if (!s->ssrc_remote_known) {
         s->ssrc_remote = v->ssrc;
@@ -567,7 +736,10 @@ static int session_on_data(zrpc_udp_transport_t *udp, zrpc_session_t *s, const z
             }
         }
         zrpc_reasm_release(r);
+        return ZRPC_OK;
     }
+    /* FEC：若本消息恰好缺一枚分片且已缓存其校验包，尝试重建补齐。 */
+    fec_try_reconstruct(udp, s, v->msg_id, now_ms);
     return ZRPC_OK;
 }
 
@@ -776,6 +948,37 @@ static void reasm_on_lost(const zrpc_reasm_slot_t *slot, void *user) {
     }
 }
 
+/* Sender-side per-message RTO (Plan A): when the session has been idle (no peer
+ * data) for >= RTO, retransmit the unacked tail. This recovers a lost last
+ * fragment that the peer rx_window cannot flag (no higher seq => no NACK).
+ * RTO is overridable via env ZRPC_RTO_MS (ms), default 100. */
+#define ZRPC_RTO_MAX_ROUNDS 6
+
+static uint32_t udp_rto_env_ms(void) {
+    static int inited = 0;
+    static uint32_t value = 0;
+    if (!inited) {
+        const char *env = getenv("ZRPC_RTO_MS");
+        if (env && env[0]) {
+            int v = atoi(env);
+            if (v > 0 && v < 5000) {
+                value = (uint32_t)v;
+            }
+        }
+        inited = 1;
+    }
+    return value;
+}
+
+/* Sender-side RTO. Default 10ms (LAN/loopback/nearby); override with
+ * ZRPC_RTO_MS for high-RTT WAN links. (RTCP-derived RTT proved too coarse to
+ * drive this adaptively on a low-latency link.) */
+static uint32_t session_rto_ms(const zrpc_session_t *s) {
+    uint32_t env = udp_rto_env_ms();
+    (void)s;
+    return env > 0 ? env : 10u;
+}
+
 static void session_tick(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint64_t now_ms) {
     uint16_t missing[ZRPC_MAX_NACK_SEQS];
     size_t mn = 0;
@@ -785,6 +988,39 @@ static void session_tick(zrpc_udp_transport_t *udp, zrpc_session_t *s, uint64_t 
     }
 
     session_txq_drain(udp, s, now_ms);
+
+    /* Plan A: idle sender-side RTO retransmit of the unacked tail. */
+    if (s->tx_pkts > 0 && !s->txq && s->rto_attempts < ZRPC_RTO_MAX_ROUNDS &&
+        (now_ms - s->last_rx_data_ms) >= session_rto_ms(s) &&
+        (int16_t)(s->send_seq - s->acked_upto) > 0) {
+        uint32_t rto = session_rto_ms(s);
+        unsigned i;
+        for (i = 0; i < ZRPC_TX_BATCH_MAX; i++) {
+            uint16_t seq = (uint16_t)(s->send_seq - 1u - i);
+            const uint8_t *pkt;
+            uint64_t sent;
+            uint32_t len = 0;
+            if ((int16_t)(seq - s->acked_upto) < 0) {
+                break;
+            }
+            sent = zrpc_tx_ring_sent_ms(&s->tx_ring, seq);
+            if (sent == 0 || now_ms - sent < rto) {
+                continue;
+            }
+            pkt = zrpc_tx_ring_get(&s->tx_ring, seq, &len);
+            if (!pkt || len == 0) {
+                continue;
+            }
+            (void)ztk_socket_sendto(s->sock, pkt, len, s->peer_ip_s, s->peer_port);
+            zrpc_tx_ring_mark_sent(&s->tx_ring, seq, now_ms);
+            s->retx++;
+            if (s->metrics) {
+                s->metrics->udp_retransmissions++;
+            }
+        }
+        s->rto_attempts++;
+    }
+
     if (s->cc_burst < s->cc_burst_max && now_ms - s->cc_last_loss_ms > 200 &&
         now_ms - s->cc_last_grow_ms > 50) {
         s->cc_burst++;
@@ -967,7 +1203,7 @@ static int udp_start(zrpc_transport_t *t) {
         return ZRPC_ERR_IO;
     }
     for (i = 0; i < udp->io_count; i++) {
-        udp->tick_timers[i] = ztk_timer_start(udp->pollers[i], ZRPC_TICK_INTERVAL_MS, 1,
+        udp->tick_timers[i] = ztk_timer_start(udp->pollers[i], zrpc_tick_interval_ms(), 1,
                                               udp_tick_cb, &udp->io_ctx[i]);
     }
     return ZRPC_OK;

@@ -185,7 +185,7 @@ int zrpc_node_create(const zrpc_node_config_t *cfg, zrpc_node_t **out) {
             ztk_timer_start(node->poller, node->hello_interval_ms, 1, hello_timer_cb, node);
     }
     node->node_timer =
-        ztk_timer_start(node->poller, ZRPC_TICK_INTERVAL_MS, 1, node_timer_cb, node);
+        ztk_timer_start(node->poller, zrpc_tick_interval_ms(), 1, node_timer_cb, node);
     node->started = 1;
 
     if (node->mode == ZRPC_MODE_MESH) {

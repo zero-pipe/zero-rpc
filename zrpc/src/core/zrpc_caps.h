@@ -8,6 +8,8 @@
  */
 
 #include "zrpc_framing.h" /* ZRPC_RTP_HDR_LEN / ZRPC_FRAG_HDR_LEN */
+#include <stdint.h>
+#include <stdlib.h>
 
 /* ---- 消息与路由 ---- */
 #define ZRPC_MAX_ROUTE 128
@@ -53,5 +55,25 @@
 
 /* per-poller 缓冲池：每档最多缓存的空闲块数，避免池无界增长 */
 #define ZRPC_BUF_POOL_MAX_PER_BUCKET 32
+
+/* Runtime-overridable tick period: env ZRPC_TICK_INTERVAL_MS wins, else the
+ * compile-time default. A longer tick cuts timer overhead (measured ~10% more
+ * throughput at saturation) but coarsens UDP NACK/RTX and TCP backlog flush,
+ * hence configurable rather than hardcoded. */
+static inline uint32_t zrpc_tick_interval_ms(void) {
+    static int inited = 0;
+    static uint32_t value = ZRPC_TICK_INTERVAL_MS;
+    if (!inited) {
+        const char *env = getenv("ZRPC_TICK_INTERVAL_MS");
+        if (env && env[0]) {
+            int v = atoi(env);
+            if (v > 0 && v <= 1000) {
+                value = (uint32_t)v;
+            }
+        }
+        inited = 1;
+    }
+    return value;
+}
 
 #endif /* ZRPC_CAPS_H */

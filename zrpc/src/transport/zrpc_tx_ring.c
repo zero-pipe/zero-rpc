@@ -41,6 +41,7 @@ void zrpc_tx_ring_commit(zrpc_tx_ring_t *ring, uint16_t seq, uint32_t len) {
     slot->seq = seq;
     slot->len = len;
     slot->off = index * ring->stride;
+    slot->sent_ms = 0;
 }
 
 const uint8_t *zrpc_tx_ring_get(const zrpc_tx_ring_t *ring, uint16_t seq, uint32_t *out_len) {
@@ -58,6 +59,33 @@ const uint8_t *zrpc_tx_ring_get(const zrpc_tx_ring_t *ring, uint16_t seq, uint32
         *out_len = slot->len;
     }
     return ring->arena + slot->off;
+}
+
+void zrpc_tx_ring_mark_sent(zrpc_tx_ring_t *ring, uint16_t seq, uint64_t ms) {
+    uint32_t index;
+    zrpc_tx_slot_t *slot;
+    if (!ring || !ring->arena) {
+        return;
+    }
+    index = (uint32_t)(seq % ZRPC_RTX_RING);
+    slot = &ring->slots[index];
+    if (slot->used && slot->seq == seq) {
+        slot->sent_ms = ms;
+    }
+}
+
+uint64_t zrpc_tx_ring_sent_ms(const zrpc_tx_ring_t *ring, uint16_t seq) {
+    uint32_t index;
+    const zrpc_tx_slot_t *slot;
+    if (!ring || !ring->arena) {
+        return 0;
+    }
+    index = (uint32_t)(seq % ZRPC_RTX_RING);
+    slot = &ring->slots[index];
+    if (slot->used && slot->seq == seq) {
+        return slot->sent_ms;
+    }
+    return 0;
 }
 
 void zrpc_tx_ring_cleanup(zrpc_tx_ring_t *ring) {
