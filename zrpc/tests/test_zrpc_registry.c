@@ -1,7 +1,7 @@
 /* registry / selector：service instance 隔离、多 endpoint 轮询、删除与过期。 */
 #include <zrpc/zrpc.h>
 
-#include "zrpc_registry.h"
+#include "registry.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -27,57 +27,57 @@ static zrpc_endpoint_t ep(const char *scheme, const char *host, uint16_t port) {
 }
 
 int main(void) {
-    zrpc_registry_t registry;
+    zri_registry_t registry;
     zrpc_endpoint_t endpoints[2];
     zrpc_endpoint_t selected;
     const char *services[2];
 
     /* 注册表可独立于 node 使用。 */
     memset(&registry, 0, sizeof(registry));
-    zrpc_registry_init(&registry);
+    zri_registry_init(&registry);
 
     endpoints[0] = ep("udp", "127.0.0.1", 9001);
     endpoints[1] = ep("tcp", "127.0.0.1", 9002);
     services[0] = "order";
     services[1] = "user";
-    CHECK(zrpc_registry_replace_node(&registry, 7, "nodeA-00000007", services, 2, endpoints, 2,
+    CHECK(zri_registry_replace_node(&registry, 7, "nodeA-00000007", services, 2, endpoints, 2,
                                      1000) == ZRPC_OK);
 
     /* 一个 instance 有两个 endpoint：对同一 service 轮询。 */
-    CHECK(zrpc_registry_select(&registry, "order", &selected) == ZRPC_OK);
+    CHECK(zri_registry_select(&registry, "order", &selected) == ZRPC_OK);
     CHECK(selected.port == 9001);
-    CHECK(zrpc_registry_select(&registry, "order", &selected) == ZRPC_OK);
+    CHECK(zri_registry_select(&registry, "order", &selected) == ZRPC_OK);
     CHECK(selected.port == 9002);
     CHECK(strcmp(selected.scheme, "tcp") == 0);
 
     /* 另一个 service 独立选择。 */
-    CHECK(zrpc_registry_select(&registry, "user", &selected) == ZRPC_OK);
+    CHECK(zri_registry_select(&registry, "user", &selected) == ZRPC_OK);
     CHECK(selected.port == 9001);
 
     /* 大包策略：优先 TCP endpoint。 */
-    CHECK(zrpc_registry_select_prefer(&registry, "order", 1, &selected) == ZRPC_OK);
+    CHECK(zri_registry_select_prefer(&registry, "order", 1, &selected) == ZRPC_OK);
     CHECK(strcmp(selected.scheme, "tcp") == 0);
     CHECK(selected.port == 9002);
 
     /* 未知 service。 */
-    CHECK(zrpc_registry_select(&registry, "missing", &selected) == ZRPC_ERR_NOTFOUND);
+    CHECK(zri_registry_select(&registry, "missing", &selected) == ZRPC_ERR_NOTFOUND);
 
     /* 整个 node 下线：实例全部移除。 */
-    zrpc_registry_remove_node(&registry, 7);
-    CHECK(zrpc_registry_select(&registry, "order", &selected) == ZRPC_ERR_NOTFOUND);
+    zri_registry_remove_node(&registry, 7);
+    CHECK(zri_registry_select(&registry, "order", &selected) == ZRPC_ERR_NOTFOUND);
 
     /* 过期：last_seen 很早，ttl 之后被清理。 */
-    CHECK(zrpc_registry_replace_node(&registry, 9, "nodeB-00000009", services, 1, endpoints, 1,
+    CHECK(zri_registry_replace_node(&registry, 9, "nodeB-00000009", services, 1, endpoints, 1,
                                      1000) == ZRPC_OK);
-    zrpc_registry_expire(&registry, 1000 + 5000, 3000);
-    CHECK(zrpc_registry_select(&registry, "order", &selected) == ZRPC_ERR_NOTFOUND);
+    zri_registry_expire(&registry, 1000 + 5000, 3000);
+    CHECK(zri_registry_select(&registry, "order", &selected) == ZRPC_ERR_NOTFOUND);
 
-    zrpc_registry_cleanup(&registry);
+    zri_registry_cleanup(&registry);
 
     if (g_fail) {
-        printf("zrpc_registry: FAIL\n");
+        printf("zri_registry: FAIL\n");
         return 1;
     }
-    printf("zrpc_registry: OK\n");
+    printf("zri_registry: OK\n");
     return 0;
 }

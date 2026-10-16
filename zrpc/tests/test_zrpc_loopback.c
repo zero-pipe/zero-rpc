@@ -241,9 +241,9 @@ int main(void) {
     failed += run_case(ZRPC_TRANSPORT_TCP, "tcp");
 
     if (failed) {
-        printf("zrpc_loopback: FAIL\n");
+        printf("zri_loopback: FAIL\n");
         return 1;
     }
-    printf("zrpc_loopback: OK\n");
+    printf("zri_loopback: OK\n");
     return 0;
 }

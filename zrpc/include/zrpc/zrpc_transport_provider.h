@@ -15,6 +15,7 @@ typedef struct zrpc_transport_instance zrpc_transport_instance_t;
 
 typedef struct zrpc_transport_message {
     uint8_t kind;
+    int status; /* 应用状态码；仅 RESPONSE 有意义 */
     uint32_t request_id;
     zrpc_stream_meta_t stream;
     const char *route;

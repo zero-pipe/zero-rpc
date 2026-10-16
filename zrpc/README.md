@@ -47,37 +47,41 @@ zrpc/
     zrpc_stub.h       node 之上的传输无关调用原语
     zrpc_sync.h       同步调用便捷层（可选）
     zrpc_config.h     JSON 配置
-  src/
+  src/                内部实现（文件用短名，目录已表达归属）
     core/             组合根与内部子模块（按文件/职责切分）
-      zrpc_node.c         节点生命周期 + 传输装配 + 阻塞运行
-      zrpc_dispatch.c     入站消息分发 + 出站传输选择
-      zrpc_service.c      方法注册 + 请求/分片分发
-      zrpc_reply.c        服务端回复编码
-      zrpc_proxy.c        代理生命周期 + 路由解析 + 普通调用
-      zrpc_stream.c       客户端流式会话
-      zrpc_stub.c         传输无关调用原语
-      zrpc_pending.c      pending 关联表
-      zrpc_sync.c         同步便捷层
-      zrpc_message_view.c / zrpc_service_table.c / zrpc_codec.c / zrpc_mem.c
+      node.c              节点生命周期 + 传输装配 + 阻塞运行
+      dispatch.c          入站消息分发 + 出站传输选择
+      service.c           方法注册 + 请求/分片分发
+      reply.c             服务端回复编码
+      proxy.c             代理生命周期 + 路由解析 + 普通调用
+      stream.c            客户端流式会话
+      stub.c              传输无关调用原语
+      pending.c           pending 关联表
+      sync.c              同步便捷层
+      message_view.c / service_table.c / codec.c / mem.c
       内部头按模块拆分（无聚合“上帝头”，各模块只 include 自己需要的）：
-        zrpc_caps.h            容量常量
-        zrpc_pending.h         pending 表
-        zrpc_service_internal.h 服务端内部结构
-        zrpc_proxy_internal.h  客户端内部结构（proxy/stub/stream）
-        zrpc_node_internal.h   节点（组合根）
-    router/           静态路由表（自带锁，独立于 node，操作 zrpc_route_table_t）
+        caps.h               容量常量
+        pending.h            pending 表
+        service_internal.h   服务端内部结构
+        proxy_internal.h     客户端内部结构（proxy/stub/stream）
+        node_internal.h      节点（组合根）
+    router/           静态路由表（自带锁，独立于 node，操作 zri_route_table_t）
     registry/         service instance / endpoint snapshot / selector（自带锁，独立于 node）
     discovery/        registry backend（UDP mesh 广播）；node 作用域的控制面后端
                       自持对端表/发现 socket/单播目标（node->discovery）
-                      只经 zrpc_node_access.h 门面访问 node，不穿透 struct zrpc_node
+                      只经 node_access.h 门面访问 node，不穿透 struct zrpc_node
     message/          provider-neutral RPC envelope 编解码
     transport/        传输 facade + provider SPI + UDP/TCP 驱动 + framing
-      只读 zrpc_transport_t 上的配置快照，不穿透 node 内部
-      zrpc_framing    RTP/分片/NACK、RTCP SR/RR/SDES 与 TCP 长度前缀分帧
-      zrpc_rx_window  UDP 接收窗口与缺口检测
-      zrpc_reasm      UDP 分片重组
-      zrpc_tx_ring    UDP RTX 重传环
+      只读 zri_transport_t 上的配置快照，不穿透 node 内部
+      framing         RTP/分片/NACK、RTCP SR/RR/SDES 与 TCP 长度前缀分帧
+      rx_window       UDP 接收窗口与缺口检测
+      reasm           UDP 分片重组
+      tx_ring         UDP RTX 重传环
     config/           JSON 配置解析
+
+  命名约定：公开 API 一律 `zrpc_`（见 include/zrpc/）；库内部符号一律 `zri_`
+  （对齐 nng 的 `nng_`/`nni_` 双命名空间），不透明公开句柄类型（如
+  `zrpc_node_t`）保持 `zrpc_` 前缀。
   tests/              framing / loopback(udp+tcp) / config / registry
   tools/              压测 server / loadgen
   examples/           编号示例（对齐 fastcall-c：node / service / proxy / stub / table / 路由）

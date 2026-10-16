@@ -1,5 +1,5 @@
-#include "zrpc_envelope.h"
-#include "zrpc_framing.h"
+#include "envelope.h"
+#include "framing.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -18,13 +18,14 @@ static void test_envelope_roundtrip(void) {
     uint8_t buf[256];
     const char *route = "echo.ping";
     const uint8_t payload[5] = {1, 2, 3, 4, 5};
-    zrpc_envelope_t envelope;
-    zrpc_envelope_view_t view;
+    zri_envelope_t envelope;
+    zri_envelope_t view;
     size_t n;
 
     memset(&envelope, 0, sizeof(envelope));
     envelope.kind = ZRPC_KIND_REQUEST;
     envelope.encoding = 3;
+    envelope.status = -7;
     envelope.request_id = 42;
     envelope.stream_flags = ZRPC_STREAM_FLAG_STREAM | ZRPC_STREAM_FLAG_FIRST;
     envelope.stream_id = 99;
@@ -33,11 +34,12 @@ static void test_envelope_roundtrip(void) {
     envelope.route = route;
     envelope.payload = payload;
     envelope.payload_len = sizeof(payload);
-    n = zrpc_envelope_encode(buf, sizeof(buf), &envelope);
-    CHECK(n == zrpc_envelope_size(strlen(route), sizeof(payload)));
-    CHECK(zrpc_envelope_decode(buf, n, &view) == ZRPC_OK);
+    n = zri_envelope_encode(buf, sizeof(buf), &envelope);
+    CHECK(n == zri_envelope_size(strlen(route), sizeof(payload)));
+    CHECK(zri_envelope_decode(buf, n, &view) == ZRPC_OK);
     CHECK(view.kind == ZRPC_KIND_REQUEST);
     CHECK(view.encoding == 3);
+    CHECK(view.status == -7);
     CHECK(view.request_id == 42);
     CHECK(view.stream_flags == (ZRPC_STREAM_FLAG_STREAM | ZRPC_STREAM_FLAG_FIRST));
     CHECK(view.stream_id == 99);
@@ -52,8 +54,8 @@ static void test_envelope_roundtrip(void) {
 static void test_udp_fragment_roundtrip(void) {
     uint8_t buf[256];
     const uint8_t chunk[5] = {1, 2, 3, 4, 5};
-    zrpc_frag_desc_t desc;
-    zrpc_frag_view_t view;
+    zri_frag_t desc;
+    zri_frag_t view;
     size_t n;
 
     memset(&desc, 0, sizeof(desc));
@@ -67,9 +69,9 @@ static void test_udp_fragment_roundtrip(void) {
     desc.frag_len = sizeof(chunk);
     desc.flags = ZRPC_FLAG_FIRST | ZRPC_FLAG_LAST;
     desc.chunk = chunk;
-    n = zrpc_frame_build_data(buf, sizeof(buf), &desc);
+    n = zri_frame_build_data(buf, sizeof(buf), &desc);
     CHECK(n > 0);
-    CHECK(zrpc_frame_parse_data(buf, n, &view) == 1);
+    CHECK(zri_frame_parse_data(buf, n, &view) == 1);
     CHECK(view.marker == 1);
     CHECK(view.seq == 0x1234);
     CHECK(view.ssrc == 0x0a0b0c0du);
@@ -87,9 +89,9 @@ static void test_tcp_opaque_frame(void) {
     size_t parsed_len = 0;
     size_t n;
 
-    n = zrpc_tcp_build(buf, sizeof(buf), body, sizeof(body));
+    n = zri_tcp_build(buf, sizeof(buf), body, sizeof(body));
     CHECK(n == sizeof(body) + ZRPC_TCP_HDR_LEN);
-    CHECK(zrpc_tcp_parse(buf, n, &parsed, &parsed_len) == 1);
+    CHECK(zri_tcp_parse(buf, n, &parsed, &parsed_len) == 1);
     CHECK(parsed_len == sizeof(body));
     CHECK(memcmp(parsed, body, sizeof(body)) == 0);
 }
@@ -101,9 +103,9 @@ static void test_nack_roundtrip(void) {
     size_t n;
     int c;
 
-    n = zrpc_frame_build_nack(buf, sizeof(buf), 0x11111111u, 0x22222222u, seqs, 4);
+    n = zri_frame_build_nack(buf, sizeof(buf), 0x11111111u, 0x22222222u, seqs, 4);
     CHECK(n > 0);
-    c = zrpc_frame_parse_nack(buf, n, NULL, NULL, out, 64);
+    c = zri_frame_parse_nack(buf, n, NULL, NULL, out, 64);
     CHECK(c == 4);
     CHECK(out[0] == 100);
     CHECK(out[1] == 101);
@@ -113,17 +115,17 @@ static void test_nack_roundtrip(void) {
 
 static void test_parse_rejects_rtcp(void) {
     uint8_t rtcp[12];
-    zrpc_frag_view_t view;
+    zri_frag_t view;
     memset(rtcp, 0, sizeof(rtcp));
     rtcp[0] = (uint8_t)(2u << 6);
     rtcp[1] = ZRPC_RTCP_RTPFB;
-    CHECK(zrpc_frame_parse_data(rtcp, sizeof(rtcp), &view) == 0);
+    CHECK(zri_frame_parse_data(rtcp, sizeof(rtcp), &view) == 0);
 }
 
 static void test_rtcp_sr_roundtrip(void) {
     uint8_t buf[256];
-    zrpc_rtcp_report_block_t rb;
-    zrpc_rtcp_sr_t sr;
+    zri_rtcp_report_block_t rb;
+    zri_rtcp_sr_t sr;
     size_t n;
 
     memset(&rb, 0, sizeof(rb));
@@ -135,11 +137,11 @@ static void test_rtcp_sr_roundtrip(void) {
     rb.lsr = 0x11223344u;
     rb.dlsr = 0x55667788u;
 
-    n = zrpc_frame_build_sr(buf, sizeof(buf), 0xdeadbeefu, 0x11111111u, 0x22222222u, 0x33333333u,
+    n = zri_frame_build_sr(buf, sizeof(buf), 0xdeadbeefu, 0x11111111u, 0x22222222u, 0x33333333u,
                             100, 2000, &rb, 1);
     CHECK(n == 52);
     memset(&sr, 0, sizeof(sr));
-    CHECK(zrpc_frame_parse_sr(buf, n, &sr) == 1);
+    CHECK(zri_frame_parse_sr(buf, n, &sr) == 1);
     CHECK(sr.ssrc == 0xdeadbeefu);
     CHECK(sr.ntp_msw == 0x11111111u && sr.ntp_lsw == 0x22222222u);
     CHECK(sr.rtp_ts == 0x33333333u);
@@ -156,17 +158,17 @@ static void test_rtcp_sr_roundtrip(void) {
 
 static void test_rtcp_rr_roundtrip(void) {
     uint8_t buf[128];
-    zrpc_rtcp_report_block_t rb;
-    zrpc_rtcp_rr_t rr;
+    zri_rtcp_report_block_t rb;
+    zri_rtcp_rr_t rr;
     size_t n;
 
     memset(&rb, 0, sizeof(rb));
     rb.ssrc = 0x01010101u;
     rb.cumulative_lost = 5;
-    n = zrpc_frame_build_rr(buf, sizeof(buf), 0x0f0f0f0fu, &rb, 1);
+    n = zri_frame_build_rr(buf, sizeof(buf), 0x0f0f0f0fu, &rb, 1);
     CHECK(n == 32);
     memset(&rr, 0, sizeof(rr));
-    CHECK(zrpc_frame_parse_rr(buf, n, &rr) == 1);
+    CHECK(zri_frame_parse_rr(buf, n, &rr) == 1);
     CHECK(rr.ssrc == 0x0f0f0f0fu);
     CHECK(rr.rb_count == 1);
     CHECK(rr.rb[0].ssrc == 0x01010101u);
@@ -175,17 +177,17 @@ static void test_rtcp_rr_roundtrip(void) {
 
 static void test_rtcp_sdes_and_dispatch(void) {
     uint8_t buf[128];
-    zrpc_frag_view_t view;
+    zri_frag_t view;
     size_t n;
 
-    n = zrpc_frame_build_sdes_cname(buf, sizeof(buf), 0xabcdef01u, "zrpc");
+    n = zri_frame_build_sdes_cname(buf, sizeof(buf), 0xabcdef01u, "zrpc");
     CHECK(n == 16); /* 4 头 + 4 ssrc + 2 项头 + 4 名 + 2 填充 */
-    CHECK(zrpc_frame_parse_data(buf, n, &view) == 0); /* SDES 不是数据包 */
+    CHECK(zri_frame_parse_data(buf, n, &view) == 0); /* SDES 不是数据包 */
 
     memset(buf, 0, sizeof(buf));
     buf[0] = (uint8_t)(2u << 6);
     buf[1] = ZRPC_RTCP_SR;
-    CHECK(zrpc_frame_parse_sr(buf, 3, NULL) == 0);
+    CHECK(zri_frame_parse_sr(buf, 3, NULL) == 0);
 }
 
 static void test_rtcp_bye_roundtrip(void) {
@@ -193,11 +195,11 @@ static void test_rtcp_bye_roundtrip(void) {
     uint32_t ssrc = 0;
     size_t n;
 
-    n = zrpc_frame_build_bye(buf, sizeof(buf), 0x0badf00du);
+    n = zri_frame_build_bye(buf, sizeof(buf), 0x0badf00du);
     CHECK(n == 8);
-    CHECK(zrpc_frame_parse_bye(buf, n, &ssrc) == 1);
+    CHECK(zri_frame_parse_bye(buf, n, &ssrc) == 1);
     CHECK(ssrc == 0x0badf00du);
-    CHECK(zrpc_frame_parse_bye(buf, 4, NULL) == 0);
+    CHECK(zri_frame_parse_bye(buf, 4, NULL) == 0);
 }
 
 int main(void) {
@@ -211,9 +213,9 @@ int main(void) {
     test_rtcp_sdes_and_dispatch();
     test_rtcp_bye_roundtrip();
     if (g_fail) {
-        printf("zrpc_framing: FAIL\n");
+        printf("zri_framing: FAIL\n");
         return 1;
     }
-    printf("zrpc_framing: OK\n");
+    printf("zri_framing: OK\n");
     return 0;
 }

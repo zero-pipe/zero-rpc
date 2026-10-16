@@ -1,5 +1,5 @@
-#include "zrpc_mem.h"
-#include "zrpc_node_access.h"
+#include "mem.h"
+#include "node_access.h"
 
 #include <zrpc/zrpc_node.h>
 
@@ -30,7 +30,7 @@ static void pool_probe(void *user) {
     size_t cap_b = 0;
 
     g_task_ok = 0;
-    if (cur != zrpc_node_poller(node)) {
+    if (cur != zri_node_poller(node)) {
         goto done;
     }
     pool = ztk_poller_buf_pool(cur);
@@ -49,23 +49,23 @@ static void pool_probe(void *user) {
     }
     ztk_buf_pool_release(pool, b, cap_b);
 
-    /* zrpc_mem：owner 线程内释放应复用同一块。 */
+    /* zri_mem：owner 线程内释放应复用同一块。 */
     {
-        void *m1 = zrpc_mem_alloc(64);
+        void *m1 = zri_mem_alloc(64);
         void *m2;
         if (!m1) {
             goto done;
         }
-        zrpc_mem_free(m1);
-        m2 = zrpc_mem_alloc(64);
+        zri_mem_free(m1);
+        m2 = zri_mem_alloc(64);
         if (m2 != m1) {
-            zrpc_mem_free(m2);
+            zri_mem_free(m2);
             goto done;
         }
-        zrpc_mem_free(m2);
+        zri_mem_free(m2);
     }
     /* 交给主线程跨线程释放：不得崩溃。 */
-    g_remote_obj = zrpc_mem_alloc(64);
+    g_remote_obj = zri_mem_alloc(64);
     if (!g_remote_obj) {
         goto done;
     }
@@ -95,10 +95,10 @@ int main(void) {
         return 1;
     }
 
-    n = ztk_poller_pool_size(zrpc_node_pool(node));
+    n = ztk_poller_pool_size(zri_node_pool(node));
     CHECK(n >= 1);
     for (i = 0; i < n; i++) {
-        ztk_poller *p = ztk_poller_pool_at(zrpc_node_pool(node), i);
+        ztk_poller *p = ztk_poller_pool_at(zri_node_pool(node), i);
         CHECK(p != NULL);
         CHECK(ztk_poller_buf_pool(p) != NULL);
     }
@@ -107,7 +107,7 @@ int main(void) {
     g_sem = ztk_sem_create(0);
     CHECK(g_sem != NULL);
     if (g_sem) {
-        CHECK(ztk_poller_async(zrpc_node_poller(node), pool_probe, node, 0) == ZTK_OK);
+        CHECK(ztk_poller_async(zri_node_poller(node), pool_probe, node, 0) == ZTK_OK);
         CHECK(ztk_sem_timedwait(g_sem, 2000) == ZTK_OK);
         CHECK(g_task_ok == 1);
         ztk_sem_destroy(g_sem);
@@ -116,7 +116,7 @@ int main(void) {
 
     /* 跨线程释放（非 owner poller 线程）。 */
     if (g_remote_obj) {
-        zrpc_mem_free(g_remote_obj);
+        zri_mem_free(g_remote_obj);
         g_remote_obj = NULL;
     }
 

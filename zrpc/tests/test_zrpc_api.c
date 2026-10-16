@@ -214,9 +214,9 @@ int main(void) {
     failed += test_message_view();
     failed += test_stub_and_sync();
     if (failed) {
-        printf("zrpc_api: FAIL\n");
+        printf("zri_api: FAIL\n");
         return 1;
     }
-    printf("zrpc_api: OK\n");
+    printf("zri_api: OK\n");
     return 0;
 }
