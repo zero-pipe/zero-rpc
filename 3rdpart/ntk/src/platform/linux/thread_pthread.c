@@ -1,29 +1,29 @@
-#include "ztk/thread/thread.h"
-#include "ztk/ztk_errno.h"
+#include "thread/thread.h"
+#include "ntk_errno.h"
 #include <pthread.h>
 #include <stdlib.h>
 #include <unistd.h>
 
-struct ztk_thread {
+struct ntk_thread {
     pthread_t native;
-    ztk_thread_fn fn;
+    ntk_thread_fn fn;
     void *user;
-    ztk_thread_priority_t priority;
+    ntk_thread_priority_t priority;
 };
 
 static void *thread_trampoline(void *arg)
 {
-    ztk_thread *t = (ztk_thread *)arg;
-    ztk_thread_set_current_priority(t->priority);
+    ntk_thread *t = (ntk_thread *)arg;
+    ntk_thread_set_current_priority(t->priority);
     t->fn(t->user);
     return NULL;
 }
 
-ztk_thread *ztk_thread_create_ex(ztk_thread_fn fn, void *user, ztk_thread_priority_t priority)
+ntk_thread *ntk_thread_create_ex(ntk_thread_fn fn, void *user, ntk_thread_priority_t priority)
 {
     if (!fn)
         return NULL;
-    ztk_thread *t = (ztk_thread *)calloc(1, sizeof(*t));
+    ntk_thread *t = (ntk_thread *)calloc(1, sizeof(*t));
     if (!t)
         return NULL;
     t->fn = fn;
@@ -36,27 +36,27 @@ ztk_thread *ztk_thread_create_ex(ztk_thread_fn fn, void *user, ztk_thread_priori
     return t;
 }
 
-ztk_thread *ztk_thread_create(ztk_thread_fn fn, void *user)
+ntk_thread *ntk_thread_create(ntk_thread_fn fn, void *user)
 {
-    return ztk_thread_create_ex(fn, user, ZTK_THREAD_PRIO_NORMAL);
+    return ntk_thread_create_ex(fn, user, NTK_THREAD_PRIO_NORMAL);
 }
 
-ztk_err_t ztk_thread_join(ztk_thread *t)
+ntk_err_t ntk_thread_join(ntk_thread *t)
 {
     if (!t)
-        return ZTK_ERR_INVALID;
+        return NTK_ERR_INVALID;
     void *ret = NULL;
     if (pthread_join(t->native, &ret) != 0)
-        return ZTK_ERR_PLATFORM;
-    return ZTK_OK;
+        return NTK_ERR_PLATFORM;
+    return NTK_OK;
 }
 
-void ztk_thread_destroy(ztk_thread *t)
+void ntk_thread_destroy(ntk_thread *t)
 {
     free(t);
 }
 
-unsigned int ztk_thread_hardware_concurrency(void)
+unsigned int ntk_thread_hardware_concurrency(void)
 {
     long n = sysconf(_SC_NPROCESSORS_ONLN);
     if (n < 1)

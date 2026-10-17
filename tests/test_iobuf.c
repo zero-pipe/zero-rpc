@@ -18,7 +18,7 @@ static void test_copy_peek_consume(void) {
     const char a[] = "hello";
     const char c[] = " world";
     char out[32];
-    ztk_socket_iov iov[4];
+    ntk_socket_iov iov[4];
 
     zri_iobuf_init(&b);
     CHECK(zri_iobuf_append_copy(&b, NULL, a, sizeof(a) - 1) == 0);
@@ -41,22 +41,22 @@ static void test_copy_peek_consume(void) {
 
 static void test_ref_and_borrow(void) {
     zri_iobuf_t b;
-    ztk_buf *owner;
+    ntk_buf *owner;
     const char borrowed[] = "borrowed";
     char out[32];
 
     zri_iobuf_init(&b);
-    owner = ztk_buf_alloc(16);
+    owner = ntk_buf_alloc(16);
     CHECK(owner != NULL);
     if (!owner) {
         return;
     }
-    memcpy((void *)ztk_buf_data(owner), "owned", 5);
-    ztk_buf_set_len(owner, 5);
-    CHECK(ztk_buf_refcnt(owner) == 1);
-    CHECK(zri_iobuf_append_buf(&b, owner, ztk_buf_data(owner), 5) == 0);
-    CHECK(ztk_buf_refcnt(owner) == 2);
-    ztk_buf_unref(owner);
+    memcpy((void *)ntk_buf_data(owner), "owned", 5);
+    ntk_buf_set_len(owner, 5);
+    CHECK(ntk_buf_refcnt(owner) == 1);
+    CHECK(zri_iobuf_append_buf(&b, owner, ntk_buf_data(owner), 5) == 0);
+    CHECK(ntk_buf_refcnt(owner) == 2);
+    ntk_buf_unref(owner);
     CHECK(zri_iobuf_append_borrow(&b, borrowed, sizeof(borrowed) - 1) == 0);
     memset(out, 0, sizeof(out));
     CHECK(zri_iobuf_peek(&b, 0, out, 13) == 13);
@@ -66,7 +66,7 @@ static void test_ref_and_borrow(void) {
 
 static void test_view(void) {
     zri_iobuf_t b;
-    ztk_buf *scratch = NULL;
+    ntk_buf *scratch = NULL;
     const uint8_t *view;
     const char first[] = "abc";
     const char second[] = "def";
@@ -83,7 +83,7 @@ static void test_view(void) {
     CHECK(scratch != NULL);
     CHECK(memcmp(view, "abcdef", 6) == 0);
     if (scratch) {
-        ztk_buf_unref(scratch);
+        ntk_buf_unref(scratch);
     }
     zri_iobuf_reset(&b);
 }

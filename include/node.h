@@ -5,7 +5,7 @@
  * 节点：生命周期、传输选择、线程与发现配置。
  *
  * 一个节点持有：
- *   - 一个 ztk_poller_pool（IO 线程池，不创建自有线程）；
+ *   - 一个 ntk_poller_pool（IO 线程池，不创建自有线程）；
  *   - 一个或多个 binding；未显式配置 bindings 时使用 transport 配置创建一个 binding；
  *   - 可选的服务发现（MESH）与路由表。
  */

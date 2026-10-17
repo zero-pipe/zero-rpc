@@ -11,13 +11,13 @@
 #include <string.h>
 
 uint64_t zri_now_ms(void) {
-    return ztk_monotonic_ms();
+    return ntk_monotonic_ms();
 }
 
 static uint32_t zri_rand(void) {
     static uint32_t st;
     if (st == 0) {
-        st = (uint32_t)ztk_monotonic_ms() ^ 0x9e3779b9u;
+        st = (uint32_t)ntk_monotonic_ms() ^ 0x9e3779b9u;
     }
     st ^= st << 13;
     st ^= st >> 17;
@@ -48,7 +48,7 @@ static void node_timer_cb(void *user) {
 
 int node_create(const node_config_t *cfg, node_t **out) {
     node_t *node;
-    ztk_poller_pool_opts_t popts;
+    ntk_poller_pool_opts_t popts;
     static int platform_inited = 0;
 
     if (!cfg || !out) {
@@ -69,7 +69,7 @@ int node_create(const node_config_t *cfg, node_t **out) {
     zri_copy_str(node->discovery_host, sizeof(node->discovery_host), cfg->discovery_host,
                   "255.255.255.255");
     node->discovery_port = cfg->discovery_port ? cfg->discovery_port : DISCOVERY_PORT;
-    node->io_threads = cfg->io_threads ? cfg->io_threads : ztk_thread_hardware_concurrency();
+    node->io_threads = cfg->io_threads ? cfg->io_threads : ntk_thread_hardware_concurrency();
     if (node->io_threads > IO_MAX) {
         node->io_threads = IO_MAX;
     }
@@ -116,37 +116,37 @@ int node_create(const node_config_t *cfg, node_t **out) {
     zri_route_init(&node->routes);
     zri_registry_init(&node->registry);
     node->registry_backend = (cfg->mode == MODE_MESH) ? zri_registry_backend_mesh() : NULL;
-    node->id_lock = ztk_mutex_create(ZTK_MUTEX_NORMAL);
+    node->id_lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
     if (!node->id_lock) {
         node_destroy(node);
         return ERR_NOMEM;
     }
 
     if (!platform_inited) {
-        ztk_platform_init();
+        ntk_platform_init();
         platform_inited = 1;
     }
 
     memset(&popts, 0, sizeof(popts));
     popts.size = node->io_threads;
-    popts.thread_priority = ZTK_THREAD_PRIO_NORMAL;
-    node->pool = ztk_poller_pool_create(&popts);
-    if (!node->pool || ztk_poller_pool_start(node->pool) != ZTK_OK) {
+    popts.thread_priority = NTK_THREAD_PRIO_NORMAL;
+    node->pool = ntk_poller_pool_create(&popts);
+    if (!node->pool || ntk_poller_pool_start(node->pool) != NTK_OK) {
         node_destroy(node);
         return ERR_IO;
     }
-    node->poller = ztk_poller_pool_at(node->pool, 0);
+    node->poller = ntk_poller_pool_at(node->pool, 0);
 
     /*
      * 挂载 per-poller 缓冲池，先把底层能力接上，热路径再逐步迁移到
-     * ztk_buf_alloc_local / ztk_buf_pool_acquire。每档设上限，避免无界增长。
+     * ntk_buf_alloc_local / ntk_buf_pool_acquire。每档设上限，避免无界增长。
      */
     {
-        ztk_buf_pool_opts bopts;
+        ntk_buf_pool_opts bopts;
         memset(&bopts, 0, sizeof(bopts));
         bopts.max_per_bucket = BUF_POOL_MAX_PER_BUCKET;
         bopts.thread_safe = 0; /* poller 本地，热路径无锁 */
-        if (ztk_poller_pool_attach_buf_pools(node->pool, &bopts) != ZTK_OK) {
+        if (ntk_poller_pool_attach_buf_pools(node->pool, &bopts) != NTK_OK) {
             node_destroy(node);
             return ERR_NOMEM;
         }
@@ -182,10 +182,10 @@ int node_create(const node_config_t *cfg, node_t **out) {
             return ERR_IO;
         }
         node->hello_timer =
-            ztk_timer_start(node->poller, node->hello_interval_ms, 1, hello_timer_cb, node);
+            ntk_timer_start(node->poller, node->hello_interval_ms, 1, hello_timer_cb, node);
     }
     node->node_timer =
-        ztk_timer_start(node->poller, zri_tick_interval_ms(), 1, node_timer_cb, node);
+        ntk_timer_start(node->poller, zri_tick_interval_ms(), 1, node_timer_cb, node);
     node->started = 1;
 
     if (node->mode == MODE_MESH) {
@@ -208,14 +208,14 @@ void node_destroy(node_t *node) {
     }
     /* Quiesce poller callbacks before destroying sockets or transport state. */
     if (node->pool) {
-        ztk_poller_pool_stop(node->pool);
+        ntk_poller_pool_stop(node->pool);
     }
     if (node->hello_timer) {
-        ztk_timer_stop(node->hello_timer);
+        ntk_timer_stop(node->hello_timer);
         node->hello_timer = NULL;
     }
     if (node->node_timer) {
-        ztk_timer_stop(node->node_timer);
+        ntk_timer_stop(node->node_timer);
         node->node_timer = NULL;
     }
     {
@@ -249,7 +249,7 @@ void node_destroy(node_t *node) {
         node->transport_count = 0;
     }
     if (node->pool) {
-        ztk_poller_pool_destroy(node->pool);
+        ntk_poller_pool_destroy(node->pool);
         node->pool = NULL;
     }
     {
@@ -280,7 +280,7 @@ void node_destroy(node_t *node) {
         node->codecs = NULL;
     }
     if (node->id_lock) {
-        ztk_mutex_destroy(node->id_lock);
+        ntk_mutex_destroy(node->id_lock);
     }
     {
         int i;
@@ -442,7 +442,7 @@ int node_wait_for_service(node_t *node, const char *service, uint64_t timeout_ms
         if (zri_now_ms() >= deadline) {
             return ERR_TIMEOUT;
         }
-        ztk_sleep_ms(10);
+        ntk_sleep_ms(10);
     }
 }
 
@@ -471,7 +471,7 @@ int node_post(node_t *node, void (*fn)(void *user), void *user) {
     memset(t, 0, sizeof(*t));
     t->fn = fn;
     t->user = user;
-    if (ztk_poller_async(node->poller, post_trampoline, t, 1) != ZTK_OK) {
+    if (ntk_poller_async(node->poller, post_trampoline, t, 1) != NTK_OK) {
         zri_mem_free(t);
         return ERR_IO;
     }
@@ -497,7 +497,7 @@ int node_post_delay(node_t *node, uint64_t delay_ms, void (*fn)(void *user), voi
     memset(t, 0, sizeof(*t));
     t->fn = fn;
     t->user = user;
-    if (ztk_poller_do_delay(node->poller, delay_ms, post_delay_cb, t) == NULL) {
+    if (ntk_poller_do_delay(node->poller, delay_ms, post_delay_cb, t) == NULL) {
         zri_mem_free(t);
         return ERR_IO;
     }
@@ -529,7 +529,7 @@ int node_spin_once(node_t *node, uint64_t timeout_ms) {
         if (timeout_ms && zri_now_ms() >= deadline) {
             return ERR_TIMEOUT;
         }
-        ztk_sleep_ms(20);
+        ntk_sleep_ms(20);
     }
     return OK;
 }

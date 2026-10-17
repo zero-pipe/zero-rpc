@@ -1,9 +1,9 @@
-#ifndef ZTK_SSL_CTX_INTERNAL_H
-#define ZTK_SSL_CTX_INTERNAL_H
+#ifndef NTK_SSL_CTX_INTERNAL_H
+#define NTK_SSL_CTX_INTERNAL_H
 
 #include <openssl/ssl.h>
 
-struct ztk_ssl_ctx {
+struct ntk_ssl_ctx {
     SSL_CTX *ctx;
 };
 

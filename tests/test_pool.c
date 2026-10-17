@@ -7,7 +7,7 @@
 #include <string.h>
 
 static int g_fail;
-static ztk_sem *g_sem;
+static ntk_sem *g_sem;
 static int g_task_ok;
 static void *g_remote_obj;
 
@@ -22,8 +22,8 @@ static void *g_remote_obj;
 /* 在 poller 线程内验证：当前 poller 正确，且池释放后可复用同一块。 */
 static void pool_probe(void *user) {
     node_t *node = (node_t *)user;
-    ztk_poller *cur = ztk_poller_current();
-    ztk_buf_pool *pool;
+    ntk_poller *cur = ntk_poller_current();
+    ntk_buf_pool *pool;
     void *a;
     void *b;
     size_t cap_a = 0;
@@ -33,21 +33,21 @@ static void pool_probe(void *user) {
     if (cur != zri_node_poller(node)) {
         goto done;
     }
-    pool = ztk_poller_buf_pool(cur);
+    pool = ntk_poller_buf_pool(cur);
     if (!pool) {
         goto done;
     }
-    a = ztk_buf_pool_acquire(pool, 128, &cap_a);
+    a = ntk_buf_pool_acquire(pool, 128, &cap_a);
     if (!a) {
         goto done;
     }
-    ztk_buf_pool_release(pool, a, cap_a);
-    b = ztk_buf_pool_acquire(pool, 128, &cap_b);
+    ntk_buf_pool_release(pool, a, cap_a);
+    b = ntk_buf_pool_acquire(pool, 128, &cap_b);
     if (b != a) {
-        ztk_buf_pool_release(pool, b, cap_b);
+        ntk_buf_pool_release(pool, b, cap_b);
         goto done;
     }
-    ztk_buf_pool_release(pool, b, cap_b);
+    ntk_buf_pool_release(pool, b, cap_b);
 
     /* zri_mem：owner 线程内释放应复用同一块。 */
     {
@@ -71,7 +71,7 @@ static void pool_probe(void *user) {
     }
     g_task_ok = 1;
 done:
-    ztk_sem_post(g_sem, 1);
+    ntk_sem_post(g_sem, 1);
 }
 
 int main(void) {
@@ -88,29 +88,29 @@ int main(void) {
     cfg.io_threads = 2;
 
     /* 主线程未绑定 poller。 */
-    CHECK(ztk_poller_current() == NULL);
+    CHECK(ntk_poller_current() == NULL);
 
     if (node_create(&cfg, &node) != OK) {
         printf("node create failed\n");
         return 1;
     }
 
-    n = ztk_poller_pool_size(zri_node_pool(node));
+    n = ntk_poller_pool_size(zri_node_pool(node));
     CHECK(n >= 1);
     for (i = 0; i < n; i++) {
-        ztk_poller *p = ztk_poller_pool_at(zri_node_pool(node), i);
+        ntk_poller *p = ntk_poller_pool_at(zri_node_pool(node), i);
         CHECK(p != NULL);
-        CHECK(ztk_poller_buf_pool(p) != NULL);
+        CHECK(ntk_poller_buf_pool(p) != NULL);
     }
 
     /* 在 owner poller 线程内验证 current + 复用。 */
-    g_sem = ztk_sem_create(0);
+    g_sem = ntk_sem_create(0);
     CHECK(g_sem != NULL);
     if (g_sem) {
-        CHECK(ztk_poller_async(zri_node_poller(node), pool_probe, node, 0) == ZTK_OK);
-        CHECK(ztk_sem_timedwait(g_sem, 2000) == ZTK_OK);
+        CHECK(ntk_poller_async(zri_node_poller(node), pool_probe, node, 0) == NTK_OK);
+        CHECK(ntk_sem_timedwait(g_sem, 2000) == NTK_OK);
         CHECK(g_task_ok == 1);
-        ztk_sem_destroy(g_sem);
+        ntk_sem_destroy(g_sem);
         g_sem = NULL;
     }
 

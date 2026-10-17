@@ -125,7 +125,7 @@ static void stub_call_now(stub_t *stub, uint64_t id, const char *service, const 
         if (retry) {
             retry->node = node;
             retry->id = id;
-            if (ztk_poller_do_delay(node->poller, 1, stub_resend_task_fn, retry) != NULL) {
+            if (ntk_poller_do_delay(node->poller, 1, stub_resend_task_fn, retry) != NULL) {
                 return;
             }
             free(retry);
@@ -159,9 +159,9 @@ static void stub_call_task_fn(void *user) {
 
 static uint64_t stub_next_id(node_t *node) {
     uint64_t id;
-    ztk_mutex_lock(node->id_lock);
+    ntk_mutex_lock(node->id_lock);
     id = (uint64_t)(uint32_t)(node->next_request_id++);
-    ztk_mutex_unlock(node->id_lock);
+    ntk_mutex_unlock(node->id_lock);
     return id ? id : 1;
 }
 
@@ -202,7 +202,7 @@ static zri_stub_task_t *stub_task_create(stub_t *stub, uint64_t id, const char *
 
 /* 跨线程投递；失败时释放任务并返回错误码。 */
 static int stub_task_submit(stub_t *stub, zri_stub_task_t *task) {
-    if (ztk_poller_async(stub->node->poller, stub_call_task_fn, task, 1) != ZTK_OK) {
+    if (ntk_poller_async(stub->node->poller, stub_call_task_fn, task, 1) != NTK_OK) {
         stub_task_free(task);
         return ERR_IO;
     }
@@ -274,7 +274,7 @@ int stub_call(stub_t *stub, const char *service, const char *method,
         return rc;
     }
     id = stub_next_id(stub->node);
-    if (ztk_poller_is_current_thread(stub->node->poller)) {
+    if (ntk_poller_is_current_thread(stub->node->poller)) {
         stub_event_now(stub, id, service, method, data, len, encoding);
         if (out_request_id) {
             *out_request_id = id;
@@ -322,7 +322,7 @@ int zri_stub_call_ex(stub_t *stub, const char *service, const char *method,
     }
     id = stub_next_id(stub->node);
 
-    if (ztk_poller_is_current_thread(stub->node->poller)) {
+    if (ntk_poller_is_current_thread(stub->node->poller)) {
         stub_call_now(stub, id, service, method, data, len, encoding, cb, chunk_cb, done_cb,
                       streaming, user, timeout_ms);
         if (out_request_id) {

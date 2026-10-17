@@ -6,7 +6,7 @@
  * load generator conventions apply. Not a shipped example.
  */
 #include <server.h>
-#include <ztk/platform.h>
+#include <platform.h>
 
 #include <signal.h>
 #include <stdio.h>
@@ -34,7 +34,7 @@ static void order_get(call_t *call, const request_t *req, void *user) {
 
     /* Fault-injection hook for timeout tests: stall the handler before replying. */
     if (options && options->delay_ms) {
-        ztk_sleep_ms((unsigned)options->delay_ms);
+        ntk_sleep_ms((unsigned)options->delay_ms);
     }
     if (options && options->echo_request) {
         reply(call, 0, &req->payload);
@@ -183,7 +183,7 @@ int main(int argc, char **argv) {
     fflush(stdout);
 
     while (!g_stop) {
-        ztk_sleep_ms(100);
+        ntk_sleep_ms(100);
     }
 
 done:

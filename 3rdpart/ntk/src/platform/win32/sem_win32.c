@@ -1,14 +1,14 @@
-#include "ztk/thread/sem.h"
+#include "thread/sem.h"
 #include <stdlib.h>
 #include <windows.h>
 
-struct ztk_sem {
+struct ntk_sem {
     HANDLE h;
 };
 
-ztk_sem *ztk_sem_create(unsigned int initial)
+ntk_sem *ntk_sem_create(unsigned int initial)
 {
-    ztk_sem *s = (ztk_sem *)calloc(1, sizeof(*s));
+    ntk_sem *s = (ntk_sem *)calloc(1, sizeof(*s));
     if (!s)
         return NULL;
     s->h = CreateSemaphoreA(NULL, (LONG)initial, 0x7fffffff, NULL);
@@ -19,7 +19,7 @@ ztk_sem *ztk_sem_create(unsigned int initial)
     return s;
 }
 
-void ztk_sem_destroy(ztk_sem *s)
+void ntk_sem_destroy(ntk_sem *s)
 {
     if (!s)
         return;
@@ -28,28 +28,28 @@ void ztk_sem_destroy(ztk_sem *s)
     free(s);
 }
 
-ztk_err_t ztk_sem_wait(ztk_sem *s)
+ntk_err_t ntk_sem_wait(ntk_sem *s)
 {
     if (!s)
-        return ZTK_ERR_INVALID;
-    return WaitForSingleObject(s->h, INFINITE) == WAIT_OBJECT_0 ? ZTK_OK : ZTK_ERR_PLATFORM;
+        return NTK_ERR_INVALID;
+    return WaitForSingleObject(s->h, INFINITE) == WAIT_OBJECT_0 ? NTK_OK : NTK_ERR_PLATFORM;
 }
 
-ztk_err_t ztk_sem_timedwait(ztk_sem *s, unsigned int timeout_ms)
+ntk_err_t ntk_sem_timedwait(ntk_sem *s, unsigned int timeout_ms)
 {
     if (!s)
-        return ZTK_ERR_INVALID;
+        return NTK_ERR_INVALID;
     DWORD r = WaitForSingleObject(s->h, timeout_ms);
     if (r == WAIT_OBJECT_0)
-        return ZTK_OK;
+        return NTK_OK;
     if (r == WAIT_TIMEOUT)
-        return ZTK_ERR_TIMEOUT;
-    return ZTK_ERR_PLATFORM;
+        return NTK_ERR_TIMEOUT;
+    return NTK_ERR_PLATFORM;
 }
 
-ztk_err_t ztk_sem_post(ztk_sem *s, unsigned int count)
+ntk_err_t ntk_sem_post(ntk_sem *s, unsigned int count)
 {
     if (!s || !count)
-        return ZTK_ERR_INVALID;
-    return ReleaseSemaphore(s->h, (LONG)count, NULL) ? ZTK_OK : ZTK_ERR_PLATFORM;
+        return NTK_ERR_INVALID;
+    return ReleaseSemaphore(s->h, (LONG)count, NULL) ? NTK_OK : NTK_ERR_PLATFORM;
 }

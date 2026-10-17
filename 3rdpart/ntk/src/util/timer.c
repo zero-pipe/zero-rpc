@@ -1,5 +1,5 @@
-#include "ztk/util/timer.h"
-#include "ztk/poller/poller.h"
+#include "util/timer.h"
+#include "poller/poller.h"
 #include <stdlib.h>
 
 #if defined(_WIN32)
@@ -8,29 +8,29 @@
 #  include <sys/time.h>
 #endif
 
-struct ztk_timer {
-    ztk_poller *poller;
-    ztk_poller_timer *handle;
+struct ntk_timer {
+    ntk_poller *poller;
+    ntk_poller_timer *handle;
     uint64_t interval_ms;
     int repeat;
-    ztk_timer_cb cb;
+    ntk_timer_cb cb;
     void *user;
 };
 
 static uint64_t timer_bridge(void *user)
 {
-    ztk_timer *t = (ztk_timer *)user;
+    ntk_timer *t = (ntk_timer *)user;
     if (t->cb)
         t->cb(t->user);
     return t->repeat ? t->interval_ms : 0;
 }
 
-ztk_timer *ztk_timer_start(ztk_poller *p, uint64_t interval_ms, int repeat, ztk_timer_cb cb, void *user)
+ntk_timer *ntk_timer_start(ntk_poller *p, uint64_t interval_ms, int repeat, ntk_timer_cb cb, void *user)
 {
     if (!p || !cb || interval_ms == 0)
         return NULL;
 
-    ztk_timer *t = (ztk_timer *)calloc(1, sizeof(*t));
+    ntk_timer *t = (ntk_timer *)calloc(1, sizeof(*t));
     if (!t)
         return NULL;
     t->poller = p;
@@ -39,7 +39,7 @@ ztk_timer *ztk_timer_start(ztk_poller *p, uint64_t interval_ms, int repeat, ztk_
     t->cb = cb;
     t->user = user;
 
-    t->handle = ztk_poller_do_delay(p, interval_ms, timer_bridge, t);
+    t->handle = ntk_poller_do_delay(p, interval_ms, timer_bridge, t);
     if (!t->handle) {
         free(t);
         return NULL;
@@ -47,16 +47,16 @@ ztk_timer *ztk_timer_start(ztk_poller *p, uint64_t interval_ms, int repeat, ztk_
     return t;
 }
 
-void ztk_timer_stop(ztk_timer *t)
+void ntk_timer_stop(ntk_timer *t)
 {
     if (!t)
         return;
     if (t->handle)
-        ztk_poller_timer_cancel(t->handle);
+        ntk_poller_timer_cancel(t->handle);
     free(t);
 }
 
-uint64_t ztk_wall_ms(void)
+uint64_t ntk_wall_ms(void)
 {
 #if defined(_WIN32)
     FILETIME ft;

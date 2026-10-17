@@ -86,7 +86,7 @@ static void disc_send_to(node_t *node, const char *ip, uint16_t port, const uint
                          size_t len) {
     zri_discovery_state_t *st = zri_node_discovery(node);
     if (st && st->sock && ip && port) {
-        (void)ztk_socket_sendto(st->sock, buf, len, ip, port);
+        (void)ntk_socket_sendto(st->sock, buf, len, ip, port);
     }
 }
 
@@ -288,7 +288,7 @@ static void disc_handle_frame(node_t *node, const char *ip, const uint8_t *buf, 
     }
 }
 
-static void disc_recv_cb(ztk_socket *sock, void *user) {
+static void disc_recv_cb(ntk_socket *sock, void *user) {
     node_t *node = (node_t *)user;
     zri_discovery_state_t *st = zri_node_discovery(node);
     uint8_t buf[DISC_FRAME_MAX];
@@ -299,7 +299,7 @@ static void disc_recv_cb(ztk_socket *sock, void *user) {
     for (;;) {
         char ip[ENDPOINT_MAX];
         uint16_t port = 0;
-        ztk_ssize_t n = ztk_socket_recvfrom(st->sock, buf, sizeof(buf), ip, sizeof(ip), &port);
+        ntk_ssize_t n = ntk_socket_recvfrom(st->sock, buf, sizeof(buf), ip, sizeof(ip), &port);
         if (n <= 0) {
             break;
         }
@@ -309,7 +309,7 @@ static void disc_recv_cb(ztk_socket *sock, void *user) {
 
 int zri_discovery_init(node_t *node) {
     zri_discovery_state_t *st = zri_node_discovery(node);
-    ztk_socket_callbacks_t cbs;
+    ntk_socket_callbacks_t cbs;
     uint16_t actual = 0;
 #if defined(_WIN32)
     const int reuse_port = 0;
@@ -320,21 +320,21 @@ int zri_discovery_init(node_t *node) {
     if (!st) {
         return ERR_INVALID;
     }
-    st->sock = ztk_socket_create();
+    st->sock = ntk_socket_create();
     if (!st->sock) {
         return ERR_NOMEM;
     }
-    if (ztk_socket_bind_udp_ex(st->sock, "0.0.0.0", node_discovery_port(node), 1, reuse_port) !=
-        ZTK_OK) {
+    if (ntk_socket_bind_udp_ex(st->sock, "0.0.0.0", node_discovery_port(node), 1, reuse_port) !=
+        NTK_OK) {
         return ERR_IO;
     }
-    (void)ztk_socket_set_broadcast(st->sock, 1);
-    if (ztk_socket_get_local(st->sock, NULL, 0, &actual) == ZTK_OK) {
+    (void)ntk_socket_set_broadcast(st->sock, 1);
+    if (ntk_socket_get_local(st->sock, NULL, 0, &actual) == NTK_OK) {
         zri_node_set_discovery_port(node, actual);
     }
     memset(&cbs, 0, sizeof(cbs));
     cbs.on_readable = disc_recv_cb;
-    if (ztk_socket_attach_poller(st->sock, zri_node_poller(node), &cbs, node) != ZTK_OK) {
+    if (ntk_socket_attach_poller(st->sock, zri_node_poller(node), &cbs, node) != NTK_OK) {
         return ERR_IO;
     }
     return OK;
@@ -343,8 +343,8 @@ int zri_discovery_init(node_t *node) {
 void zri_discovery_shutdown(node_t *node) {
     zri_discovery_state_t *st = zri_node_discovery(node);
     if (st && st->sock) {
-        ztk_socket_detach_poller(st->sock);
-        ztk_socket_destroy(st->sock);
+        ntk_socket_detach_poller(st->sock);
+        ntk_socket_destroy(st->sock);
         st->sock = NULL;
     }
 }

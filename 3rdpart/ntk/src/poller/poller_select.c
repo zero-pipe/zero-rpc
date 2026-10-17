@@ -1,41 +1,41 @@
 #include "poller_internal.h"
-#include "ztk/poller/poller.h"
-#include "ztk/ztk_errno.h"
+#include "poller/poller.h"
+#include "ntk_errno.h"
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
 
 #ifdef _WIN32
 #  include <winsock2.h>
-#  define ZTK_SELECT_CLOSE(fd)           closesocket((SOCKET)(fd))
-#  define ZTK_SELECT_READ(fd, buf, len)  recv((SOCKET)(fd), (buf), (int)(len), 0)
-#  define ZTK_SELECT_WRITE(fd, buf, len) send((SOCKET)(fd), (buf), (int)(len), 0)
-#  define ZTK_SELECT_WOULDBLOCK(e)       ((e) == WSAEWOULDBLOCK)
-#  define ZTK_SELECT_INTR(e)             ((e) == WSAEINTR)
+#  define NTK_SELECT_CLOSE(fd)           closesocket((SOCKET)(fd))
+#  define NTK_SELECT_READ(fd, buf, len)  recv((SOCKET)(fd), (buf), (int)(len), 0)
+#  define NTK_SELECT_WRITE(fd, buf, len) send((SOCKET)(fd), (buf), (int)(len), 0)
+#  define NTK_SELECT_WOULDBLOCK(e)       ((e) == WSAEWOULDBLOCK)
+#  define NTK_SELECT_INTR(e)             ((e) == WSAEINTR)
 static int select_last_err(void) { return WSAGetLastError(); }
 #else
 #  include <unistd.h>
 #  include <fcntl.h>
 #  include <sys/select.h>
-#  define ZTK_SELECT_CLOSE(fd)           close(fd)
-#  define ZTK_SELECT_READ(fd, buf, len)  read((fd), (buf), (len))
-#  define ZTK_SELECT_WRITE(fd, buf, len) write((fd), (buf), (len))
-#  define ZTK_SELECT_WOULDBLOCK(e)       ((e) == EAGAIN || (e) == EWOULDBLOCK)
-#  define ZTK_SELECT_INTR(e)             ((e) == EINTR)
+#  define NTK_SELECT_CLOSE(fd)           close(fd)
+#  define NTK_SELECT_READ(fd, buf, len)  read((fd), (buf), (len))
+#  define NTK_SELECT_WRITE(fd, buf, len) write((fd), (buf), (len))
+#  define NTK_SELECT_WOULDBLOCK(e)       ((e) == EAGAIN || (e) == EWOULDBLOCK)
+#  define NTK_SELECT_INTR(e)             ((e) == EINTR)
 static int select_last_err(void) { return errno; }
 #endif
 
-struct ztk_fd_entry {
+struct ntk_fd_entry {
     int fd;
     unsigned events;
-    ztk_poller_cb cb;
+    ntk_poller_cb cb;
     void *user;
-    struct ztk_fd_entry *next;
+    struct ntk_fd_entry *next;
 };
 
-static ztk_fd_entry *find_entry(ztk_poller *p, int fd)
+static ntk_fd_entry *find_entry(ntk_poller *p, int fd)
 {
-    for (ztk_fd_entry *e = p->entries; e; e = e->next) {
+    for (ntk_fd_entry *e = p->entries; e; e = e->next) {
         if (e->fd == fd)
             return e;
     }
@@ -88,7 +88,7 @@ static int make_wake_pair(int fds[2])
 #else
 static int make_wake_pair(int fds[2])
 {
-#ifdef ZTK_HAVE_PIPE2
+#ifdef NTK_HAVE_PIPE2
     if (pipe2(fds, O_CLOEXEC | O_NONBLOCK) == 0)
         return 0;
 #endif
@@ -102,24 +102,24 @@ static int make_wake_pair(int fds[2])
 }
 #endif
 
-static void drain_wake(ztk_poller *p)
+static void drain_wake(ntk_poller *p)
 {
     char buf[256];
-    while (ZTK_SELECT_READ(p->wake_r, buf, sizeof(buf)) > 0) {}
+    while (NTK_SELECT_READ(p->wake_r, buf, sizeof(buf)) > 0) {}
 }
 
 /* --- public API ---------------------------------------------------------- */
 
-ztk_poller *ztk_poller_create(void)
+ntk_poller *ntk_poller_create(void)
 {
-    ztk_poller *p = (ztk_poller *)calloc(1, sizeof(*p));
+    ntk_poller *p = (ntk_poller *)calloc(1, sizeof(*p));
     if (!p)
         return NULL;
 
     p->epfd   = -1;
     p->wake_r = -1;
     p->wake_w = -1;
-    ztk_poller_task_init(p);
+    ntk_poller_task_init(p);
 
     int pipes[2];
     if (make_wake_pair(pipes) != 0)
@@ -127,92 +127,92 @@ ztk_poller *ztk_poller_create(void)
     p->wake_r = pipes[0];
     p->wake_w = pipes[1];
 
-    ztk_fd_entry *we = (ztk_fd_entry *)calloc(1, sizeof(*we));
+    ntk_fd_entry *we = (ntk_fd_entry *)calloc(1, sizeof(*we));
     if (!we)
         goto fail;
     we->fd     = p->wake_r;
-    we->events = ZTK_POLL_IN;
+    we->events = NTK_POLL_IN;
     we->next   = p->entries;
     p->entries = we;
 
     return p;
 
 fail:
-    ztk_poller_destroy(p);
+    ntk_poller_destroy(p);
     return NULL;
 }
 
-void ztk_poller_destroy(ztk_poller *p)
+void ntk_poller_destroy(ntk_poller *p)
 {
     if (!p)
         return;
-    ztk_poller_task_fini(p);
+    ntk_poller_task_fini(p);
     while (p->entries) {
-        ztk_fd_entry *n = p->entries->next;
+        ntk_fd_entry *n = p->entries->next;
         free(p->entries);
         p->entries = n;
     }
-    if (p->wake_w >= 0) ZTK_SELECT_CLOSE(p->wake_w);
-    if (p->wake_r >= 0) ZTK_SELECT_CLOSE(p->wake_r);
+    if (p->wake_w >= 0) NTK_SELECT_CLOSE(p->wake_w);
+    if (p->wake_r >= 0) NTK_SELECT_CLOSE(p->wake_r);
     free(p);
 }
 
-ztk_err_t ztk_poller_add(ztk_poller *p, int fd, unsigned events, ztk_poller_cb cb, void *user)
+ntk_err_t ntk_poller_add(ntk_poller *p, int fd, unsigned events, ntk_poller_cb cb, void *user)
 {
     if (!p || fd < 0)
-        return ZTK_ERR_INVALID;
+        return NTK_ERR_INVALID;
 
-    ztk_fd_entry *e = find_entry(p, fd);
+    ntk_fd_entry *e = find_entry(p, fd);
     if (e) {
         e->events = events;
         e->cb     = cb;
         e->user   = user;
-        return ZTK_OK;
+        return NTK_OK;
     }
 
-    e = (ztk_fd_entry *)calloc(1, sizeof(*e));
+    e = (ntk_fd_entry *)calloc(1, sizeof(*e));
     if (!e)
-        return ZTK_ERR_NOMEM;
+        return NTK_ERR_NOMEM;
     e->fd     = fd;
     e->events = events;
     e->cb     = cb;
     e->user   = user;
     e->next   = p->entries;
     p->entries = e;
-    return ZTK_OK;
+    return NTK_OK;
 }
 
-ztk_err_t ztk_poller_mod(ztk_poller *p, int fd, unsigned events)
+ntk_err_t ntk_poller_mod(ntk_poller *p, int fd, unsigned events)
 {
     if (!p)
-        return ZTK_ERR_INVALID;
-    ztk_fd_entry *e = find_entry(p, fd);
+        return NTK_ERR_INVALID;
+    ntk_fd_entry *e = find_entry(p, fd);
     if (!e)
-        return ZTK_ERR_INVALID;
+        return NTK_ERR_INVALID;
     e->events = events;
-    return ZTK_OK;
+    return NTK_OK;
 }
 
-ztk_err_t ztk_poller_del(ztk_poller *p, int fd)
+ntk_err_t ntk_poller_del(ntk_poller *p, int fd)
 {
     if (!p)
-        return ZTK_ERR_INVALID;
+        return NTK_ERR_INVALID;
     if (fd == p->wake_r)
-        return ZTK_ERR_INVALID;
+        return NTK_ERR_INVALID;
 
-    ztk_fd_entry **prev = &p->entries;
-    for (ztk_fd_entry *e = p->entries; e; e = e->next) {
+    ntk_fd_entry **prev = &p->entries;
+    for (ntk_fd_entry *e = p->entries; e; e = e->next) {
         if (e->fd == fd) {
             *prev = e->next;
             free(e);
-            return ZTK_OK;
+            return NTK_OK;
         }
         prev = &e->next;
     }
-    return ZTK_ERR_INVALID;
+    return NTK_ERR_INVALID;
 }
 
-int ztk_poller_poll(ztk_poller *p, int timeout_ms)
+int ntk_poller_poll(ntk_poller *p, int timeout_ms)
 {
     if (!p)
         return -1;
@@ -223,7 +223,7 @@ int ztk_poller_poll(ztk_poller *p, int timeout_ms)
     FD_ZERO(&efds);
 
     int maxfd = -1;
-    for (ztk_fd_entry *e = p->entries; e; e = e->next) {
+    for (ntk_fd_entry *e = p->entries; e; e = e->next) {
         if (e->fd < 0)
             continue;
 #ifdef _WIN32
@@ -234,15 +234,15 @@ int ztk_poller_poll(ztk_poller *p, int timeout_ms)
         if (e->fd > maxfd)
             maxfd = e->fd;
 #endif
-        if (e->events & (ZTK_POLL_IN | ZTK_POLL_HUP))
+        if (e->events & (NTK_POLL_IN | NTK_POLL_HUP))
             FD_SET((unsigned)e->fd, &rfds);
-        if (e->events & ZTK_POLL_OUT)
+        if (e->events & NTK_POLL_OUT)
             FD_SET((unsigned)e->fd, &wfds);
-        if (e->events & ZTK_POLL_ERR)
+        if (e->events & NTK_POLL_ERR)
             FD_SET((unsigned)e->fd, &efds);
     }
 
-    int wait_ms = ztk_poller_resolve_timeout_ms(p, timeout_ms);
+    int wait_ms = ntk_poller_resolve_timeout_ms(p, timeout_ms);
     struct timeval tv;
     struct timeval *tvp = NULL;
     if (wait_ms >= 0) {
@@ -251,38 +251,38 @@ int ztk_poller_poll(ztk_poller *p, int timeout_ms)
         tvp = &tv;
     }
 
-    ztk_poller_load_on_sleep(p);
+    ntk_poller_load_on_sleep(p);
 #ifdef _WIN32
     int n = select(0, &rfds, &wfds, &efds, tvp);
 #else
     int n = select(maxfd + 1, &rfds, &wfds, &efds, tvp);
 #endif
-    ztk_poller_load_on_wake(p);
+    ntk_poller_load_on_wake(p);
 
     if (n < 0) {
         int e = select_last_err();
-        if (ZTK_SELECT_WOULDBLOCK(e) || ZTK_SELECT_INTR(e))
+        if (NTK_SELECT_WOULDBLOCK(e) || NTK_SELECT_INTR(e))
             return 0;
         return -1;
     }
     if (n == 0) {
         if (p->task_mtx) {
             int pending = 0;
-            ztk_mutex_lock(p->task_mtx);
+            ntk_mutex_lock(p->task_mtx);
             pending = p->task_head != NULL;
-            ztk_mutex_unlock(p->task_mtx);
+            ntk_mutex_unlock(p->task_mtx);
             if (pending)
-                ztk_poller_drain_tasks(p);
+                ntk_poller_drain_tasks(p);
         }
         return 0;
     }
 
     /* 先收集就绪事件，再触发回调，防止回调里 add/del 破坏链表遍历 */
-    typedef struct { int fd; unsigned out; ztk_poller_cb cb; void *user; } ready_ev;
+    typedef struct { int fd; unsigned out; ntk_poller_cb cb; void *user; } ready_ev;
     ready_ev ready[64];
     int fired = 0;
 
-    for (ztk_fd_entry *e = p->entries; e; e = e->next) {
+    for (ntk_fd_entry *e = p->entries; e; e = e->next) {
         if (e->fd < 0)
             continue;
 #ifndef _WIN32
@@ -291,14 +291,14 @@ int ztk_poller_poll(ztk_poller *p, int timeout_ms)
 #endif
         if (e->fd == p->wake_r && FD_ISSET((unsigned)e->fd, &rfds)) {
             drain_wake(p);
-            ztk_poller_drain_tasks(p);
+            ntk_poller_drain_tasks(p);
             continue;
         }
 
         unsigned out = 0;
-        if (FD_ISSET((unsigned)e->fd, &rfds)) out |= ZTK_POLL_IN;
-        if (FD_ISSET((unsigned)e->fd, &wfds)) out |= ZTK_POLL_OUT;
-        if (FD_ISSET((unsigned)e->fd, &efds)) out |= ZTK_POLL_ERR;
+        if (FD_ISSET((unsigned)e->fd, &rfds)) out |= NTK_POLL_IN;
+        if (FD_ISSET((unsigned)e->fd, &wfds)) out |= NTK_POLL_OUT;
+        if (FD_ISSET((unsigned)e->fd, &efds)) out |= NTK_POLL_ERR;
         if (!out || !e->cb)
             continue;
 
@@ -319,25 +319,25 @@ int ztk_poller_poll(ztk_poller *p, int timeout_ms)
     return fired;
 }
 
-int ztk_poller_wake_read_fd(ztk_poller *p)
+int ntk_poller_wake_read_fd(ntk_poller *p)
 {
     return p ? p->wake_r : -1;
 }
 
-int ztk_poller_wake_write_fd(ztk_poller *p)
+int ntk_poller_wake_write_fd(ntk_poller *p)
 {
     return p ? p->wake_w : -1;
 }
 
-ztk_err_t ztk_poller_wake(ztk_poller *p)
+ntk_err_t ntk_poller_wake(ntk_poller *p)
 {
     if (!p || p->wake_w < 0)
-        return ZTK_ERR_INVALID;
+        return NTK_ERR_INVALID;
     char c = 1;
-    if (ZTK_SELECT_WRITE(p->wake_w, &c, 1) < 0) {
-        if (ZTK_SELECT_WOULDBLOCK(select_last_err()))
-            return ZTK_OK;
-        return ZTK_ERR_PLATFORM;
+    if (NTK_SELECT_WRITE(p->wake_w, &c, 1) < 0) {
+        if (NTK_SELECT_WOULDBLOCK(select_last_err()))
+            return NTK_OK;
+        return NTK_ERR_PLATFORM;
     }
-    return ZTK_OK;
+    return NTK_OK;
 }

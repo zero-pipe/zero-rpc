@@ -3,7 +3,7 @@
 
 #include "util.h"
 
-#include <ztk/ztk.h>
+#include <ntk.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -14,7 +14,7 @@ void zri_route_init(zri_route_table_t *table) {
     }
     table->routes = NULL;
     if (!table->lock) {
-        table->lock = ztk_mutex_create(ZTK_MUTEX_NORMAL);
+        table->lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
     }
 }
 
@@ -25,7 +25,7 @@ void zri_route_cleanup(zri_route_table_t *table) {
         return;
     }
     if (table->lock) {
-        ztk_mutex_lock((ztk_mutex *)table->lock);
+        ntk_mutex_lock((ntk_mutex *)table->lock);
     }
     HASH_ITER(hh, table->routes, r, tmp) {
         HASH_DEL(table->routes, r);
@@ -33,8 +33,8 @@ void zri_route_cleanup(zri_route_table_t *table) {
     }
     table->routes = NULL;
     if (table->lock) {
-        ztk_mutex_unlock((ztk_mutex *)table->lock);
-        ztk_mutex_destroy((ztk_mutex *)table->lock);
+        ntk_mutex_unlock((ntk_mutex *)table->lock);
+        ntk_mutex_destroy((ntk_mutex *)table->lock);
         table->lock = NULL;
     }
 }
@@ -60,12 +60,12 @@ int zri_route_set(zri_route_table_t *table, const char *service, const char *ip,
         return ERR_INVALID;
     }
     if (table->lock) {
-        ztk_mutex_lock((ztk_mutex *)table->lock);
+        ntk_mutex_lock((ntk_mutex *)table->lock);
     }
     r = route_upsert(table, service);
     if (!r) {
         if (table->lock) {
-            ztk_mutex_unlock((ztk_mutex *)table->lock);
+            ntk_mutex_unlock((ntk_mutex *)table->lock);
         }
         return ERR_NOMEM;
     }
@@ -78,7 +78,7 @@ int zri_route_set(zri_route_table_t *table, const char *service, const char *ip,
     r->endpoints[0].transport = transport;
     r->is_static = 1;
     if (table->lock) {
-        ztk_mutex_unlock((ztk_mutex *)table->lock);
+        ntk_mutex_unlock((ntk_mutex *)table->lock);
     }
     return OK;
 }
@@ -93,12 +93,12 @@ int zri_route_add_endpoint(zri_route_table_t *table, const char *service, const 
         return ERR_INVALID;
     }
     if (table->lock) {
-        ztk_mutex_lock((ztk_mutex *)table->lock);
+        ntk_mutex_lock((ntk_mutex *)table->lock);
     }
     r = route_upsert(table, service);
     if (!r) {
         if (table->lock) {
-            ztk_mutex_unlock((ztk_mutex *)table->lock);
+            ntk_mutex_unlock((ntk_mutex *)table->lock);
         }
         return ERR_NOMEM;
     }
@@ -112,21 +112,21 @@ int zri_route_add_endpoint(zri_route_table_t *table, const char *service, const 
             strcmp(existing->host, endpoint.host) == 0) {
             r->is_static = is_static || r->is_static;
             if (table->lock) {
-                ztk_mutex_unlock((ztk_mutex *)table->lock);
+                ntk_mutex_unlock((ntk_mutex *)table->lock);
             }
             return OK;
         }
     }
     if (r->endpoint_count == MAX_ENDPOINTS) {
         if (table->lock) {
-            ztk_mutex_unlock((ztk_mutex *)table->lock);
+            ntk_mutex_unlock((ntk_mutex *)table->lock);
         }
         return ERR_NOMEM;
     }
     r->endpoints[r->endpoint_count++] = endpoint;
     r->is_static = is_static || r->is_static;
     if (table->lock) {
-        ztk_mutex_unlock((ztk_mutex *)table->lock);
+        ntk_mutex_unlock((ntk_mutex *)table->lock);
     }
     return OK;
 }
@@ -148,7 +148,7 @@ int zri_route_lookup_prefer(zri_route_table_t *table, const char *service, int p
         return ERR_INVALID;
     }
     if (table->lock) {
-        ztk_mutex_lock((ztk_mutex *)table->lock);
+        ntk_mutex_lock((ntk_mutex *)table->lock);
     }
     HASH_FIND_STR(table->routes, service, r);
     if (r && r->endpoint_count) {
@@ -178,7 +178,7 @@ int zri_route_lookup_prefer(zri_route_table_t *table, const char *service, int p
         found = 1;
     }
     if (table->lock) {
-        ztk_mutex_unlock((ztk_mutex *)table->lock);
+        ntk_mutex_unlock((ntk_mutex *)table->lock);
     }
     return found ? OK : ERR_NOTFOUND;
 }

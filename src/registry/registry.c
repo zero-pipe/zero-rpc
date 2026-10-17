@@ -3,7 +3,7 @@
 
 #include "util.h"
 
-#include <ztk/ztk.h>
+#include <ntk.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -40,8 +40,8 @@ static void registry_remove_node_locked(zri_registry_t *registry, uint32_t node_
     }
 }
 
-static ztk_mutex *registry_lock(const zri_registry_t *registry) {
-    return registry && registry->lock ? (ztk_mutex *)registry->lock : NULL;
+static ntk_mutex *registry_lock(const zri_registry_t *registry) {
+    return registry && registry->lock ? (ntk_mutex *)registry->lock : NULL;
 }
 
 void zri_registry_init(zri_registry_t *registry) {
@@ -51,19 +51,19 @@ void zri_registry_init(zri_registry_t *registry) {
     registry->instances = NULL;
     registry->generation = 0;
     registry->next_instance = 0;
-    registry->lock = ztk_mutex_create(ZTK_MUTEX_NORMAL);
+    registry->lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
 }
 
 void zri_registry_cleanup(zri_registry_t *registry) {
     zri_registry_instance_t *instance;
     zri_registry_instance_t *next;
-    ztk_mutex *lock;
+    ntk_mutex *lock;
     if (!registry) {
         return;
     }
     lock = registry_lock(registry);
     if (lock) {
-        ztk_mutex_lock(lock);
+        ntk_mutex_lock(lock);
     }
     instance = registry->instances;
     while (instance) {
@@ -74,8 +74,8 @@ void zri_registry_cleanup(zri_registry_t *registry) {
     registry->instances = NULL;
     registry->next_instance = 0;
     if (lock) {
-        ztk_mutex_unlock(lock);
-        ztk_mutex_destroy(lock);
+        ntk_mutex_unlock(lock);
+        ntk_mutex_destroy(lock);
     }
     registry->lock = NULL;
 }
@@ -96,21 +96,21 @@ int zri_registry_upsert(zri_registry_t *registry, const char *service, const cha
                          const endpoint_t *endpoints, size_t endpoint_count, uint32_t node_id,
                          uint64_t last_seen_ms) {
     zri_registry_instance_t *instance;
-    ztk_mutex *lock;
+    ntk_mutex *lock;
     if (!registry || !service || !service[0] || !instance_id || !instance_id[0] || !endpoints ||
         endpoint_count == 0 || endpoint_count > MAX_BINDINGS) {
         return ERR_INVALID;
     }
     lock = registry_lock(registry);
     if (lock) {
-        ztk_mutex_lock(lock);
+        ntk_mutex_lock(lock);
     }
     instance = find_instance(registry, service, instance_id);
     if (!instance) {
         instance = (zri_registry_instance_t *)calloc(1, sizeof(*instance));
         if (!instance) {
             if (lock) {
-                ztk_mutex_unlock(lock);
+                ntk_mutex_unlock(lock);
             }
             return ERR_NOMEM;
         }
@@ -127,23 +127,23 @@ int zri_registry_upsert(zri_registry_t *registry, const char *service, const cha
     instance->last_seen_ms = last_seen_ms;
     registry->generation++;
     if (lock) {
-        ztk_mutex_unlock(lock);
+        ntk_mutex_unlock(lock);
     }
     return OK;
 }
 
 void zri_registry_remove_node(zri_registry_t *registry, uint32_t node_id) {
-    ztk_mutex *lock;
+    ntk_mutex *lock;
     if (!registry) {
         return;
     }
     lock = registry_lock(registry);
     if (lock) {
-        ztk_mutex_lock(lock);
+        ntk_mutex_lock(lock);
     }
     registry_remove_node_locked(registry, node_id);
     if (lock) {
-        ztk_mutex_unlock(lock);
+        ntk_mutex_unlock(lock);
     }
 }
 
@@ -151,13 +151,13 @@ void zri_registry_expire(zri_registry_t *registry, uint64_t now_ms, uint64_t ttl
     zri_registry_instance_t *instance;
     zri_registry_instance_t *previous = NULL;
     zri_registry_instance_t *next;
-    ztk_mutex *lock;
+    ntk_mutex *lock;
     if (!registry) {
         return;
     }
     lock = registry_lock(registry);
     if (lock) {
-        ztk_mutex_lock(lock);
+        ntk_mutex_lock(lock);
     }
     instance = registry->instances;
     while (instance) {
@@ -176,7 +176,7 @@ void zri_registry_expire(zri_registry_t *registry, uint64_t now_ms, uint64_t ttl
         instance = next;
     }
     if (lock) {
-        ztk_mutex_unlock(lock);
+        ntk_mutex_unlock(lock);
     }
 }
 
@@ -201,13 +201,13 @@ int zri_registry_select_prefer(zri_registry_t *registry, const char *service, in
     size_t count = 0;
     size_t target;
     size_t current = 0;
-    ztk_mutex *lock;
+    ntk_mutex *lock;
     if (!registry || !service || !out) {
         return ERR_INVALID;
     }
     lock = registry_lock(registry);
     if (lock) {
-        ztk_mutex_lock(lock);
+        ntk_mutex_lock(lock);
     }
     for (instance = registry->instances; instance; instance = instance->next) {
         if (strcmp(instance->service, service) == 0 && instance->endpoint_count > 0) {
@@ -227,7 +227,7 @@ int zri_registry_select_prefer(zri_registry_t *registry, const char *service, in
     }
     if (count == 0) {
         if (lock) {
-            ztk_mutex_unlock(lock);
+            ntk_mutex_unlock(lock);
         }
         return ERR_NOTFOUND;
     }
@@ -251,7 +251,7 @@ int zri_registry_select_prefer(zri_registry_t *registry, const char *service, in
                 *out = selected->endpoints[index];
                 selected->next_endpoint = index + 1;
                 if (lock) {
-                    ztk_mutex_unlock(lock);
+                    ntk_mutex_unlock(lock);
                 }
                 return OK;
             }
@@ -259,7 +259,7 @@ int zri_registry_select_prefer(zri_registry_t *registry, const char *service, in
     }
     *out = selected->endpoints[selected->next_endpoint++ % selected->endpoint_count];
     if (lock) {
-        ztk_mutex_unlock(lock);
+        ntk_mutex_unlock(lock);
     }
     return OK;
 }
@@ -270,14 +270,14 @@ int zri_registry_replace_node(zri_registry_t *registry, uint32_t node_id, const 
                                uint64_t last_seen_ms) {
     size_t i;
     int rc = OK;
-    ztk_mutex *lock;
+    ntk_mutex *lock;
     if (!registry || !instance_id || !instance_id[0] || (service_count && !services) ||
         endpoint_count > MAX_BINDINGS || (service_count && endpoint_count == 0)) {
         return ERR_INVALID;
     }
     lock = registry_lock(registry);
     if (lock) {
-        ztk_mutex_lock(lock);
+        ntk_mutex_lock(lock);
     }
     registry_remove_node_locked(registry, node_id);
     for (i = 0; i < service_count; i++) {
@@ -301,7 +301,7 @@ int zri_registry_replace_node(zri_registry_t *registry, uint32_t node_id, const 
         registry->generation++;
     }
     if (lock) {
-        ztk_mutex_unlock(lock);
+        ntk_mutex_unlock(lock);
     }
     return rc;
 }

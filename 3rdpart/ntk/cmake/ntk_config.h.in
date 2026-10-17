@@ -1,0 +1,19 @@
+#ifndef NTK_CONFIG_H
+#define NTK_CONFIG_H
+
+#define NTK_VERSION_MAJOR @NTK_VERSION_MAJOR@
+#define NTK_VERSION_MINOR @NTK_VERSION_MINOR@
+#define NTK_VERSION_PATCH @NTK_VERSION_PATCH@
+
+#cmakedefine NTK_PLATFORM_LINUX 1
+#cmakedefine NTK_PLATFORM_WIN32 1
+#cmakedefine NTK_PLATFORM_GENERIC 1
+
+#cmakedefine NTK_HAVE_EPOLL 1
+#cmakedefine NTK_HAVE_WEPOLL 1
+#cmakedefine NTK_HAVE_SELECT 1
+#cmakedefine NTK_HAVE_PIPE2 1
+#cmakedefine NTK_HAVE_POSIX_SEM 1
+#cmakedefine NTK_HAVE_OPENSSL 1
+
+#endif /* NTK_CONFIG_H */

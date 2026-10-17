@@ -25,7 +25,7 @@ typedef struct zri_session {
     int used;
     int io;
     metrics_t *metrics;
-    ztk_socket *sock;
+    ntk_socket *sock;
     uint32_t peer_ip;
     char peer_ip_s[ENDPOINT_MAX];
     uint16_t peer_port;
@@ -102,9 +102,9 @@ typedef struct zri_udp_io_ctx {
 
 typedef struct zri_udp_transport {
     zri_transport_t base;
-    ztk_socket *socks[IO_MAX];
-    ztk_poller *pollers[IO_MAX];
-    ztk_timer *tick_timers[IO_MAX];
+    ntk_socket *socks[IO_MAX];
+    ntk_poller *pollers[IO_MAX];
+    ntk_timer *tick_timers[IO_MAX];
     zri_udp_io_ctx_t io_ctx[IO_MAX];
     zri_session_t sessions[IO_MAX][PEERS_PER_IO];
     int io_count;
@@ -122,7 +122,7 @@ static uint32_t sess_rand(void) {
 static uint32_t udp_rand(void) {
     static uint32_t st;
     if (st == 0) {
-        st = (uint32_t)ztk_monotonic_ms() ^ 0x9e3779b9u;
+        st = (uint32_t)ntk_monotonic_ms() ^ 0x9e3779b9u;
     }
     st ^= st << 13;
     st ^= st >> 17;
@@ -150,7 +150,7 @@ static void session_cleanup(zri_session_t *s) {
 
 static void session_send_bye(zri_udp_transport_t *udp, zri_session_t *s);
 
-static void session_init(zri_udp_transport_t *udp, zri_session_t *s, int io, ztk_socket *sock,
+static void session_init(zri_udp_transport_t *udp, zri_session_t *s, int io, ntk_socket *sock,
                          const char *ip_s, uint16_t port, uint64_t now_ms) {
     memset(s, 0, sizeof(*s));
     s->used = 1;
@@ -177,7 +177,7 @@ static void session_init(zri_udp_transport_t *udp, zri_session_t *s, int io, ztk
  * 而不是直接丢包——否则并发对端数超过 PEERS_PER_IO 时，新对端的首请求
  * 会被静默丢弃且永远建不起会话（表现为首请求超时）。
  */
-static zri_session_t *session_for(zri_udp_transport_t *udp, int io, ztk_socket *sock,
+static zri_session_t *session_for(zri_udp_transport_t *udp, int io, ntk_socket *sock,
                                    const char *ip_s, uint16_t port, uint64_t now_ms) {
     int i;
     int free_slot = -1;
@@ -251,7 +251,7 @@ static void env_view_copy(const zri_env_view_t *v, size_t off, size_t len, uint8
 
 static void emit_frag(zri_udp_transport_t *udp, zri_session_t *s, uint32_t msg_id,
                       uint32_t total_len, uint32_t off, uint32_t chunk, const zri_env_view_t *view,
-                      int last, uint64_t now, ztk_udp_dgram_t *msgs, unsigned *nm) {
+                      int last, uint64_t now, ntk_udp_dgram_t *msgs, unsigned *nm) {
     zri_frag_t d;
     uint8_t *dst;
     size_t hdr;
@@ -300,7 +300,7 @@ static void emit_frag(zri_udp_transport_t *udp, zri_session_t *s, uint32_t msg_i
     s->rtcp_pkt_count++;
     s->rtcp_octet_count += chunk;
     s->rtcp_last_rtp_ts = d.ts;
-    s->rtcp_last_rtp_wall = ztk_wall_ms();
+    s->rtcp_last_rtp_wall = ntk_wall_ms();
 }
 
 /* ---- 整包 XOR 前向纠错（env FEC=1，默认关） ----
@@ -352,7 +352,7 @@ static void send_fec(zri_udp_transport_t *udp, zri_session_t *s, const zri_env_v
         return;
     }
     memcpy(pkt + hdr, parity, parity_len);
-    (void)ztk_socket_sendto(s->sock, pkt, hdr + parity_len, s->peer_ip_s, s->peer_port);
+    (void)ntk_socket_sendto(s->sock, pkt, hdr + parity_len, s->peer_ip_s, s->peer_port);
 }
 
 static void fec_try_reconstruct(zri_udp_transport_t *udp, zri_session_t *s, uint32_t msg_id,
@@ -445,7 +445,7 @@ static void fec_on_parity(zri_udp_transport_t *udp, zri_session_t *s, const zri_
 }
 
 static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_message_t *msg) {
-    ztk_udp_dgram_t msgs[TX_BATCH_MAX];
+    ntk_udp_dgram_t msgs[TX_BATCH_MAX];
     unsigned nm = 0;
     size_t route_len;
     const uint8_t *data;
@@ -518,7 +518,7 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_me
 
         if (i < s->cc_burst) {
             if (nm == TX_BATCH_MAX) {
-                (void)ztk_socket_sendto_batch(s->sock, msgs, nm);
+                (void)ntk_socket_sendto_batch(s->sock, msgs, nm);
                 nm = 0;
             }
             emit_frag(udp, s, msg->request_id, (uint32_t)env_len, (uint32_t)off, (uint32_t)chunk,
@@ -537,7 +537,7 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_me
         off += chunk;
     }
     if (nm > 0) {
-        (void)ztk_socket_sendto_batch(s->sock, msgs, nm);
+        (void)ntk_socket_sendto_batch(s->sock, msgs, nm);
     }
     if (nfrag >= 2 && s->txq == NULL && udp_fec_enabled()) {
         send_fec(udp, s, &view, env_len, msg->request_id);
@@ -546,7 +546,7 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_me
 }
 
 static void session_txq_drain(zri_udp_transport_t *udp, zri_session_t *s, uint64_t now) {
-    ztk_udp_dgram_t msgs[TX_BATCH_MAX];
+    ntk_udp_dgram_t msgs[TX_BATCH_MAX];
     unsigned nm = 0;
     uint32_t budget = s->cc_burst;
     zri_env_view_t view;
@@ -568,14 +568,14 @@ static void session_txq_drain(zri_udp_transport_t *udp, zri_session_t *s, uint64
         }
         last = (off + chunk) >= s->txq_total;
         if (nm == TX_BATCH_MAX) {
-            (void)ztk_socket_sendto_batch(s->sock, msgs, nm);
+            (void)ntk_socket_sendto_batch(s->sock, msgs, nm);
             nm = 0;
         }
         emit_frag(udp, s, s->txq_msgid, s->txq_total, off, chunk, &view, last, now, msgs, &nm);
         s->txq_sent += chunk;
     }
     if (nm > 0) {
-        (void)ztk_socket_sendto_batch(s->sock, msgs, nm);
+        (void)ntk_socket_sendto_batch(s->sock, msgs, nm);
     }
     if (s->txq_sent >= s->txq_total) {
         free(s->txq);
@@ -719,7 +719,7 @@ static void session_on_nack(zri_udp_transport_t *udp, zri_session_t *s, const ui
         uint32_t len = 0;
         const uint8_t *packet = zri_tx_ring_get(&s->tx_ring, seqs[i], &len);
         if (packet) {
-            (void)ztk_socket_sendto(s->sock, packet, len, s->peer_ip_s, s->peer_port);
+            (void)ntk_socket_sendto(s->sock, packet, len, s->peer_ip_s, s->peer_port);
             s->retx++;
             if (s->metrics) {
                 s->metrics->udp_retransmissions++;
@@ -772,7 +772,7 @@ static void fill_report_block(const zri_session_t *s, zri_rtcp_report_block_t *r
 
 /* 从对端报告块中提取关于本端流（ssrc_local）的丢包/抖动/RTT。 */
 static void apply_report_blocks(zri_session_t *s, const zri_rtcp_report_block_t *rb, int n) {
-    uint32_t now32 = ntp_middle32(ntp_msw(ztk_wall_ms()), ntp_lsw(ztk_wall_ms()));
+    uint32_t now32 = ntp_middle32(ntp_msw(ntk_wall_ms()), ntp_lsw(ntk_wall_ms()));
     int i;
     for (i = 0; i < n; i++) {
         if (rb[i].ssrc != s->ssrc_local) {
@@ -870,7 +870,7 @@ static void session_send_rtcp(zri_udp_transport_t *udp, zri_session_t *s, uint64
         return;
     }
     total = n + zri_frame_build_sdes_cname(buf + n, sizeof(buf) - n, s->ssrc_local, "rpc");
-    (void)ztk_socket_sendto(s->sock, buf, total, s->peer_ip_s, s->peer_port);
+    (void)ntk_socket_sendto(s->sock, buf, total, s->peer_ip_s, s->peer_port);
     s->rx_expected_prior = s->rx_max_seq_set ? (s->rx_cycles + s->rx_max_seq + 1u) : 0u;
     s->rx_received_prior = s->rx_received;
 }
@@ -887,7 +887,7 @@ static void session_send_bye(zri_udp_transport_t *udp, zri_session_t *s) {
     if (n == 0) {
         return;
     }
-    (void)ztk_socket_sendto(s->sock, buf, n, s->peer_ip_s, s->peer_port);
+    (void)ntk_socket_sendto(s->sock, buf, n, s->peer_ip_s, s->peer_port);
     if (s->metrics) {
         s->metrics->rtcp_bye_sent++;
     }
@@ -967,7 +967,7 @@ static void session_tick(zri_udp_transport_t *udp, zri_session_t *s, uint64_t no
             if (!pkt || len == 0) {
                 continue;
             }
-            (void)ztk_socket_sendto(s->sock, pkt, len, s->peer_ip_s, s->peer_port);
+            (void)ntk_socket_sendto(s->sock, pkt, len, s->peer_ip_s, s->peer_port);
             zri_tx_ring_mark_sent(&s->tx_ring, seq, now_ms);
             s->retx++;
             if (s->metrics) {
@@ -995,7 +995,7 @@ static void session_tick(zri_udp_transport_t *udp, zri_session_t *s, uint64_t no
             size_t n = zri_frame_build_nack(nack, sizeof(nack), s->ssrc_local, s->ssrc_remote,
                                             missing, mn);
             if (n > 0) {
-                (void)ztk_socket_sendto(s->sock, nack, n, s->peer_ip_s, s->peer_port);
+                (void)ntk_socket_sendto(s->sock, nack, n, s->peer_ip_s, s->peer_port);
                 s->last_nack_ms = now_ms;
                 if (s->metrics) {
                     s->metrics->udp_nacks_sent++;
@@ -1018,11 +1018,11 @@ static void session_tick(zri_udp_transport_t *udp, zri_session_t *s, uint64_t no
 
 /* ---- 数据面接收 ---- */
 
-static void data_recv_cb(ztk_socket *sock, void *user) {
+static void data_recv_cb(ntk_socket *sock, void *user) {
     zri_udp_io_ctx_t *ctx = (zri_udp_io_ctx_t *)user;
     zri_udp_transport_t *udp = ctx ? ctx->udp : NULL;
     int io = ctx ? ctx->io : 0;
-    ztk_udp_recv_t recvs[RX_BATCH_MAX];
+    ntk_udp_recv_t recvs[RX_BATCH_MAX];
 
     if (!udp || !ctx->rx) {
         return;
@@ -1037,7 +1037,7 @@ static void data_recv_cb(ztk_socket *sock, void *user) {
             recvs[i].ip[0] = '\0';
             recvs[i].port = 0;
         }
-        got = ztk_socket_recvfrom_batch(sock, recvs, RX_BATCH_MAX);
+        got = ntk_socket_recvfrom_batch(sock, recvs, RX_BATCH_MAX);
         if (got <= 0) {
             break;
         }
@@ -1109,26 +1109,26 @@ static void udp_tick_cb(void *user) {
 
 static int udp_start(zri_transport_t *t) {
     zri_udp_transport_t *udp = (zri_udp_transport_t *)t;
-    ztk_socket_callbacks_t cbs;
+    ntk_socket_callbacks_t cbs;
     uint16_t actual = 0;
     int i;
 
     udp->io_count = 0;
     for (i = 0; i < (int)t->io_threads && i < IO_MAX; i++) {
-        ztk_socket *ds = ztk_socket_create();
+        ntk_socket *ds = ntk_socket_create();
         if (!ds) {
             break;
         }
-        if (ztk_socket_bind_udp_ex(ds, t->bind_host, t->port, 1, i > 0 ? 1 : 0) != ZTK_OK) {
-            ztk_socket_destroy(ds);
+        if (ntk_socket_bind_udp_ex(ds, t->bind_host, t->port, 1, i > 0 ? 1 : 0) != NTK_OK) {
+            ntk_socket_destroy(ds);
             break;
         }
-        if (i == 0 && ztk_socket_get_local(ds, NULL, 0, &actual) == ZTK_OK) {
+        if (i == 0 && ntk_socket_get_local(ds, NULL, 0, &actual) == NTK_OK) {
             t->port = actual;
         }
 #if !defined(_WIN32)
         {
-            int fd = ztk_socket_fd(ds);
+            int fd = ntk_socket_fd(ds);
             int sz = 8 * 1024 * 1024;
             if (fd >= 0) {
                 (void)setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &sz, (socklen_t)sizeof(sz));
@@ -1140,16 +1140,16 @@ static int udp_start(zri_transport_t *t) {
         udp->io_ctx[i].io = i;
         udp->io_ctx[i].rx = (uint8_t *)malloc((size_t)RX_BATCH_MAX * RTX_SLOT_MAX);
         if (!udp->io_ctx[i].rx) {
-            ztk_socket_destroy(ds);
+            ntk_socket_destroy(ds);
             break;
         }
         memset(&cbs, 0, sizeof(cbs));
         cbs.on_readable = data_recv_cb;
-        udp->pollers[i] = ztk_poller_pool_at(t->pool, (unsigned)i);
-        if (ztk_socket_attach_poller(ds, udp->pollers[i], &cbs, &udp->io_ctx[i]) != ZTK_OK) {
+        udp->pollers[i] = ntk_poller_pool_at(t->pool, (unsigned)i);
+        if (ntk_socket_attach_poller(ds, udp->pollers[i], &cbs, &udp->io_ctx[i]) != NTK_OK) {
             free(udp->io_ctx[i].rx);
             udp->io_ctx[i].rx = NULL;
-            ztk_socket_destroy(ds);
+            ntk_socket_destroy(ds);
             break;
         }
         udp->socks[i] = ds;
@@ -1159,7 +1159,7 @@ static int udp_start(zri_transport_t *t) {
         return ERR_IO;
     }
     for (i = 0; i < udp->io_count; i++) {
-        udp->tick_timers[i] = ztk_timer_start(udp->pollers[i], zri_tick_interval_ms(), 1,
+        udp->tick_timers[i] = ntk_timer_start(udp->pollers[i], zri_tick_interval_ms(), 1,
                                               udp_tick_cb, &udp->io_ctx[i]);
     }
     return OK;
@@ -1170,7 +1170,7 @@ static void udp_stop(zri_transport_t *t) {
     int i, j;
     for (i = 0; i < IO_MAX; i++) {
         if (udp->tick_timers[i]) {
-            ztk_timer_stop(udp->tick_timers[i]);
+            ntk_timer_stop(udp->tick_timers[i]);
             udp->tick_timers[i] = NULL;
         }
     }
@@ -1187,8 +1187,8 @@ static void udp_stop(zri_transport_t *t) {
     }
     for (i = 0; i < IO_MAX; i++) {
         if (udp->socks[i]) {
-            ztk_socket_detach_poller(udp->socks[i]);
-            ztk_socket_destroy(udp->socks[i]);
+            ntk_socket_detach_poller(udp->socks[i]);
+            ntk_socket_destroy(udp->socks[i]);
             udp->socks[i] = NULL;
         }
         if (udp->io_ctx[i].rx) {

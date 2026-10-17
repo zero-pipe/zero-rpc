@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static zri_iobuf_blk_t *blk_new(ztk_buf *owner, const void *data, size_t len) {
+static zri_iobuf_blk_t *blk_new(ntk_buf *owner, const void *data, size_t len) {
     zri_iobuf_blk_t *blk;
 
     if (!data || len == 0) {
@@ -27,7 +27,7 @@ static void blk_release(zri_iobuf_blk_t *blk) {
         return;
     }
     if (blk->owner) {
-        ztk_buf_unref(blk->owner);
+        ntk_buf_unref(blk->owner);
     }
     zri_mem_free(blk);
 }
@@ -78,22 +78,22 @@ int zri_iobuf_empty(const zri_iobuf_t *b) {
     return (!b || b->total == 0) ? 1 : 0;
 }
 
-int zri_iobuf_append_copy(zri_iobuf_t *b, ztk_poller *poller, const void *data, size_t len) {
-    ztk_buf *owner;
+int zri_iobuf_append_copy(zri_iobuf_t *b, ntk_poller *poller, const void *data, size_t len) {
+    ntk_buf *owner;
     zri_iobuf_blk_t *blk;
 
     if (!b || !data || len == 0) {
         return -1;
     }
-    owner = ztk_buf_alloc_local(poller, len);
+    owner = ntk_buf_alloc_local(poller, len);
     if (!owner) {
         return -1;
     }
-    memcpy((void *)ztk_buf_data(owner), data, len);
-    ztk_buf_set_len(owner, len);
-    blk = blk_new(owner, ztk_buf_data(owner), len);
+    memcpy((void *)ntk_buf_data(owner), data, len);
+    ntk_buf_set_len(owner, len);
+    blk = blk_new(owner, ntk_buf_data(owner), len);
     if (!blk) {
-        ztk_buf_unref(owner);
+        ntk_buf_unref(owner);
         return -1;
     }
     blk->owner = owner; /* blk_new 已赋值，这里显式强调所有权 */
@@ -104,16 +104,16 @@ int zri_iobuf_append_copy(zri_iobuf_t *b, ztk_poller *poller, const void *data, 
     return 0;
 }
 
-int zri_iobuf_append_buf(zri_iobuf_t *b, ztk_buf *owner, const void *data, size_t len) {
+int zri_iobuf_append_buf(zri_iobuf_t *b, ntk_buf *owner, const void *data, size_t len) {
     zri_iobuf_blk_t *blk;
 
     if (!b || !owner || !data || len == 0) {
         return -1;
     }
-    ztk_buf_ref(owner); /* block 持有一份引用 */
+    ntk_buf_ref(owner); /* block 持有一份引用 */
     blk = blk_new(owner, data, len);
     if (!blk) {
-        ztk_buf_unref(owner);
+        ntk_buf_unref(owner);
         return -1;
     }
     if (iobuf_push(b, blk) != 0) {
@@ -186,7 +186,7 @@ size_t zri_iobuf_peek(const zri_iobuf_t *b, size_t off, void *dst, size_t n) {
     return done;
 }
 
-unsigned zri_iobuf_iovec(const zri_iobuf_t *b, ztk_socket_iov *iov, unsigned max_count,
+unsigned zri_iobuf_iovec(const zri_iobuf_t *b, ntk_socket_iov *iov, unsigned max_count,
                           size_t max_bytes) {
     const zri_iobuf_blk_t *blk;
     unsigned n = 0;
@@ -240,7 +240,7 @@ void zri_iobuf_consume(zri_iobuf_t *b, size_t n) {
     }
 }
 
-const uint8_t *zri_iobuf_view(zri_iobuf_t *b, size_t n, ztk_poller *poller, ztk_buf **scratch) {
+const uint8_t *zri_iobuf_view(zri_iobuf_t *b, size_t n, ntk_poller *poller, ntk_buf **scratch) {
     const zri_iobuf_blk_t *blk;
     size_t head_remain;
 
@@ -260,19 +260,19 @@ const uint8_t *zri_iobuf_view(zri_iobuf_t *b, size_t n, ztk_poller *poller, ztk_
     if (!scratch) {
         return NULL;
     }
-    if (!*scratch || ztk_buf_cap(*scratch) < n) {
-        ztk_buf *nb = ztk_buf_alloc_local(poller, n);
+    if (!*scratch || ntk_buf_cap(*scratch) < n) {
+        ntk_buf *nb = ntk_buf_alloc_local(poller, n);
         if (!nb) {
             return NULL;
         }
         if (*scratch) {
-            ztk_buf_unref(*scratch);
+            ntk_buf_unref(*scratch);
         }
         *scratch = nb;
     }
-    if (zri_iobuf_peek(b, 0, (void *)ztk_buf_data(*scratch), n) != n) {
+    if (zri_iobuf_peek(b, 0, (void *)ntk_buf_data(*scratch), n) != n) {
         return NULL;
     }
-    ztk_buf_set_len(*scratch, n);
-    return ztk_buf_data(*scratch);
+    ntk_buf_set_len(*scratch, n);
+    return ntk_buf_data(*scratch);
 }

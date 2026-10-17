@@ -275,7 +275,7 @@ int service_create(node_t *node, const char *service_name, service_t **out) {
     }
     t->node = node;
     t->svc = svc;
-    if (ztk_poller_async(node->poller, svc_link_task, t, 1) != ZTK_OK) {
+    if (ntk_poller_async(node->poller, svc_link_task, t, 1) != NTK_OK) {
         free(t);
         free(svc);
         return ERR_IO;
@@ -316,7 +316,7 @@ static int service_add_method_ex(service_t *svc, const char *method, handler_fn 
     t->node = svc->node;
     t->svc = svc;
     t->method = m;
-    if (ztk_poller_async(svc->node->poller, svc_method_task, t, 1) != ZTK_OK) {
+    if (ntk_poller_async(svc->node->poller, svc_method_task, t, 1) != NTK_OK) {
         free(t);
         free(m);
         return ERR_IO;

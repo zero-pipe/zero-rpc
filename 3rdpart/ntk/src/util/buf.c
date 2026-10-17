@@ -1,28 +1,28 @@
-#include "ztk/util/buf.h"
-#include "ztk/poller/poller.h"
-#include "ztk/thread/sync.h"
+#include "util/buf.h"
+#include "poller/poller.h"
+#include "thread/sync.h"
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
 #if defined(_MSC_VER)
 #include <windows.h>
-static int ztk_atomic_fetch_add(volatile long *v, int delta)
+static int ntk_atomic_fetch_add(volatile long *v, int delta)
 {
     return (int)InterlockedExchangeAdd(v, (long)delta);
 }
 #elif defined(__GNUC__) || defined(__clang__)
-static int ztk_atomic_fetch_add(volatile int *v, int delta)
+static int ntk_atomic_fetch_add(volatile int *v, int delta)
 {
     return __atomic_fetch_add(v, delta, __ATOMIC_SEQ_CST);
 }
 #else
-#error "ztk_buf requires MSVC or GCC/clang atomics"
+#error "ntk_buf requires MSVC or GCC/clang atomics"
 #endif
 
-/* ── ztk_buf：引用计数载荷 ── */
+/* ── ntk_buf：引用计数载荷 ── */
 
-struct ztk_buf {
+struct ntk_buf {
 #if defined(_MSC_VER)
     volatile long refcnt;
 #else
@@ -30,21 +30,21 @@ struct ztk_buf {
 #endif
     size_t len;
     size_t cap;
-    ztk_buf_pool *pool;
+    ntk_buf_pool *pool;
     size_t pool_blk_cap;
     uint8_t data[];
 };
 
-static ztk_buf_pool *g_shared_pool;
+static ntk_buf_pool *g_shared_pool;
 
-void ztk_buf_set_shared_pool(ztk_buf_pool *pool)
+void ntk_buf_set_shared_pool(ntk_buf_pool *pool)
 {
     g_shared_pool = pool;
 }
 
-static ztk_buf *buf_create_malloc(size_t cap)
+static ntk_buf *buf_create_malloc(size_t cap)
 {
-    ztk_buf *b = (ztk_buf *)malloc(sizeof(*b) + cap);
+    ntk_buf *b = (ntk_buf *)malloc(sizeof(*b) + cap);
     if (!b) {
         return NULL;
     }
@@ -56,9 +56,9 @@ static ztk_buf *buf_create_malloc(size_t cap)
     return b;
 }
 
-static ztk_buf *buf_create_from_pool(ztk_buf_pool *pool, size_t cap)
+static ntk_buf *buf_create_from_pool(ntk_buf_pool *pool, size_t cap)
 {
-    size_t hdr = offsetof(ztk_buf, data);
+    size_t hdr = offsetof(ntk_buf, data);
     size_t need = hdr + cap;
     size_t blk_cap = 0;
     void *mem;
@@ -67,13 +67,13 @@ static ztk_buf *buf_create_from_pool(ztk_buf_pool *pool, size_t cap)
         return buf_create_malloc(cap);
     }
 
-    mem = ztk_buf_pool_acquire(pool, need, &blk_cap);
+    mem = ntk_buf_pool_acquire(pool, need, &blk_cap);
     if (!mem) {
         return buf_create_malloc(cap);
     }
 
     {
-        ztk_buf *b = (ztk_buf *)mem;
+        ntk_buf *b = (ntk_buf *)mem;
         b->refcnt = 1;
         b->len = 0;
         b->pool = pool;
@@ -83,7 +83,7 @@ static ztk_buf *buf_create_from_pool(ztk_buf_pool *pool, size_t cap)
     }
 }
 
-ztk_buf *ztk_buf_alloc(size_t cap)
+ntk_buf *ntk_buf_alloc(size_t cap)
 {
     if (cap == 0) {
         return NULL;
@@ -91,30 +91,30 @@ ztk_buf *ztk_buf_alloc(size_t cap)
     return buf_create_from_pool(g_shared_pool, cap);
 }
 
-ztk_buf *ztk_buf_alloc_local(ztk_poller *poller, size_t cap)
+ntk_buf *ntk_buf_alloc_local(ntk_poller *poller, size_t cap)
 {
-    ztk_buf_pool *local;
+    ntk_buf_pool *local;
 
     if (cap == 0) {
         return NULL;
     }
-    local = ztk_poller_buf_pool(poller);
+    local = ntk_poller_buf_pool(poller);
     if (local) {
         return buf_create_from_pool(local, cap);
     }
-    return ztk_buf_alloc(cap);
+    return ntk_buf_alloc(cap);
 }
 
-ztk_buf *ztk_buf_ref(ztk_buf *b)
+ntk_buf *ntk_buf_ref(ntk_buf *b)
 {
     if (!b) {
         return NULL;
     }
-    ztk_atomic_fetch_add(&b->refcnt, 1);
+    ntk_atomic_fetch_add(&b->refcnt, 1);
     return b;
 }
 
-ztk_buf *ztk_buf_try_ref(ztk_buf *b)
+ntk_buf *ntk_buf_try_ref(ntk_buf *b)
 {
     if (!b) {
         return NULL;
@@ -141,40 +141,40 @@ ztk_buf *ztk_buf_try_ref(ztk_buf *b)
         }
     }
 #else
-#error "ztk_buf_try_ref requires MSVC or GCC/clang atomics"
+#error "ntk_buf_try_ref requires MSVC or GCC/clang atomics"
 #endif
 }
 
-void ztk_buf_unref(ztk_buf *b)
+void ntk_buf_unref(ntk_buf *b)
 {
     if (!b) {
         return;
     }
-    if (ztk_atomic_fetch_add(&b->refcnt, -1) == 1) {
+    if (ntk_atomic_fetch_add(&b->refcnt, -1) == 1) {
         if (b->pool) {
-            ztk_buf_pool_release(b->pool, b, b->pool_blk_cap);
+            ntk_buf_pool_release(b->pool, b, b->pool_blk_cap);
         } else {
             free(b);
         }
     }
 }
 
-const void *ztk_buf_data(const ztk_buf *b)
+const void *ntk_buf_data(const ntk_buf *b)
 {
     return b ? (const void *)b->data : NULL;
 }
 
-size_t ztk_buf_len(const ztk_buf *b)
+size_t ntk_buf_len(const ntk_buf *b)
 {
     return b ? b->len : 0;
 }
 
-size_t ztk_buf_cap(const ztk_buf *b)
+size_t ntk_buf_cap(const ntk_buf *b)
 {
     return b ? b->cap : 0;
 }
 
-int ztk_buf_refcnt(const ztk_buf *b)
+int ntk_buf_refcnt(const ntk_buf *b)
 {
     if (!b) {
         return 0;
@@ -186,7 +186,7 @@ int ztk_buf_refcnt(const ztk_buf *b)
 #endif
 }
 
-void ztk_buf_set_len(ztk_buf *b, size_t len)
+void ntk_buf_set_len(ntk_buf *b, size_t len)
 {
     if (!b || len > b->cap) {
         return;
@@ -194,36 +194,36 @@ void ztk_buf_set_len(ztk_buf *b, size_t len)
     b->len = len;
 }
 
-/* ── ztk_buf_pool：分档侵入式 freelist ── */
+/* ── ntk_buf_pool：分档侵入式 freelist ── */
 
-#define ZTK_BUF_BUCKET_COUNT 9
+#define NTK_BUF_BUCKET_COUNT 9
 
 /* 512 → 2K → 8K → 32K → 64K → 128K → 512K → 1M → 2M */
-static const size_t k_bucket_caps[ZTK_BUF_BUCKET_COUNT] = {
+static const size_t k_bucket_caps[NTK_BUF_BUCKET_COUNT] = {
     512, 2048, 8192, 32768, 65536, 131072, 524288, 1048576, 2097152,
 };
 
-typedef struct ztk_buf_free_node {
-    struct ztk_buf_free_node *next;
-} ztk_buf_free_node;
+typedef struct ntk_buf_free_node {
+    struct ntk_buf_free_node *next;
+} ntk_buf_free_node;
 
-struct ztk_buf_pool {
+struct ntk_buf_pool {
     unsigned max_per_bucket;
     int thread_safe;
-    ztk_buf_free_node *free_heads[ZTK_BUF_BUCKET_COUNT];
-    unsigned counts[ZTK_BUF_BUCKET_COUNT];
-    ztk_buf_pool_stats stats;
-    ztk_mutex *mu; /* thread_safe=0 时为 NULL */
-    ztk_poller *owner; /* 无锁本地池所属 poller；跨线程 release 回投 */
+    ntk_buf_free_node *free_heads[NTK_BUF_BUCKET_COUNT];
+    unsigned counts[NTK_BUF_BUCKET_COUNT];
+    ntk_buf_pool_stats stats;
+    ntk_mutex *mu; /* thread_safe=0 时为 NULL */
+    ntk_poller *owner; /* 无锁本地池所属 poller；跨线程 release 回投 */
 };
 
-typedef struct ztk_buf_pool_defer {
-    ztk_buf_pool *pool;
+typedef struct ntk_buf_pool_defer {
+    ntk_buf_pool *pool;
     void *ptr;
     size_t cap;
-} ztk_buf_pool_defer;
+} ntk_buf_pool_defer;
 
-void ztk_buf_pool_set_owner_poller(ztk_buf_pool *pool, ztk_poller *owner)
+void ntk_buf_pool_set_owner_poller(ntk_buf_pool *pool, ntk_poller *owner)
 {
     if (pool) {
         pool->owner = owner;
@@ -234,7 +234,7 @@ static int bucket_index_for_size(size_t size, size_t *out_cap)
 {
     int i;
 
-    for (i = 0; i < ZTK_BUF_BUCKET_COUNT; ++i) {
+    for (i = 0; i < NTK_BUF_BUCKET_COUNT; ++i) {
         if (size <= k_bucket_caps[i]) {
             if (out_cap) {
                 *out_cap = k_bucket_caps[i];
@@ -249,7 +249,7 @@ static int bucket_index_exact_cap(size_t cap)
 {
     int i;
 
-    for (i = 0; i < ZTK_BUF_BUCKET_COUNT; ++i) {
+    for (i = 0; i < NTK_BUF_BUCKET_COUNT; ++i) {
         if (cap == k_bucket_caps[i]) {
             return i;
         }
@@ -257,24 +257,24 @@ static int bucket_index_exact_cap(size_t cap)
     return -1;
 }
 
-static void pool_lock(ztk_buf_pool *pool)
+static void pool_lock(ntk_buf_pool *pool)
 {
     if (pool && pool->mu) {
-        ztk_mutex_lock(pool->mu);
+        ntk_mutex_lock(pool->mu);
     }
 }
 
-static void pool_unlock(ztk_buf_pool *pool)
+static void pool_unlock(ntk_buf_pool *pool)
 {
     if (pool && pool->mu) {
-        ztk_mutex_unlock(pool->mu);
+        ntk_mutex_unlock(pool->mu);
     }
 }
 
-static void pool_release_now(ztk_buf_pool *pool, void *ptr, size_t cap)
+static void pool_release_now(ntk_buf_pool *pool, void *ptr, size_t cap)
 {
     int bi;
-    ztk_buf_free_node *node;
+    ntk_buf_free_node *node;
 
     bi = bucket_index_exact_cap(cap);
     if (bi < 0) {
@@ -287,7 +287,7 @@ static void pool_release_now(ztk_buf_pool *pool, void *ptr, size_t cap)
 
     pool_lock(pool);
     if (pool->counts[bi] < pool->max_per_bucket) {
-        node = (ztk_buf_free_node *)ptr;
+        node = (ntk_buf_free_node *)ptr;
         node->next = pool->free_heads[bi];
         pool->free_heads[bi] = node;
         pool->counts[bi]++;
@@ -302,7 +302,7 @@ static void pool_release_now(ztk_buf_pool *pool, void *ptr, size_t cap)
 
 static void pool_release_deferred(void *user)
 {
-    ztk_buf_pool_defer *d = (ztk_buf_pool_defer *)user;
+    ntk_buf_pool_defer *d = (ntk_buf_pool_defer *)user;
 
     if (!d) {
         return;
@@ -313,22 +313,22 @@ static void pool_release_deferred(void *user)
     free(d);
 }
 
-ztk_buf_pool *ztk_buf_pool_create(const ztk_buf_pool_opts *opts)
+ntk_buf_pool *ntk_buf_pool_create(const ntk_buf_pool_opts *opts)
 {
-    ztk_buf_pool *p = (ztk_buf_pool *)calloc(1, sizeof(*p));
+    ntk_buf_pool *p = (ntk_buf_pool *)calloc(1, sizeof(*p));
     int thread_safe = 1;
 
     if (!p) {
         return NULL;
     }
     p->max_per_bucket =
-        (opts && opts->max_per_bucket > 0) ? opts->max_per_bucket : ZTK_BUF_POOL_DEFAULT_MAX;
+        (opts && opts->max_per_bucket > 0) ? opts->max_per_bucket : NTK_BUF_POOL_DEFAULT_MAX;
     if (opts) {
         thread_safe = opts->thread_safe ? 1 : 0;
     }
     p->thread_safe = thread_safe;
     if (thread_safe) {
-        p->mu = ztk_mutex_create(ZTK_MUTEX_NORMAL);
+        p->mu = ntk_mutex_create(NTK_MUTEX_NORMAL);
         if (!p->mu) {
             free(p);
             return NULL;
@@ -337,7 +337,7 @@ ztk_buf_pool *ztk_buf_pool_create(const ztk_buf_pool_opts *opts)
     return p;
 }
 
-void ztk_buf_pool_destroy(ztk_buf_pool *pool)
+void ntk_buf_pool_destroy(ntk_buf_pool *pool)
 {
     int i;
 
@@ -346,10 +346,10 @@ void ztk_buf_pool_destroy(ztk_buf_pool *pool)
     }
     pool->owner = NULL;
     pool_lock(pool);
-    for (i = 0; i < ZTK_BUF_BUCKET_COUNT; ++i) {
-        ztk_buf_free_node *n = pool->free_heads[i];
+    for (i = 0; i < NTK_BUF_BUCKET_COUNT; ++i) {
+        ntk_buf_free_node *n = pool->free_heads[i];
         while (n) {
-            ztk_buf_free_node *next = n->next;
+            ntk_buf_free_node *next = n->next;
             free(n);
             n = next;
         }
@@ -358,12 +358,12 @@ void ztk_buf_pool_destroy(ztk_buf_pool *pool)
     }
     pool_unlock(pool);
     if (pool->mu) {
-        ztk_mutex_destroy(pool->mu);
+        ntk_mutex_destroy(pool->mu);
     }
     free(pool);
 }
 
-void *ztk_buf_pool_acquire(ztk_buf_pool *pool, size_t size, size_t *out_cap)
+void *ntk_buf_pool_acquire(ntk_buf_pool *pool, size_t size, size_t *out_cap)
 {
     size_t cap = 0;
     int bi;
@@ -387,7 +387,7 @@ void *ztk_buf_pool_acquire(ztk_buf_pool *pool, size_t size, size_t *out_cap)
 
     pool_lock(pool);
     if (pool->free_heads[bi]) {
-        ztk_buf_free_node *n = pool->free_heads[bi];
+        ntk_buf_free_node *n = pool->free_heads[bi];
         pool->free_heads[bi] = n->next;
         pool->counts[bi]--;
         pool->stats.acquire_hit++;
@@ -409,17 +409,17 @@ void *ztk_buf_pool_acquire(ztk_buf_pool *pool, size_t size, size_t *out_cap)
     return ptr;
 }
 
-void ztk_buf_pool_release(ztk_buf_pool *pool, void *ptr, size_t cap)
+void ntk_buf_pool_release(ntk_buf_pool *pool, void *ptr, size_t cap)
 {
-    ztk_buf_pool_defer *d;
+    ntk_buf_pool_defer *d;
 
     if (!pool || !ptr) {
         return;
     }
 
     /* 无锁本地池：非 owner 线程末次释放 → 回投 owner；失败则 free，不踩 freelist */
-    if (!pool->thread_safe && pool->owner && !ztk_poller_is_current_thread(pool->owner)) {
-        d = (ztk_buf_pool_defer *)malloc(sizeof(*d));
+    if (!pool->thread_safe && pool->owner && !ntk_poller_is_current_thread(pool->owner)) {
+        d = (ntk_buf_pool_defer *)malloc(sizeof(*d));
         if (!d) {
             free(ptr);
             return;
@@ -427,7 +427,7 @@ void ztk_buf_pool_release(ztk_buf_pool *pool, void *ptr, size_t cap)
         d->pool = pool;
         d->ptr = ptr;
         d->cap = cap;
-        if (ztk_poller_async(pool->owner, pool_release_deferred, d, 0) != ZTK_OK) {
+        if (ntk_poller_async(pool->owner, pool_release_deferred, d, 0) != NTK_OK) {
             free(ptr);
             free(d);
         }
@@ -437,7 +437,7 @@ void ztk_buf_pool_release(ztk_buf_pool *pool, void *ptr, size_t cap)
     pool_release_now(pool, ptr, cap);
 }
 
-void ztk_buf_pool_get_stats(const ztk_buf_pool *pool, ztk_buf_pool_stats *out)
+void ntk_buf_pool_get_stats(const ntk_buf_pool *pool, ntk_buf_pool_stats *out)
 {
     if (!out) {
         return;
@@ -446,12 +446,12 @@ void ztk_buf_pool_get_stats(const ztk_buf_pool *pool, ztk_buf_pool_stats *out)
     if (!pool) {
         return;
     }
-    pool_lock((ztk_buf_pool *)pool);
+    pool_lock((ntk_buf_pool *)pool);
     *out = pool->stats;
-    pool_unlock((ztk_buf_pool *)pool);
+    pool_unlock((ntk_buf_pool *)pool);
 }
 
-void ztk_buf_pool_reset_stats(ztk_buf_pool *pool)
+void ntk_buf_pool_reset_stats(ntk_buf_pool *pool)
 {
     if (!pool) {
         return;
@@ -461,7 +461,7 @@ void ztk_buf_pool_reset_stats(ztk_buf_pool *pool)
     pool_unlock(pool);
 }
 
-int ztk_buf_pool_bucket_counts(const ztk_buf_pool *pool, unsigned *out_counts, int max_buckets)
+int ntk_buf_pool_bucket_counts(const ntk_buf_pool *pool, unsigned *out_counts, int max_buckets)
 {
     int n;
     int i;
@@ -469,11 +469,11 @@ int ztk_buf_pool_bucket_counts(const ztk_buf_pool *pool, unsigned *out_counts, i
     if (!pool || !out_counts || max_buckets <= 0) {
         return 0;
     }
-    n = max_buckets < ZTK_BUF_BUCKET_COUNT ? max_buckets : ZTK_BUF_BUCKET_COUNT;
-    pool_lock((ztk_buf_pool *)pool);
+    n = max_buckets < NTK_BUF_BUCKET_COUNT ? max_buckets : NTK_BUF_BUCKET_COUNT;
+    pool_lock((ntk_buf_pool *)pool);
     for (i = 0; i < n; ++i) {
         out_counts[i] = pool->counts[i];
     }
-    pool_unlock((ztk_buf_pool *)pool);
+    pool_unlock((ntk_buf_pool *)pool);
     return n;
 }

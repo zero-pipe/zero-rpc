@@ -1,4 +1,4 @@
-#include "ztk/net/ssl.h"
+#include "net/ssl.h"
 #include "internal/ssl_ctx_internal.h"
 #if defined(_WIN32)
 #  include <winsock2.h>
@@ -17,14 +17,14 @@ static int ssl_verify_cb(int ok, X509_STORE_CTX *store)
     return ok;
 }
 
-ztk_err_t ztk_ssl_global_init(void)
+ntk_err_t ntk_ssl_global_init(void)
 {
     if (s_ssl_inited)
-        return ZTK_OK;
+        return NTK_OK;
 #if OPENSSL_VERSION_NUMBER >= 0x10100000L
     if (OPENSSL_init_ssl(OPENSSL_INIT_LOAD_SSL_STRINGS | OPENSSL_INIT_LOAD_CRYPTO_STRINGS, NULL) != 1) {
-        ztk_set_last_error("OPENSSL_init_ssl failed");
-        return ZTK_ERR_PLATFORM;
+        ntk_set_last_error("OPENSSL_init_ssl failed");
+        return NTK_ERR_PLATFORM;
     }
 #else
     SSL_library_init();
@@ -33,10 +33,10 @@ ztk_err_t ztk_ssl_global_init(void)
 #endif
     s_ssl_inited = 1;
     s_ssl_init_count = 0;
-    return ZTK_OK;
+    return NTK_OK;
 }
 
-void ztk_ssl_global_fini(void)
+void ntk_ssl_global_fini(void)
 {
     if (!s_ssl_inited || s_ssl_init_count > 0)
         return;
@@ -48,12 +48,12 @@ void ztk_ssl_global_fini(void)
     s_ssl_inited = 0;
 }
 
-ztk_ssl_ctx *ztk_ssl_ctx_create(const ztk_ssl_config_t *cfg)
+ntk_ssl_ctx *ntk_ssl_ctx_create(const ntk_ssl_config_t *cfg)
 {
-    if (ztk_ssl_global_init() != ZTK_OK)
+    if (ntk_ssl_global_init() != NTK_OK)
         return NULL;
 
-    ztk_ssl_ctx *sc = (ztk_ssl_ctx *)calloc(1, sizeof(*sc));
+    ntk_ssl_ctx *sc = (ntk_ssl_ctx *)calloc(1, sizeof(*sc));
     if (!sc)
         return NULL;
 
@@ -61,7 +61,7 @@ ztk_ssl_ctx *ztk_ssl_ctx_create(const ztk_ssl_config_t *cfg)
     sc->ctx = SSL_CTX_new(method);
     if (!sc->ctx) {
         free(sc);
-        ztk_set_last_error("SSL_CTX_new failed");
+        ntk_set_last_error("SSL_CTX_new failed");
         return NULL;
     }
 
@@ -75,14 +75,14 @@ ztk_ssl_ctx *ztk_ssl_ctx_create(const ztk_ssl_config_t *cfg)
 
     if (cfg && cfg->ca_file && cfg->ca_file[0]) {
         if (SSL_CTX_load_verify_locations(sc->ctx, cfg->ca_file, NULL) != 1) {
-            ztk_set_last_error("SSL_CTX_load_verify_locations failed");
+            ntk_set_last_error("SSL_CTX_load_verify_locations failed");
             SSL_CTX_free(sc->ctx);
             free(sc);
             return NULL;
         }
     } else if (cfg && cfg->verify_peer) {
         if (SSL_CTX_set_default_verify_paths(sc->ctx) != 1) {
-            ztk_set_last_error("SSL_CTX_set_default_verify_paths failed");
+            ntk_set_last_error("SSL_CTX_set_default_verify_paths failed");
             SSL_CTX_free(sc->ctx);
             free(sc);
             return NULL;
@@ -91,7 +91,7 @@ ztk_ssl_ctx *ztk_ssl_ctx_create(const ztk_ssl_config_t *cfg)
 
     if (cfg && cfg->client_cert_file && cfg->client_cert_file[0]) {
         if (SSL_CTX_use_certificate_file(sc->ctx, cfg->client_cert_file, SSL_FILETYPE_PEM) != 1) {
-            ztk_set_last_error("SSL_CTX_use_certificate_file failed");
+            ntk_set_last_error("SSL_CTX_use_certificate_file failed");
             SSL_CTX_free(sc->ctx);
             free(sc);
             return NULL;
@@ -99,13 +99,13 @@ ztk_ssl_ctx *ztk_ssl_ctx_create(const ztk_ssl_config_t *cfg)
     }
     if (cfg && cfg->client_key_file && cfg->client_key_file[0]) {
         if (SSL_CTX_use_PrivateKey_file(sc->ctx, cfg->client_key_file, SSL_FILETYPE_PEM) != 1) {
-            ztk_set_last_error("SSL_CTX_use_PrivateKey_file failed");
+            ntk_set_last_error("SSL_CTX_use_PrivateKey_file failed");
             SSL_CTX_free(sc->ctx);
             free(sc);
             return NULL;
         }
         if (SSL_CTX_check_private_key(sc->ctx) != 1) {
-            ztk_set_last_error("SSL_CTX_check_private_key failed");
+            ntk_set_last_error("SSL_CTX_check_private_key failed");
             SSL_CTX_free(sc->ctx);
             free(sc);
             return NULL;
@@ -116,7 +116,7 @@ ztk_ssl_ctx *ztk_ssl_ctx_create(const ztk_ssl_config_t *cfg)
     return sc;
 }
 
-void ztk_ssl_ctx_destroy(ztk_ssl_ctx *ctx)
+void ntk_ssl_ctx_destroy(ntk_ssl_ctx *ctx)
 {
     if (!ctx)
         return;

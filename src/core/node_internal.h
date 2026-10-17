@@ -13,7 +13,7 @@
 #include <node.h>
 #include <codec.h>
 #include <stub.h>
-#include <ztk/ztk.h>
+#include <ntk.h>
 
 #include <stddef.h>
 #include <stdint.h>
@@ -50,14 +50,14 @@ struct node {
     uint32_t rtcp_interval_ms;
     int rtcp_disabled;
 
-    ztk_poller_pool *pool;
-    ztk_poller *poller; /* io 0，用于发现/客户端调用 */
+    ntk_poller_pool *pool;
+    ntk_poller *poller; /* io 0，用于发现/客户端调用 */
     zri_transport_t *transports[MAX_BINDINGS];
     size_t transport_count;
     /* Compatibility alias for the first binding. */
     zri_transport_t *transport;
-    ztk_timer *hello_timer;
-    ztk_timer *node_timer;
+    ntk_timer *hello_timer;
+    ntk_timer *node_timer;
 
     service_t *services;
     zri_discovery_state_t discovery;
@@ -71,7 +71,7 @@ struct node {
     const zri_registry_backend_t *registry_backend;
     metrics_t metrics;
 
-    ztk_mutex *id_lock;
+    ntk_mutex *id_lock;
     uint64_t next_request_id;
     int started;
 };

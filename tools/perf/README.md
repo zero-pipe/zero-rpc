@@ -36,7 +36,7 @@ scripts/check.sh --full
 
 | 层 | 位置 | 门禁 |
 | --- | --- | --- |
-| unit | `tests/`（label `unit`）、ztk tests | 硬门禁，必须全过 |
+| unit | `tests/`（label `unit`）、ntk tests | 硬门禁，必须全过 |
 | integration | `tests/`（label `integration`） | 硬门禁，必须全过 |
 | perf | `zbench.py perf` | 出报告；有 baseline 时按 QPS/P99 容差判回归 |
 | stress | `zbench.py stress` | 场景级 `expect` 判定，必须全过 |

@@ -56,7 +56,7 @@ install(TARGETS rpc
 )
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/include/ DESTINATION include)
 
-target_link_libraries(rpc PUBLIC ztk)
+target_link_libraries(rpc PUBLIC ntk)
 
 set_target_properties(rpc PROPERTIES
     C_STANDARD 99

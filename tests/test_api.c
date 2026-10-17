@@ -2,7 +2,7 @@
 #include <client.h>
 #include <extensions.h>
 #include <server.h>
-#include <ztk/platform.h>
+#include <platform.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -203,7 +203,7 @@ static int test_stub_and_sync(void) {
             printf("call_event failed: %d\n", rc);
             failed = 1;
         } else {
-            ztk_sleep_ms(100);
+            ntk_sleep_ms(100);
             if (calls <= before) {
                 printf("call_event was not delivered\n");
                 failed = 1;

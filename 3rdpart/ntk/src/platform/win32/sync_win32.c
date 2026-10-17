@@ -1,23 +1,23 @@
-#include "ztk/thread/sync.h"
+#include "thread/sync.h"
 #include <stdlib.h>
 #include <windows.h>
 
-struct ztk_mutex {
+struct ntk_mutex {
     CRITICAL_SECTION cs;
     int recursive;
 };
 
-ztk_mutex *ztk_mutex_create(int flags)
+ntk_mutex *ntk_mutex_create(int flags)
 {
-    ztk_mutex *m = (ztk_mutex *)calloc(1, sizeof(*m));
+    ntk_mutex *m = (ntk_mutex *)calloc(1, sizeof(*m));
     if (!m)
         return NULL;
-    m->recursive = (flags & ZTK_MUTEX_RECURSIVE) ? 1 : 0;
+    m->recursive = (flags & NTK_MUTEX_RECURSIVE) ? 1 : 0;
     InitializeCriticalSection(&m->cs);
     return m;
 }
 
-void ztk_mutex_destroy(ztk_mutex *m)
+void ntk_mutex_destroy(ntk_mutex *m)
 {
     if (!m)
         return;
@@ -25,25 +25,25 @@ void ztk_mutex_destroy(ztk_mutex *m)
     free(m);
 }
 
-ztk_err_t ztk_mutex_lock(ztk_mutex *m)
+ntk_err_t ntk_mutex_lock(ntk_mutex *m)
 {
     if (!m)
-        return ZTK_ERR_INVALID;
+        return NTK_ERR_INVALID;
     EnterCriticalSection(&m->cs);
-    return ZTK_OK;
+    return NTK_OK;
 }
 
-ztk_err_t ztk_mutex_unlock(ztk_mutex *m)
+ntk_err_t ntk_mutex_unlock(ntk_mutex *m)
 {
     if (!m)
-        return ZTK_ERR_INVALID;
+        return NTK_ERR_INVALID;
     LeaveCriticalSection(&m->cs);
-    return ZTK_OK;
+    return NTK_OK;
 }
 
-ztk_err_t ztk_mutex_trylock(ztk_mutex *m)
+ntk_err_t ntk_mutex_trylock(ntk_mutex *m)
 {
     if (!m)
-        return ZTK_ERR_INVALID;
-    return TryEnterCriticalSection(&m->cs) ? ZTK_OK : ZTK_ERR_AGAIN;
+        return NTK_ERR_INVALID;
+    return TryEnterCriticalSection(&m->cs) ? NTK_OK : NTK_ERR_AGAIN;
 }

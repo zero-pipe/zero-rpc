@@ -13,7 +13,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <ztk/ztk.h>
+#include <ntk.h>
 
 #include "caps.h"
 
@@ -45,7 +45,7 @@ typedef struct zri_disc_target {
 
 /* 发现子系统自有状态：由 node 内嵌，模块内聚访问。 */
 typedef struct zri_discovery_state {
-    ztk_socket *sock;
+    ntk_socket *sock;
     zri_peer_t peers[MAX_PEERS];
     zri_disc_target_t targets[DISC_TARGET_MAX];
 } zri_discovery_state_t;

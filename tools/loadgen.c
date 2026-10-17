@@ -5,8 +5,8 @@
  * 形状：单进程单"热连接"，同一时刻 1 个 outstanding RPC（对齐 gRPC 单 channel）。
  */
 #include <client.h>
-#include <ztk/platform.h>
-#include <ztk/thread/sem.h>
+#include <platform.h>
+#include <thread/sem.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -99,7 +99,7 @@ typedef struct options {
 } options_t;
 
 typedef struct callout {
-    ztk_sem *sem;
+    ntk_sem *sem;
     int status;
     size_t resp_len;
     int verify_ok;
@@ -126,7 +126,7 @@ static void on_response(int status, const response_t *resp, void *user) {
         co->verify_ok = (resp->payload.len == g_expect_len &&
                          memcmp(resp->payload.data, g_expect_data, g_expect_len) == 0);
     }
-    ztk_sem_post(co->sem, 1);
+    ntk_sem_post(co->sem, 1);
 }
 
 static uint64_t sleep_until_ns(uint64_t deadline) {
@@ -138,7 +138,7 @@ static uint64_t sleep_until_ns(uint64_t deadline) {
         }
         remain = deadline - now;
         if (remain > 2000000ull) {
-            ztk_sleep_ms((unsigned)((remain - 1000000ull) / 1000000ull));
+            ntk_sleep_ms((unsigned)((remain - 1000000ull) / 1000000ull));
         } else {
             /* 自旋等待亚毫秒精度 */
         }
@@ -198,7 +198,7 @@ static void error_add(error_entry_t *errors, int *error_count, int code) {
 
 static node_t *g_node;
 static proxy_t *g_proxy;
-static ztk_sem *g_done;
+static ntk_sem *g_done;
 static options_t g_opt;
 static const uint8_t *g_payload;
 static uint64_t g_start_ns, g_deadline_ns;
@@ -214,7 +214,7 @@ static int g_again;
 static void ed_issue(void *user);
 
 static void ed_finish(void) {
-    ztk_sem_post(g_done, 1);
+    ntk_sem_post(g_done, 1);
 }
 
 static void ed_resp(int status, const response_t *resp, void *user) {
@@ -304,7 +304,7 @@ int main(int argc, char **argv) {
     node_config_t cfg;
     node_t *node = NULL;
     proxy_t *proxy = NULL;
-    ztk_sem *sem = NULL;
+    ntk_sem *sem = NULL;
     callout_t co;
     uint8_t *payload = NULL;
     error_entry_t errors[16];
@@ -421,7 +421,7 @@ int main(int argc, char **argv) {
     cfg.max_msg_bytes = opt.max_msg_bytes;
     cfg.backpressure_bytes = opt.backpressure_bytes;
 
-    sem = ztk_sem_create(0);
+    sem = ntk_sem_create(0);
     if (!sem) {
         fprintf(stderr, "sem create failed\n");
         return 1;
@@ -482,12 +482,12 @@ int main(int argc, char **argv) {
                 node_destroy(node);
                 return 1;
             }
-            (void)ztk_sem_timedwait(sem, (unsigned)(opt.timeout_ms + 100));
+            (void)ntk_sem_timedwait(sem, (unsigned)(opt.timeout_ms + 100));
             if (co.status != ERR_NOTFOUND) {
                 warmed = 1;
                 break;
             }
-            ztk_sleep_ms(20);
+            ntk_sleep_ms(20);
         }
         if (!warmed) {
             g_status = 1; /* discovery_error */
@@ -528,7 +528,7 @@ int main(int argc, char **argv) {
                     index++;
                     continue;
                 }
-                if (ztk_sem_timedwait(sem, (unsigned)(opt.timeout_ms + 100)) != ZTK_OK) {
+                if (ntk_sem_timedwait(sem, (unsigned)(opt.timeout_ms + 100)) != NTK_OK) {
                     failed++;
                     error_add(errors, &error_count, ERR_TIMEOUT);
                     index++;
@@ -567,12 +567,12 @@ int main(int argc, char **argv) {
             g_attempted = g_succeeded = g_failed = g_response_bytes = 0;
             g_min_ns = g_max_ns = g_sum_ns = g_lat_count = 0;
             g_error_count = 0;
-            g_done = ztk_sem_create(0);
+            g_done = ntk_sem_create(0);
             if (g_done) {
                 (void)node_post(node, ed_issue, NULL);
-                (void)ztk_sem_timedwait(
+                (void)ntk_sem_timedwait(
                     g_done, (unsigned)(opt.duration_seconds * 1000 + opt.timeout_ms + 2000));
-                ztk_sem_destroy(g_done);
+                ntk_sem_destroy(g_done);
                 g_done = NULL;
             }
             attempted = g_attempted;
@@ -678,7 +678,7 @@ int main(int argc, char **argv) {
         fclose(out);
     }
     free(payload);
-    ztk_sem_destroy(sem);
+    ntk_sem_destroy(sem);
     proxy_destroy(proxy);
     node_destroy(node);
     return 0;

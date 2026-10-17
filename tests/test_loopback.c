@@ -1,7 +1,7 @@
 #include <client.h>
 #include <server.h>
-#include <ztk/platform.h>
-#include <ztk/thread/sem.h>
+#include <platform.h>
+#include <thread/sem.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -13,7 +13,7 @@ static void echo_handler(call_t *call, const request_t *req, void *user) {
 }
 
 typedef struct client_state {
-    ztk_sem *sem;
+    ntk_sem *sem;
     int status;
     char buf[8192];
     size_t len;
@@ -27,11 +27,11 @@ static void on_response(int status, const response_t *resp, void *user) {
         st->len = resp->payload.len;
         st->buf[resp->payload.len < sizeof(st->buf) ? resp->payload.len : sizeof(st->buf) - 1] = '\0';
     }
-    ztk_sem_post(st->sem, 1);
+    ntk_sem_post(st->sem, 1);
 }
 
 static int wait_response(client_state_t *st, unsigned timeout_ms) {
-    if (ztk_sem_timedwait(st->sem, timeout_ms) != ZTK_OK) {
+    if (ntk_sem_timedwait(st->sem, timeout_ms) != NTK_OK) {
         return -1;
     }
     return 0;
@@ -54,12 +54,12 @@ static int run_call(proxy_t *proxy, client_state_t *st, const void *data, size_t
         }
         if (wait_response(st, 1000) == 0) {
             if (st->status == ERR_NOTFOUND) {
-                ztk_sleep_ms(50);
+                ntk_sleep_ms(50);
                 continue;
             }
             return st->status;
         }
-        ztk_sleep_ms(50);
+        ntk_sleep_ms(50);
     }
     return -1;
 }
@@ -136,7 +136,7 @@ static int run_case(transport_kind_t kind, const char *label) {
     }
 
     memset(&st, 0, sizeof(st));
-    st.sem = ztk_sem_create(0);
+    st.sem = ntk_sem_create(0);
     if (!st.sem) {
         failed = 1;
         goto cleanup;
@@ -168,7 +168,7 @@ static int run_case(transport_kind_t kind, const char *label) {
         }
     }
 
-    ztk_sem_destroy(st.sem);
+    ntk_sem_destroy(st.sem);
 
     {
         metrics_t metrics;
@@ -198,7 +198,7 @@ static int run_case(transport_kind_t kind, const char *label) {
                 ok = 1;
                 break;
             }
-            ztk_sleep_ms(200);
+            ntk_sleep_ms(200);
             waited += 200;
         }
         if (!ok) {

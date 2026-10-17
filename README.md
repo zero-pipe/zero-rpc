@@ -1,7 +1,7 @@
 # zero-rpc
 
 基于 [network-tool-kit](3rdpart/ntk) 的**异步核心 RPC**，内置 **UDP** 与 **TCP**
-传输，唯一底层依赖为 ZTK。整体分层解耦：上层只面对 `node / service / proxy / payload`，
+传输，唯一底层依赖为 NTK。整体分层解耦：上层只面对 `node / service / proxy / payload`，
 传输与序列化都是可替换的实现细节。
 
 接口抽象对齐 fastcall-c：`node` 管生命周期与传输，`stub` 承载传输无关的调用原语，
@@ -12,7 +12,7 @@
 
 - **三种调用形态**：`proxy_call_async(...)` 异步回调、`proxy_call_sync(...)` 阻塞等待、
   `proxy_call_event(...)` 单向事件。核心仍是异步的，sync 只是可选的阻塞封装。
-- **不新增线程**：全部运行在 ZTK 的 `ztk_poller_pool` 线程上；回调都在 poller 线程触发（禁止阻塞）。
+- **不新增线程**：全部运行在 NTK 的 `ntk_poller_pool` 线程上；回调都在 poller 线程触发（禁止阻塞）。
 - **可组合传输**：node 管理一个或多个 binding；每个 binding 用 `scheme://host:port` 标识。
   上层只看到统一的 envelope + 消息上下文。UDP 在内部用 RTP/RTCP 承载分片、NACK/RTX 与
   链路反馈来实现可靠性；TCP 本身可靠，只加长度前缀分帧，不引入 RTP/RTCP。

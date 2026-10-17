@@ -1,7 +1,7 @@
-#include "ztk/net/tls_client.h"
-#include "ztk/net/ssl.h"
-#include "ztk/net/socket.h"
-#include "ztk/poller/poller.h"
+#include "net/tls_client.h"
+#include "net/ssl.h"
+#include "net/socket.h"
+#include "poller/poller.h"
 #include "internal/ssl_ctx_internal.h"
 #if defined(_WIN32)
 #  include <winsock2.h>
@@ -21,9 +21,9 @@ typedef enum {
     TLS_ST_READY,
 } tls_state_t;
 
-struct ztk_tls_client {
-    ztk_tls_client_opts_t opts;
-    ztk_socket *sock;
+struct ntk_tls_client {
+    ntk_tls_client_opts_t opts;
+    ntk_socket *sock;
     SSL *ssl_handle;
     tls_state_t state;
     int tcp_connected;
@@ -35,28 +35,28 @@ struct ztk_tls_client {
     size_t pending_len;
 };
 
-static void tls_fire_error(ztk_tls_client *c);
-static void tls_mod_poll(ztk_tls_client *c, int want_write);
-static ztk_err_t tls_do_handshake(ztk_tls_client *c);
-static void tls_drain_plain(ztk_tls_client *c);
-static void tls_flush_pending(ztk_tls_client *c);
+static void tls_fire_error(ntk_tls_client *c);
+static void tls_mod_poll(ntk_tls_client *c, int want_write);
+static ntk_err_t tls_do_handshake(ntk_tls_client *c);
+static void tls_drain_plain(ntk_tls_client *c);
+static void tls_flush_pending(ntk_tls_client *c);
 
-static void tls_mod_poll(ztk_tls_client *c, int want_write)
+static void tls_mod_poll(ntk_tls_client *c, int want_write)
 {
     if (!c || !c->sock)
         return;
-    unsigned ev = ZTK_POLL_IN | ZTK_POLL_ERR | ZTK_POLL_HUP;
+    unsigned ev = NTK_POLL_IN | NTK_POLL_ERR | NTK_POLL_HUP;
     if (want_write || !c->tcp_connected)
-        ev |= ZTK_POLL_OUT;
-    ztk_socket_mod_events(c->sock, ev);
+        ev |= NTK_POLL_OUT;
+    ntk_socket_mod_events(c->sock, ev);
 }
 
-static void tls_fire_error(ztk_tls_client *c)
+static void tls_fire_error(ntk_tls_client *c)
 {
     if (!c || c->closing)
         return;
     c->closing = 1;
-    ztk_socket_detach_poller(c->sock);
+    ntk_socket_detach_poller(c->sock);
     if (c->ssl_handle) {
         SSL_free(c->ssl_handle);
         c->ssl_handle = NULL;
@@ -69,16 +69,16 @@ static void tls_fire_error(ztk_tls_client *c)
         c->opts.ops->on_error(c, c->opts.user);
 }
 
-static ztk_err_t tls_ssl_error(ztk_tls_client *c, int ret, const char *where)
+static ntk_err_t tls_ssl_error(ntk_tls_client *c, int ret, const char *where)
 {
     int err = SSL_get_error(c->ssl_handle, ret);
     if (err == SSL_ERROR_WANT_READ) {
         tls_mod_poll(c, 0);
-        return ZTK_ERR_AGAIN;
+        return NTK_ERR_AGAIN;
     }
     if (err == SSL_ERROR_WANT_WRITE) {
         tls_mod_poll(c, 1);
-        return ZTK_ERR_AGAIN;
+        return NTK_ERR_AGAIN;
     }
     char buf[256];
     unsigned long e = ERR_get_error();
@@ -86,15 +86,15 @@ static ztk_err_t tls_ssl_error(ztk_tls_client *c, int ret, const char *where)
         ERR_error_string_n(e, buf, sizeof(buf));
     else
         snprintf(buf, sizeof(buf), "%s ssl_err=%d", where ? where : "ssl", err);
-    ztk_set_last_error(buf);
+    ntk_set_last_error(buf);
     tls_fire_error(c);
-    return ZTK_ERR_IO;
+    return NTK_ERR_IO;
 }
 
-static ztk_err_t tls_do_handshake(ztk_tls_client *c)
+static ntk_err_t tls_do_handshake(ntk_tls_client *c)
 {
     if (!c || !c->ssl_handle)
-        return ZTK_ERR_INVALID;
+        return NTK_ERR_INVALID;
     int r = SSL_connect(c->ssl_handle);
     if (r == 1) {
         c->state = TLS_ST_READY;
@@ -106,12 +106,12 @@ static ztk_err_t tls_do_handshake(ztk_tls_client *c)
         }
         tls_flush_pending(c);
         tls_drain_plain(c);
-        return ZTK_OK;
+        return NTK_OK;
     }
     return tls_ssl_error(c, r, "SSL_connect");
 }
 
-static void tls_drain_plain(ztk_tls_client *c)
+static void tls_drain_plain(ntk_tls_client *c)
 {
     if (!c || c->state != TLS_ST_READY || !c->ssl_handle || c->closing)
         return;
@@ -142,7 +142,7 @@ static void tls_drain_plain(ztk_tls_client *c)
     }
 }
 
-static void tls_flush_pending(ztk_tls_client *c)
+static void tls_flush_pending(ntk_tls_client *c)
 {
     if (!c || !c->pending_len || c->state != TLS_ST_READY || !c->ssl_handle)
         return;
@@ -153,7 +153,7 @@ static void tls_flush_pending(ztk_tls_client *c)
             off += (size_t)n;
             continue;
         }
-        if (tls_ssl_error(c, n, "SSL_write") == ZTK_ERR_AGAIN) {
+        if (tls_ssl_error(c, n, "SSL_write") == NTK_ERR_AGAIN) {
             if (off > 0) {
                 memmove(c->pending, c->pending + off, c->pending_len - off);
                 c->pending_len -= off;
@@ -165,20 +165,20 @@ static void tls_flush_pending(ztk_tls_client *c)
     c->pending_len = 0;
 }
 
-static void tls_start_ssl(ztk_tls_client *c)
+static void tls_start_ssl(ntk_tls_client *c)
 {
     if (!c || !c->opts.ssl_ctx || !c->opts.ssl_ctx->ctx)
         return;
 
     c->ssl_handle = SSL_new(c->opts.ssl_ctx->ctx);
     if (!c->ssl_handle) {
-        ztk_set_last_error("SSL_new failed");
+        ntk_set_last_error("SSL_new failed");
         tls_fire_error(c);
         return;
     }
 
-    if (SSL_set_fd(c->ssl_handle, (int)ztk_socket_fd(c->sock)) != 1) {
-        ztk_set_last_error("SSL_set_fd failed");
+    if (SSL_set_fd(c->ssl_handle, (int)ntk_socket_fd(c->sock)) != 1) {
+        ntk_set_last_error("SSL_set_fd failed");
         tls_fire_error(c);
         return;
     }
@@ -193,20 +193,20 @@ static void tls_start_ssl(ztk_tls_client *c)
     (void)tls_do_handshake(c);
 }
 
-static void sock_on_writable(ztk_socket *sock, void *user)
+static void sock_on_writable(ntk_socket *sock, void *user)
 {
-    ztk_tls_client *c = (ztk_tls_client *)user;
+    ntk_tls_client *c = (ntk_tls_client *)user;
     if (!c || c->closing)
         return;
 
     if (!c->tcp_connected) {
-        ztk_err_t err = ztk_socket_check_connect(sock);
-        if (err == ZTK_OK) {
+        ntk_err_t err = ntk_socket_check_connect(sock);
+        if (err == NTK_OK) {
             c->tcp_connected = 1;
             tls_start_ssl(c);
             return;
         }
-        if (err != ZTK_ERR_AGAIN)
+        if (err != NTK_ERR_AGAIN)
             tls_fire_error(c);
         return;
     }
@@ -219,9 +219,9 @@ static void sock_on_writable(ztk_socket *sock, void *user)
     }
 }
 
-static void sock_on_readable(ztk_socket *sock, void *user)
+static void sock_on_readable(ntk_socket *sock, void *user)
 {
-    ztk_tls_client *c = (ztk_tls_client *)user;
+    ntk_tls_client *c = (ntk_tls_client *)user;
     if (!c || c->closing)
         return;
 
@@ -237,20 +237,20 @@ static void sock_on_readable(ztk_socket *sock, void *user)
         tls_drain_plain(c);
 }
 
-static void sock_on_error(ztk_socket *sock, void *user)
+static void sock_on_error(ntk_socket *sock, void *user)
 {
     (void)sock;
-    tls_fire_error((ztk_tls_client *)user);
+    tls_fire_error((ntk_tls_client *)user);
 }
 
-ztk_tls_client *ztk_tls_client_create(const ztk_tls_client_opts_t *opts)
+ntk_tls_client *ntk_tls_client_create(const ntk_tls_client_opts_t *opts)
 {
     if (!opts || !opts->poller || !opts->ops || !opts->ssl_ctx || !opts->ssl_ctx->ctx)
         return NULL;
-    if (ztk_ssl_global_init() != ZTK_OK)
+    if (ntk_ssl_global_init() != NTK_OK)
         return NULL;
 
-    ztk_tls_client *c = (ztk_tls_client *)calloc(1, sizeof(*c));
+    ntk_tls_client *c = (ntk_tls_client *)calloc(1, sizeof(*c));
     if (!c)
         return NULL;
 
@@ -258,7 +258,7 @@ ztk_tls_client *ztk_tls_client_create(const ztk_tls_client_opts_t *opts)
     if (opts->sni_host && opts->sni_host[0])
         strncpy(c->sni_name, opts->sni_host, sizeof(c->sni_name) - 1);
 
-    c->sock = ztk_socket_create();
+    c->sock = ntk_socket_create();
     if (!c->sock) {
         free(c);
         return NULL;
@@ -266,28 +266,28 @@ ztk_tls_client *ztk_tls_client_create(const ztk_tls_client_opts_t *opts)
     return c;
 }
 
-void ztk_tls_client_destroy(ztk_tls_client *client)
+void ntk_tls_client_destroy(ntk_tls_client *client)
 {
     if (!client)
         return;
-    ztk_tls_client_close(client);
+    ntk_tls_client_close(client);
     if (client->ssl_handle) {
         SSL_free(client->ssl_handle);
         client->ssl_handle = NULL;
     }
     if (client->sock) {
-        ztk_socket_destroy(client->sock);
+        ntk_socket_destroy(client->sock);
         client->sock = NULL;
     }
     free(client);
 }
 
-ztk_err_t ztk_tls_client_connect(ztk_tls_client *client, const char *host, uint16_t port)
+ntk_err_t ntk_tls_client_connect(ntk_tls_client *client, const char *host, uint16_t port)
 {
     if (!client || client->closing || !host)
-        return ZTK_ERR_INVALID;
+        return NTK_ERR_INVALID;
 
-    ztk_socket_detach_poller(client->sock);
+    ntk_socket_detach_poller(client->sock);
     if (client->ssl_handle) {
         SSL_free(client->ssl_handle);
         client->ssl_handle = NULL;
@@ -302,38 +302,38 @@ ztk_err_t ztk_tls_client_connect(ztk_tls_client *client, const char *host, uint1
         strncpy(client->sni_name, host, sizeof(client->sni_name) - 1);
 
     int pending = 0;
-    ztk_err_t err = ztk_socket_connect(client->sock, host, port, &pending);
-    if (err != ZTK_OK)
+    ntk_err_t err = ntk_socket_connect(client->sock, host, port, &pending);
+    if (err != NTK_OK)
         return err;
 
-    ztk_socket_callbacks_t cb = { sock_on_readable, sock_on_writable, sock_on_error };
-    err = ztk_socket_attach_poller(client->sock, client->opts.poller, &cb, client);
-    if (err != ZTK_OK)
+    ntk_socket_callbacks_t cb = { sock_on_readable, sock_on_writable, sock_on_error };
+    err = ntk_socket_attach_poller(client->sock, client->opts.poller, &cb, client);
+    if (err != NTK_OK)
         return err;
 
     if (!pending) {
         client->tcp_connected = 1;
         tls_start_ssl(client);
     }
-    return ZTK_OK;
+    return NTK_OK;
 }
 
-int ztk_tls_client_is_connected(const ztk_tls_client *client)
+int ntk_tls_client_is_connected(const ntk_tls_client *client)
 {
     return client && client->state == TLS_ST_READY && !client->closing && client->ready_sent;
 }
 
-ztk_err_t ztk_tls_client_send(ztk_tls_client *client, const void *data, size_t len)
+ntk_err_t ntk_tls_client_send(ntk_tls_client *client, const void *data, size_t len)
 {
     if (!client || client->closing || !data || len == 0)
-        return ZTK_ERR_INVALID;
+        return NTK_ERR_INVALID;
 
     if (client->state != TLS_ST_READY || !client->ssl_handle) {
         if (client->pending_len + len > TLS_SEND_BUF)
-            return ZTK_ERR_BUFFER_TOO_SMALL;
+            return NTK_ERR_BUFFER_TOO_SMALL;
         memcpy(client->pending + client->pending_len, data, len);
         client->pending_len += len;
-        return ZTK_ERR_AGAIN;
+        return NTK_ERR_AGAIN;
     }
 
     const uint8_t *p = (const uint8_t *)data;
@@ -344,32 +344,32 @@ ztk_err_t ztk_tls_client_send(ztk_tls_client *client, const void *data, size_t l
             off += (size_t)n;
             continue;
         }
-        ztk_err_t err = tls_ssl_error(client, n, "SSL_write");
-        if (err == ZTK_ERR_AGAIN && off < len) {
+        ntk_err_t err = tls_ssl_error(client, n, "SSL_write");
+        if (err == NTK_ERR_AGAIN && off < len) {
             size_t rest = len - off;
             if (client->pending_len + rest > TLS_SEND_BUF)
-                return ZTK_ERR_BUFFER_TOO_SMALL;
+                return NTK_ERR_BUFFER_TOO_SMALL;
             memcpy(client->pending + client->pending_len, p + off, rest);
             client->pending_len += rest;
         }
         return err;
     }
-    return ZTK_OK;
+    return NTK_OK;
 }
 
-void ztk_tls_client_close(ztk_tls_client *client)
+void ntk_tls_client_close(ntk_tls_client *client)
 {
     if (!client || client->closing)
         return;
     client->closing = 1;
-    ztk_socket_detach_poller(client->sock);
+    ntk_socket_detach_poller(client->sock);
     if (client->ssl_handle) {
         SSL_shutdown(client->ssl_handle);
         SSL_free(client->ssl_handle);
         client->ssl_handle = NULL;
     }
-    ztk_socket_destroy(client->sock);
-    client->sock = ztk_socket_create();
+    ntk_socket_destroy(client->sock);
+    client->sock = ntk_socket_create();
     client->state = TLS_ST_TCP;
     client->tcp_connected = 0;
     client->ready_sent = 0;

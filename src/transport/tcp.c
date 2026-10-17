@@ -1,7 +1,7 @@
 /*
- * TCP 传输驱动：基于 ztk_tcp_server / ztk_tcp_client 的长度前缀分帧。
+ * TCP 传输驱动：基于 ntk_tcp_server / ntk_tcp_client 的长度前缀分帧。
  *
- * 线程模型：入站会话由 ztk_tcp_server 分散到 poller_pool 的各个 poller，出站连接
+ * 线程模型：入站会话由 ntk_tcp_server 分散到 poller_pool 的各个 poller，出站连接
  * 固定在 io0。为避免跨线程争用，link 表按 poller 分片（每个 poller 独占一行），
  * 热路径无锁；同一会话的 on_recv/on_error 始终在其所属 poller 上执行。
  *
@@ -29,7 +29,7 @@ typedef struct zri_rx_acc {
     size_t cap;
     size_t rpos; /* 已消费 */
     size_t wpos; /* 已写入 */
-    ztk_buf_pool *pool; /* buf 所属池；跨线程释放不能从 current poller 推断 */
+    ntk_buf_pool *pool; /* buf 所属池；跨线程释放不能从 current poller 推断 */
 } zri_rx_acc_t;
 
 /* 一条 TCP 连接：入站（服务端会话）或出站（客户端连接）。 */
@@ -38,8 +38,8 @@ typedef struct zri_tcp_link {
     int server_side;
     char ip[ENDPOINT_MAX];
     uint16_t port;
-    ztk_tcp_session *session; /* 服务端侧：accept 得到 */
-    ztk_tcp_client *client;   /* 客户端侧：connect 发起 */
+    ntk_tcp_session *session; /* 服务端侧：accept 得到 */
+    ntk_tcp_client *client;   /* 客户端侧：connect 发起 */
     int connected;
     zri_rx_acc_t rx; /* 接收累积 */
     zri_iobuf_t tx;  /* 出站待写队列（仅客户端侧使用） */
@@ -47,16 +47,16 @@ typedef struct zri_tcp_link {
 
 typedef struct zri_tcp_transport {
     zri_transport_t base;
-    ztk_tcp_server *server;
-    ztk_poller *pollers[IO_MAX];
+    ntk_tcp_server *server;
+    ntk_poller *pollers[IO_MAX];
     int io_count;
     zri_tcp_link_t links[IO_MAX][TCP_LINKS_PER_IO];
-    ztk_timer *tick_timer;
+    ntk_timer *tick_timer;
 } zri_tcp_transport_t;
 
-static void tcp_client_on_connect(ztk_tcp_client *client, void *user);
-static void tcp_client_on_recv(ztk_tcp_client *client, const void *data, size_t len, void *user);
-static void tcp_client_on_error(ztk_tcp_client *client, void *user);
+static void tcp_client_on_connect(ntk_tcp_client *client, void *user);
+static void tcp_client_on_recv(ntk_tcp_client *client, const void *data, size_t len, void *user);
+static void tcp_client_on_error(ntk_tcp_client *client, void *user);
 static void tcp_tick_cb(void *user);
 
 /* ---- 接收累积 ---- */
@@ -74,7 +74,7 @@ static void rx_acc_free(zri_rx_acc_t *a) {
         return;
     }
     if (a->pool) {
-        ztk_buf_pool_release(a->pool, a->buf, a->cap);
+        ntk_buf_pool_release(a->pool, a->buf, a->cap);
     } else {
         free(a->buf);
     }
@@ -82,8 +82,8 @@ static void rx_acc_free(zri_rx_acc_t *a) {
 }
 
 static int rx_acc_reserve(zri_rx_acc_t *a, size_t extra) {
-    ztk_poller *poller;
-    ztk_buf_pool *pool;
+    ntk_poller *poller;
+    ntk_buf_pool *pool;
     size_t used = a->wpos - a->rpos;
 
     if (extra == 0) {
@@ -101,8 +101,8 @@ static int rx_acc_reserve(zri_rx_acc_t *a, size_t extra) {
             return OK;
         }
     }
-    poller = ztk_poller_current();
-    pool = a->pool ? a->pool : (poller ? ztk_poller_buf_pool(poller) : NULL);
+    poller = ntk_poller_current();
+    pool = a->pool ? a->pool : (poller ? ntk_poller_buf_pool(poller) : NULL);
     {
         size_t need = a->wpos + extra;
         size_t ncap = a->cap ? a->cap : 8192;
@@ -111,14 +111,14 @@ static int rx_acc_reserve(zri_rx_acc_t *a, size_t extra) {
         }
         if (pool) {
             size_t got = 0;
-            uint8_t *nb = (uint8_t *)ztk_buf_pool_acquire(pool, ncap, &got);
+            uint8_t *nb = (uint8_t *)ntk_buf_pool_acquire(pool, ncap, &got);
             if (!nb) {
                 return ERR_NOMEM;
             }
             if (a->buf) {
                 memcpy(nb, a->buf, used);
                 if (a->pool) {
-                    ztk_buf_pool_release(a->pool, a->buf, a->cap);
+                    ntk_buf_pool_release(a->pool, a->buf, a->cap);
                 } else {
                     free(a->buf);
                 }
@@ -211,19 +211,19 @@ static void tcp_link_flush_tx(zri_tcp_transport_t *t, zri_tcp_link_t *link) {
         return;
     }
     while (!zri_iobuf_empty(&link->tx)) {
-        ztk_socket_iov iov[ZTK_SOCKET_IOV_MAX];
-        unsigned n = zri_iobuf_iovec(&link->tx, iov, ZTK_SOCKET_IOV_MAX, 0);
-        ztk_socket *sock;
-        ztk_ssize_t sent;
+        ntk_socket_iov iov[NTK_SOCKET_IOV_MAX];
+        unsigned n = zri_iobuf_iovec(&link->tx, iov, NTK_SOCKET_IOV_MAX, 0);
+        ntk_socket *sock;
+        ntk_ssize_t sent;
 
         if (n == 0) {
             break;
         }
-        sock = ztk_tcp_client_socket(link->client);
+        sock = ntk_tcp_client_socket(link->client);
         if (!sock) {
             break;
         }
-        sent = ztk_socket_sendv(sock, iov, n);
+        sent = ntk_socket_sendv(sock, iov, n);
         if (sent > 0) {
             zri_iobuf_consume(&link->tx, (size_t)sent);
             continue;
@@ -238,18 +238,18 @@ static void tcp_link_flush_tx(zri_tcp_transport_t *t, zri_tcp_link_t *link) {
  */
 static int tcp_link_emit(zri_tcp_transport_t *t, zri_tcp_link_t *link, const uint8_t *header,
                          size_t header_len, const void *payload, size_t payload_len) {
-    ztk_poller *poller = ztk_poller_current();
+    ntk_poller *poller = ntk_poller_current();
     size_t total = header_len + payload_len;
 
     if (!t || !link || !link->used || !header || header_len == 0) {
         return ERR_INVALID;
     }
 
-    /* 入站会话自带出站队列（ztk_buf 引用），直接委托，避免二次排队。 */
+    /* 入站会话自带出站队列（ntk_buf 引用），直接委托，避免二次排队。 */
     if (link->server_side) {
         const void *parts[2];
         size_t lens[2];
-        ztk_err_t rc;
+        ntk_err_t rc;
         if (!link->session) {
             return ERR_STATE;
         }
@@ -257,12 +257,12 @@ static int tcp_link_emit(zri_tcp_transport_t *t, zri_tcp_link_t *link, const uin
         lens[0] = header_len;
         parts[1] = payload;
         lens[1] = payload_len;
-        rc = ztk_tcp_session_sendv(link->session, parts, lens, payload_len ? 2u : 1u);
-        if (rc == ZTK_OK) {
+        rc = ntk_tcp_session_sendv(link->session, parts, lens, payload_len ? 2u : 1u);
+        if (rc == NTK_OK) {
             t->base.metrics->tcp_frames_sent++;
             return OK;
         }
-        return (rc == ZTK_ERR_AGAIN) ? ERR_AGAIN : ERR_IO;
+        return (rc == NTK_ERR_AGAIN) ? ERR_AGAIN : ERR_IO;
     }
 
     if (!link->client) {
@@ -294,26 +294,26 @@ static int tcp_link_emit(zri_tcp_transport_t *t, zri_tcp_link_t *link, const uin
 
     /* 快路径：一次 sendv / send 写出 header + payload。 */
     {
-        ztk_socket *sock = ztk_tcp_client_socket(link->client);
-        ztk_ssize_t sent;
+        ntk_socket *sock = ntk_tcp_client_socket(link->client);
+        ntk_ssize_t sent;
         if (!sock) {
             return ERR_IO;
         }
         if (payload_len) {
-            ztk_socket_iov iov[2];
+            ntk_socket_iov iov[2];
             iov[0].base = header;
             iov[0].len = header_len;
             iov[1].base = payload;
             iov[1].len = payload_len;
-            sent = ztk_socket_sendv(sock, iov, 2);
+            sent = ntk_socket_sendv(sock, iov, 2);
         } else {
-            sent = ztk_socket_send(sock, header, header_len);
+            sent = ntk_socket_send(sock, header, header_len);
         }
-        if (sent == (ztk_ssize_t)total) {
+        if (sent == (ntk_ssize_t)total) {
             t->base.metrics->tcp_frames_sent++;
             return OK;
         }
-        if (sent == ZTK_ERR_AGAIN) {
+        if (sent == NTK_ERR_AGAIN) {
             sent = 0;
         } else if (sent < 0) {
             return ERR_IO;
@@ -343,7 +343,7 @@ static int tcp_link_emit(zri_tcp_transport_t *t, zri_tcp_link_t *link, const uin
 
 /* ---- 连接查找（各自 poller 独占一行，无锁） ---- */
 
-static int io_of_poller(zri_tcp_transport_t *t, ztk_poller *poller) {
+static int io_of_poller(zri_tcp_transport_t *t, ntk_poller *poller) {
     int i;
     if (!poller) {
         return -1;
@@ -375,8 +375,8 @@ static zri_tcp_link_t *link_find_out(zri_tcp_transport_t *t, const char *ip, uin
     }
     {
         zri_tcp_link_t *link = &row[free_slot];
-        ztk_tcp_client_ops_t ops;
-        ztk_tcp_client_opts_t copts;
+        ntk_tcp_client_ops_t ops;
+        ntk_tcp_client_opts_t copts;
         memset(link, 0, sizeof(*link));
         link->used = 1;
         link->server_side = 0;
@@ -393,13 +393,13 @@ static zri_tcp_link_t *link_find_out(zri_tcp_transport_t *t, const char *ip, uin
         copts.poller = t->base.poller;
         copts.ops = &ops;
         copts.user = t;
-        link->client = ztk_tcp_client_create(&copts);
+        link->client = ntk_tcp_client_create(&copts);
         if (!link->client) {
             link->used = 0;
             return NULL;
         }
-        if (ztk_tcp_client_connect(link->client, link->ip, link->port) != ZTK_OK) {
-            ztk_tcp_client_destroy(link->client);
+        if (ntk_tcp_client_connect(link->client, link->ip, link->port) != NTK_OK) {
+            ntk_tcp_client_destroy(link->client);
             link->client = NULL;
             link->used = 0;
             return NULL;
@@ -408,9 +408,9 @@ static zri_tcp_link_t *link_find_out(zri_tcp_transport_t *t, const char *ip, uin
     }
 }
 
-static zri_tcp_link_t *link_for_session(zri_tcp_transport_t *t, ztk_tcp_session *session,
+static zri_tcp_link_t *link_for_session(zri_tcp_transport_t *t, ntk_tcp_session *session,
                                          int create) {
-    int io = io_of_poller(t, ztk_tcp_session_poller(session));
+    int io = io_of_poller(t, ntk_tcp_session_poller(session));
     zri_tcp_link_t *row;
     int i;
     int free_slot = -1;
@@ -432,7 +432,7 @@ static zri_tcp_link_t *link_for_session(zri_tcp_transport_t *t, ztk_tcp_session 
     }
     {
         zri_tcp_link_t *link = &row[free_slot];
-        ztk_socket *sock;
+        ntk_socket *sock;
         char ip[ENDPOINT_MAX];
         uint16_t port = 0;
         memset(link, 0, sizeof(*link));
@@ -442,8 +442,8 @@ static zri_tcp_link_t *link_for_session(zri_tcp_transport_t *t, ztk_tcp_session 
         link->session = session;
         rx_acc_init(&link->rx);
         zri_iobuf_init(&link->tx);
-        sock = ztk_tcp_session_socket(session);
-        if (sock && ztk_socket_get_peer(sock, ip, sizeof(ip), &port) == ZTK_OK) {
+        sock = ntk_tcp_session_socket(session);
+        if (sock && ntk_socket_get_peer(sock, ip, sizeof(ip), &port) == NTK_OK) {
             zri_copy_str(link->ip, sizeof(link->ip), ip, "0.0.0.0");
             link->port = port;
         } else {
@@ -453,7 +453,7 @@ static zri_tcp_link_t *link_for_session(zri_tcp_transport_t *t, ztk_tcp_session 
     }
 }
 
-static zri_tcp_link_t *link_for_client(zri_tcp_transport_t *t, ztk_tcp_client *client) {
+static zri_tcp_link_t *link_for_client(zri_tcp_transport_t *t, ntk_tcp_client *client) {
     zri_tcp_link_t *row = t->links[0];
     int i;
     for (i = 0; i < TCP_LINKS_PER_IO; i++) {
@@ -466,7 +466,7 @@ static zri_tcp_link_t *link_for_client(zri_tcp_transport_t *t, ztk_tcp_client *c
 
 /* ---- 服务端会话回调 ---- */
 
-static void tcp_srv_on_recv(ztk_tcp_session *session, const void *data, size_t len, void *user) {
+static void tcp_srv_on_recv(ntk_tcp_session *session, const void *data, size_t len, void *user) {
     zri_tcp_transport_t *t = (zri_tcp_transport_t *)user;
     zri_tcp_link_t *link;
     if (!t) {
@@ -478,7 +478,7 @@ static void tcp_srv_on_recv(ztk_tcp_session *session, const void *data, size_t l
     }
 }
 
-static void tcp_srv_on_error(ztk_tcp_session *session, void *user) {
+static void tcp_srv_on_error(ntk_tcp_session *session, void *user) {
     zri_tcp_transport_t *t = (zri_tcp_transport_t *)user;
     zri_tcp_link_t *link;
     if (!t) {
@@ -495,7 +495,7 @@ static void tcp_srv_on_error(ztk_tcp_session *session, void *user) {
 
 /* ---- 客户端回调 ---- */
 
-static void tcp_client_on_connect(ztk_tcp_client *client, void *user) {
+static void tcp_client_on_connect(ntk_tcp_client *client, void *user) {
     zri_tcp_transport_t *t = (zri_tcp_transport_t *)user;
     zri_tcp_link_t *link;
     if (!t) {
@@ -508,7 +508,7 @@ static void tcp_client_on_connect(ztk_tcp_client *client, void *user) {
     }
 }
 
-static void tcp_client_on_recv(ztk_tcp_client *client, const void *data, size_t len, void *user) {
+static void tcp_client_on_recv(ntk_tcp_client *client, const void *data, size_t len, void *user) {
     zri_tcp_transport_t *t = (zri_tcp_transport_t *)user;
     zri_tcp_link_t *link;
     if (!t) {
@@ -520,7 +520,7 @@ static void tcp_client_on_recv(ztk_tcp_client *client, const void *data, size_t 
     }
 }
 
-static void tcp_client_on_error(ztk_tcp_client *client, void *user) {
+static void tcp_client_on_error(ntk_tcp_client *client, void *user) {
     zri_tcp_transport_t *t = (zri_tcp_transport_t *)user;
     zri_tcp_link_t *link;
     if (!t) {
@@ -532,7 +532,7 @@ static void tcp_client_on_error(ztk_tcp_client *client, void *user) {
     }
     rx_acc_free(&link->rx);
     zri_iobuf_reset(&link->tx);
-    ztk_tcp_client_destroy(client);
+    ntk_tcp_client_destroy(client);
     link->client = NULL;
     link->used = 0;
 }
@@ -541,18 +541,18 @@ static void tcp_client_on_error(ztk_tcp_client *client, void *user) {
 
 static int tcp_start(zri_transport_t *base) {
     zri_tcp_transport_t *t = (zri_tcp_transport_t *)base;
-    ztk_tcp_server_opts_t opts;
-    ztk_tcp_session_ops_t sops;
+    ntk_tcp_server_opts_t opts;
+    ntk_tcp_session_ops_t sops;
     unsigned n;
     unsigned i;
 
-    n = ztk_poller_pool_size(base->pool);
+    n = ntk_poller_pool_size(base->pool);
     if (n > IO_MAX) {
         n = IO_MAX;
     }
     t->io_count = (int)n;
     for (i = 0; i < n; i++) {
-        t->pollers[i] = ztk_poller_pool_at(base->pool, i);
+        t->pollers[i] = ntk_poller_pool_at(base->pool, i);
     }
 
     memset(&sops, 0, sizeof(sops));
@@ -567,17 +567,17 @@ static int tcp_start(zri_transport_t *base) {
     opts.session_create_user = NULL;
     opts.manager_interval_sec = 0.0f;
 
-    t->server = ztk_tcp_server_create(&opts);
+    t->server = ntk_tcp_server_create(&opts);
     if (!t->server) {
         return ERR_IO;
     }
-    if (ztk_tcp_server_start(t->server) != ZTK_OK) {
-        ztk_tcp_server_destroy(t->server);
+    if (ntk_tcp_server_start(t->server) != NTK_OK) {
+        ntk_tcp_server_destroy(t->server);
         t->server = NULL;
         return ERR_IO;
     }
-    base->port = ztk_tcp_server_port(t->server);
-    t->tick_timer = ztk_timer_start(base->poller, zri_tick_interval_ms(), 1, tcp_tick_cb, t);
+    base->port = ntk_tcp_server_port(t->server);
+    t->tick_timer = ntk_timer_start(base->poller, zri_tick_interval_ms(), 1, tcp_tick_cb, t);
     return OK;
 }
 
@@ -588,7 +588,7 @@ static void tcp_free_link(zri_tcp_link_t *link) {
     rx_acc_free(&link->rx);
     zri_iobuf_reset(&link->tx);
     if (!link->server_side && link->client) {
-        ztk_tcp_client_destroy(link->client);
+        ntk_tcp_client_destroy(link->client);
         link->client = NULL;
     }
     link->used = 0;
@@ -598,13 +598,13 @@ static void tcp_stop(zri_transport_t *base) {
     zri_tcp_transport_t *t = (zri_tcp_transport_t *)base;
     int i, j;
     if (t->tick_timer) {
-        ztk_timer_stop(t->tick_timer);
+        ntk_timer_stop(t->tick_timer);
         t->tick_timer = NULL;
     }
     /* 先停 listen，再销毁 server（会 detach 并销毁所有入站会话），最后清 link 表。 */
     if (t->server) {
-        ztk_tcp_server_stop(t->server);
-        ztk_tcp_server_destroy(t->server);
+        ntk_tcp_server_stop(t->server);
+        ntk_tcp_server_destroy(t->server);
         t->server = NULL;
     }
     for (i = 0; i < IO_MAX; i++) {

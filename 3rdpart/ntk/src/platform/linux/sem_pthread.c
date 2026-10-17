@@ -1,17 +1,17 @@
-#include "ztk/thread/sem.h"
-#include "ztk/ztk_errno.h"
-#include "ztk_config.h"
+#include "thread/sem.h"
+#include "ntk_errno.h"
+#include "ntk_config.h"
 #include <errno.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <time.h>
 
-#if defined(ZTK_HAVE_POSIX_SEM)
+#if defined(NTK_HAVE_POSIX_SEM)
 #  include <semaphore.h>
 #endif
 
-struct ztk_sem {
-#if defined(ZTK_HAVE_POSIX_SEM)
+struct ntk_sem {
+#if defined(NTK_HAVE_POSIX_SEM)
     sem_t native;
 #else
     pthread_mutex_t mtx;
@@ -20,13 +20,13 @@ struct ztk_sem {
 #endif
 };
 
-ztk_sem *ztk_sem_create(unsigned int initial)
+ntk_sem *ntk_sem_create(unsigned int initial)
 {
-    ztk_sem *s = (ztk_sem *)calloc(1, sizeof(*s));
+    ntk_sem *s = (ntk_sem *)calloc(1, sizeof(*s));
     if (!s)
         return NULL;
 
-#if defined(ZTK_HAVE_POSIX_SEM)
+#if defined(NTK_HAVE_POSIX_SEM)
     if (sem_init(&s->native, 0, initial) != 0) {
         free(s);
         return NULL;
@@ -39,11 +39,11 @@ ztk_sem *ztk_sem_create(unsigned int initial)
     return s;
 }
 
-void ztk_sem_destroy(ztk_sem *s)
+void ntk_sem_destroy(ntk_sem *s)
 {
     if (!s)
         return;
-#if defined(ZTK_HAVE_POSIX_SEM)
+#if defined(NTK_HAVE_POSIX_SEM)
     sem_destroy(&s->native);
 #else
     pthread_mutex_destroy(&s->mtx);
@@ -52,15 +52,15 @@ void ztk_sem_destroy(ztk_sem *s)
     free(s);
 }
 
-static ztk_err_t sem_wait_impl(ztk_sem *s, int timeout_ms)
+static ntk_err_t sem_wait_impl(ntk_sem *s, int timeout_ms)
 {
-#if defined(ZTK_HAVE_POSIX_SEM)
+#if defined(NTK_HAVE_POSIX_SEM)
     if (timeout_ms < 0) {
         while (sem_wait(&s->native) != 0) {
             if (errno != EINTR)
-                return ZTK_ERR_PLATFORM;
+                return NTK_ERR_PLATFORM;
         }
-        return ZTK_OK;
+        return NTK_OK;
     }
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
@@ -75,10 +75,10 @@ static ztk_err_t sem_wait_impl(ztk_sem *s, int timeout_ms)
         r = sem_timedwait(&s->native, &ts);
     } while (r != 0 && errno == EINTR);
     if (r == 0)
-        return ZTK_OK;
+        return NTK_OK;
     if (errno == ETIMEDOUT)
-        return ZTK_ERR_TIMEOUT;
-    return ZTK_ERR_PLATFORM;
+        return NTK_ERR_TIMEOUT;
+    return NTK_ERR_PLATFORM;
 #else
     pthread_mutex_lock(&s->mtx);
     if (timeout_ms < 0) {
@@ -97,50 +97,50 @@ static ztk_err_t sem_wait_impl(ztk_sem *s, int timeout_ms)
             int r = pthread_cond_timedwait(&s->cond, &s->mtx, &ts);
             if (r == ETIMEDOUT) {
                 pthread_mutex_unlock(&s->mtx);
-                return ZTK_ERR_TIMEOUT;
+                return NTK_ERR_TIMEOUT;
             }
             if (r != 0 && r != EINTR) {
                 pthread_mutex_unlock(&s->mtx);
-                return ZTK_ERR_PLATFORM;
+                return NTK_ERR_PLATFORM;
             }
         }
     }
     s->count--;
     pthread_mutex_unlock(&s->mtx);
-    return ZTK_OK;
+    return NTK_OK;
 #endif
 }
 
-ztk_err_t ztk_sem_wait(ztk_sem *s)
+ntk_err_t ntk_sem_wait(ntk_sem *s)
 {
     if (!s)
-        return ZTK_ERR_INVALID;
+        return NTK_ERR_INVALID;
     return sem_wait_impl(s, -1);
 }
 
-ztk_err_t ztk_sem_timedwait(ztk_sem *s, unsigned int timeout_ms)
+ntk_err_t ntk_sem_timedwait(ntk_sem *s, unsigned int timeout_ms)
 {
     if (!s)
-        return ZTK_ERR_INVALID;
+        return NTK_ERR_INVALID;
     return sem_wait_impl(s, (int)timeout_ms);
 }
 
-ztk_err_t ztk_sem_post(ztk_sem *s, unsigned int count)
+ntk_err_t ntk_sem_post(ntk_sem *s, unsigned int count)
 {
     if (!s || count == 0)
-        return ZTK_ERR_INVALID;
+        return NTK_ERR_INVALID;
 
-#if defined(ZTK_HAVE_POSIX_SEM)
+#if defined(NTK_HAVE_POSIX_SEM)
     for (unsigned int i = 0; i < count; ++i) {
         if (sem_post(&s->native) != 0)
-            return ZTK_ERR_PLATFORM;
+            return NTK_ERR_PLATFORM;
     }
-    return ZTK_OK;
+    return NTK_OK;
 #else
     pthread_mutex_lock(&s->mtx);
     s->count += count;
     pthread_cond_broadcast(&s->cond);
     pthread_mutex_unlock(&s->mtx);
-    return ZTK_OK;
+    return NTK_OK;
 #endif
 }

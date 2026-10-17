@@ -6,8 +6,8 @@
 #include <string.h>
 
 typedef struct zri_sync_ctx {
-    ztk_sem *sem;
-    ztk_mutex *lock;
+    ntk_sem *sem;
+    ntk_mutex *lock;
     int refs; /* 2：等待方 + 回调方，最后一个释放 */
     int done;
     int status;     /* 传输状态 */
@@ -19,24 +19,24 @@ typedef struct zri_sync_ctx {
 
 static void sync_ctx_put(zri_sync_ctx_t *c) {
     int last;
-    ztk_mutex_lock(c->lock);
+    ntk_mutex_lock(c->lock);
     last = (--c->refs == 0);
-    ztk_mutex_unlock(c->lock);
+    ntk_mutex_unlock(c->lock);
     if (last) {
         if (c->data) {
             free(c->data);
         }
-        ztk_mutex_destroy(c->lock);
-        ztk_sem_destroy(c->sem);
+        ntk_mutex_destroy(c->lock);
+        ntk_sem_destroy(c->sem);
         free(c);
     }
 }
 
 static void sync_response_cb(int status, const response_t *resp, void *user) {
     zri_sync_ctx_t *c = (zri_sync_ctx_t *)user;
-    ztk_mutex_lock(c->lock);
+    ntk_mutex_lock(c->lock);
     if (c->done) {
-        ztk_mutex_unlock(c->lock);
+        ntk_mutex_unlock(c->lock);
         sync_ctx_put(c);
         return;
     }
@@ -53,8 +53,8 @@ static void sync_response_cb(int status, const response_t *resp, void *user) {
         }
     }
     c->done = 1;
-    ztk_mutex_unlock(c->lock);
-    ztk_sem_post(c->sem, 1);
+    ntk_mutex_unlock(c->lock);
+    ntk_sem_post(c->sem, 1);
     sync_ctx_put(c);
 }
 
@@ -75,14 +75,14 @@ int proxy_call_sync(proxy_t *proxy, const char *service, const char *method,
     if (!c) {
         return ERR_NOMEM;
     }
-    c->sem = ztk_sem_create(0);
-    c->lock = ztk_mutex_create(ZTK_MUTEX_NORMAL);
+    c->sem = ntk_sem_create(0);
+    c->lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
     if (!c->sem || !c->lock) {
         if (c->sem) {
-            ztk_sem_destroy(c->sem);
+            ntk_sem_destroy(c->sem);
         }
         if (c->lock) {
-            ztk_mutex_destroy(c->lock);
+            ntk_mutex_destroy(c->lock);
         }
         free(c);
         return ERR_NOMEM;
@@ -99,8 +99,8 @@ int proxy_call_sync(proxy_t *proxy, const char *service, const char *method,
     if (out_request_id) {
         *out_request_id = id;
     }
-    if (ztk_sem_timedwait(c->sem,
-                          (unsigned)(timeout_ms ? timeout_ms : DEFAULT_TIMEOUT_MS)) != ZTK_OK) {
+    if (ntk_sem_timedwait(c->sem,
+                          (unsigned)(timeout_ms ? timeout_ms : DEFAULT_TIMEOUT_MS)) != NTK_OK) {
         /* 取消未完成调用；回调（若仍会到达）会释放它的引用。 */
         (void)proxy_cancel(proxy, id);
         sync_ctx_put(c);

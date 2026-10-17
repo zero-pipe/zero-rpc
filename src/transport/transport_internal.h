@@ -15,7 +15,7 @@
 #include <metrics.h>
 #include <transport_provider.h>
 
-#include <ztk/ztk.h>
+#include <ntk.h>
 
 #include <stdint.h>
 
@@ -66,8 +66,8 @@ struct zri_transport {
     uint32_t rtcp_interval_ms;
     int rtcp_disabled;
     unsigned io_threads;
-    ztk_poller_pool *pool;
-    ztk_poller *poller;
+    ntk_poller_pool *pool;
+    ntk_poller *poller;
     metrics_t *metrics;
 };
 

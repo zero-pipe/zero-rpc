@@ -7,7 +7,7 @@
  * 分层约定：
  *   - 传输层（UDP/TCP）只搬运字节，不解释业务语义；
  *   - 应用层的 payload 对框架完全透明（见 payload_t）；
- *   - 所有回调都在 ztk poller 线程内触发，回调中禁止阻塞。
+ *   - 所有回调都在 ntk poller 线程内触发，回调中禁止阻塞。
  */
 
 #include <stddef.h>

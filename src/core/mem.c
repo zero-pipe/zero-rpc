@@ -10,21 +10,21 @@
  */
 #include "mem.h"
 
-#include <ztk/ztk.h>
+#include <ntk.h>
 
 #include <stdlib.h>
 #include <string.h>
 
 typedef struct zri_mem_hdr {
-    ztk_buf_pool *pool;
-    ztk_poller *owner;
+    ntk_buf_pool *pool;
+    ntk_poller *owner;
     size_t cap;
 } zri_mem_hdr_t;
 
 void *zri_mem_alloc(size_t size) {
     zri_mem_hdr_t *h;
-    ztk_poller *owner = ztk_poller_current();
-    ztk_buf_pool *pool = owner ? ztk_poller_buf_pool(owner) : NULL;
+    ntk_poller *owner = ntk_poller_current();
+    ntk_buf_pool *pool = owner ? ntk_poller_buf_pool(owner) : NULL;
     size_t cap = 0;
     void *raw = NULL;
 
@@ -32,7 +32,7 @@ void *zri_mem_alloc(size_t size) {
         return NULL;
     }
     if (pool) {
-        raw = ztk_buf_pool_acquire(pool, sizeof(*h) + size, &cap);
+        raw = ntk_buf_pool_acquire(pool, sizeof(*h) + size, &cap);
     }
     if (!raw) {
         raw = malloc(sizeof(*h) + size);
@@ -57,8 +57,8 @@ void zri_mem_free(void *ptr) {
         return;
     }
     h = ((zri_mem_hdr_t *)ptr) - 1;
-    if (h->pool && h->owner && ztk_poller_is_current_thread(h->owner)) {
-        ztk_buf_pool_release(h->pool, h, h->cap);
+    if (h->pool && h->owner && ntk_poller_is_current_thread(h->owner)) {
+        ntk_buf_pool_release(h->pool, h, h->cap);
     } else {
         free(h);
     }

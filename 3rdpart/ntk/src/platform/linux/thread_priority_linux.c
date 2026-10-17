@@ -1,8 +1,8 @@
-#include "ztk/thread/thread.h"
+#include "thread/thread.h"
 #include <pthread.h>
 #include <sched.h>
 
-void ztk_thread_set_current_priority(ztk_thread_priority_t priority)
+void ntk_thread_set_current_priority(ntk_thread_priority_t priority)
 {
     static int min_prio = -1;
     static int max_prio = -1;

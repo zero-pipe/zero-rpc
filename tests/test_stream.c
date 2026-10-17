@@ -1,8 +1,8 @@
 /* Streaming RPC：分片上传请求，服务端逐 chunk 回调并在 LAST 回复。 */
 #include <client.h>
 #include <server.h>
-#include <ztk/platform.h>
-#include <ztk/thread/sem.h>
+#include <platform.h>
+#include <thread/sem.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -41,7 +41,7 @@ static void on_bidi(call_t *call, const request_t *req, const chunk_t *chunk,
 }
 
 typedef struct client_state {
-    ztk_sem *sem;
+    ntk_sem *sem;
     int status;
     char buf[256];
     size_t len;
@@ -55,7 +55,7 @@ static void on_response(int status, const response_t *resp, void *user) {
         st->len = resp->payload.len;
         st->buf[resp->payload.len] = '\0';
     }
-    ztk_sem_post(st->sem, 1);
+    ntk_sem_post(st->sem, 1);
 }
 
 static const char k_download[] = "0123456789ABCDEF";
@@ -76,7 +76,7 @@ static void on_download(call_t *call, const request_t *req, void *user) {
 }
 
 typedef struct download_client {
-    ztk_sem *sem;
+    ntk_sem *sem;
     char buf[64];
     size_t len;
     int chunks;
@@ -105,7 +105,7 @@ static void on_download_done(int status, void *user) {
     c->done = 1;
     c->status = status;
     if (c->sem) {
-        ztk_sem_post(c->sem, 1);
+        ntk_sem_post(c->sem, 1);
     }
 }
 
@@ -185,7 +185,7 @@ static int run_case(transport_kind_t transport, const char *label, uint16_t sdis
     (void)node_wait_for_service(client, "upload", 5000);
 
     memset(&cst, 0, sizeof(cst));
-    cst.sem = ztk_sem_create(0);
+    cst.sem = ntk_sem_create(0);
     if (!cst.sem) {
         failed = 1;
     } else if (proxy_stream_open(proxy, "upload", "chunk", on_response, &cst, 3000, &stream) !=
@@ -216,7 +216,7 @@ static int run_case(transport_kind_t transport, const char *label, uint16_t sdis
         if (proxy_stream_send(stream, &chunk) != OK) {
             failed = 1;
         }
-        if (ztk_sem_timedwait(cst.sem, 3000) != ZTK_OK) {
+        if (ntk_sem_timedwait(cst.sem, 3000) != NTK_OK) {
             printf("[%s] response timeout\n", label);
             failed = 1;
         } else {
@@ -236,7 +236,7 @@ static int run_case(transport_kind_t transport, const char *label, uint16_t sdis
         (void)proxy_stream_destroy(stream);
     }
     if (cst.sem) {
-        ztk_sem_destroy(cst.sem);
+        ntk_sem_destroy(cst.sem);
     }
 
     /* 下载方向：服务端流式响应，客户端按 chunk 接收。 */
@@ -244,14 +244,14 @@ static int run_case(transport_kind_t transport, const char *label, uint16_t sdis
         download_client_t dc;
         uint64_t req_id = 0;
         memset(&dc, 0, sizeof(dc));
-        dc.sem = ztk_sem_create(0);
+        dc.sem = ntk_sem_create(0);
         if (!dc.sem) {
             failed = 1;
         } else if (proxy_call_stream(proxy, "upload", "download", NULL, on_download_chunk,
                                           on_download_done, &dc, 3000, &req_id) != OK) {
             printf("[%s] call_stream failed\n", label);
             failed = 1;
-        } else if (ztk_sem_timedwait(dc.sem, 3000) != ZTK_OK) {
+        } else if (ntk_sem_timedwait(dc.sem, 3000) != NTK_OK) {
             printf("[%s] download timeout\n", label);
             failed = 1;
         } else if (dc.status != OK || dc.len != strlen(k_download) ||
@@ -261,7 +261,7 @@ static int run_case(transport_kind_t transport, const char *label, uint16_t sdis
             failed = 1;
         }
         if (dc.sem) {
-            ztk_sem_destroy(dc.sem);
+            ntk_sem_destroy(dc.sem);
         }
     }
 
@@ -270,7 +270,7 @@ static int run_case(transport_kind_t transport, const char *label, uint16_t sdis
         client_state_t cc;
         stream_t *s2 = NULL;
         memset(&cc, 0, sizeof(cc));
-        cc.sem = ztk_sem_create(0);
+        cc.sem = ntk_sem_create(0);
         if (!cc.sem) {
             failed = 1;
         } else if (proxy_stream_open(proxy, "upload", "chunk", on_response, &cc, 3000, &s2) !=
@@ -286,7 +286,7 @@ static int run_case(transport_kind_t transport, const char *label, uint16_t sdis
             ck.flags = STREAM_FIRST;
             (void)proxy_stream_send(s2, &ck);
             (void)proxy_stream_cancel(s2);
-            if (ztk_sem_timedwait(cc.sem, 3000) != ZTK_OK) {
+            if (ntk_sem_timedwait(cc.sem, 3000) != NTK_OK) {
                 printf("[%s] cancel timeout\n", label);
                 failed = 1;
             } else if (cc.status != ERR_CLOSED) {
@@ -296,7 +296,7 @@ static int run_case(transport_kind_t transport, const char *label, uint16_t sdis
             (void)proxy_stream_destroy(s2);
         }
         if (cc.sem) {
-            ztk_sem_destroy(cc.sem);
+            ntk_sem_destroy(cc.sem);
         }
     }
 
@@ -305,7 +305,7 @@ static int run_case(transport_kind_t transport, const char *label, uint16_t sdis
         download_client_t bc;
         stream_t *bidi = NULL;
         memset(&bc, 0, sizeof(bc));
-        bc.sem = ztk_sem_create(0);
+        bc.sem = ntk_sem_create(0);
         if (!bc.sem || proxy_stream_open_bidi(proxy, "upload", "chat", on_bidi_chunk,
                                                    on_download_done, &bc, 3000, &bidi) != OK) {
             printf("[%s] bidi open failed\n", label);
@@ -323,7 +323,7 @@ static int run_case(transport_kind_t transport, const char *label, uint16_t sdis
             ck.offset = 4;
             ck.flags = STREAM_LAST;
             (void)proxy_stream_send(bidi, &ck);
-            if (ztk_sem_timedwait(bc.sem, 3000) != ZTK_OK || bc.status != OK ||
+            if (ntk_sem_timedwait(bc.sem, 3000) != NTK_OK || bc.status != OK ||
                 bc.len != 8 || memcmp(bc.buf, "pingpong", 8) != 0 || bc.chunks != 2 ||
                 bc.last != 1) {
                 printf("[%s] bidi mismatch status=%d len=%zu chunks=%d last=%d\n", label, bc.status,
@@ -333,7 +333,7 @@ static int run_case(transport_kind_t transport, const char *label, uint16_t sdis
             (void)proxy_stream_destroy(bidi);
         }
         if (bc.sem) {
-            ztk_sem_destroy(bc.sem);
+            ntk_sem_destroy(bc.sem);
         }
     }
 

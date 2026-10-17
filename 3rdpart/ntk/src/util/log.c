@@ -1,10 +1,10 @@
-#include "ztk/util/log.h"
-#include "ztk/platform.h"
+#include "util/log.h"
+#include "platform.h"
 #include <stdio.h>
 #include <string.h>
 
 /* ── 状态 ── */
-static ztk_log_level_t s_level      = ZTK_LOG_INFO;
+static ntk_log_level_t s_level      = NTK_LOG_INFO;
 static FILE           *s_log_file   = NULL;
 
 /* rotate 配置（0 = 不轮转） */
@@ -15,14 +15,14 @@ static int    s_rotate_keep_count = 3;
 static size_t s_written_bytes = 0;
 
 /* 打开时记录路径，供 rotate 使用 */
-#define ZTK_LOG_PATH_MAX 512
-static char s_log_path[ZTK_LOG_PATH_MAX] = {0};
+#define NTK_LOG_PATH_MAX 512
+static char s_log_path[NTK_LOG_PATH_MAX] = {0};
 
 /* ── 内部：执行一次 rotate ── */
 static void do_rotate(void)
 {
-    char old_path[ZTK_LOG_PATH_MAX + 16];
-    char new_path[ZTK_LOG_PATH_MAX + 16];
+    char old_path[NTK_LOG_PATH_MAX + 16];
+    char new_path[NTK_LOG_PATH_MAX + 16];
     int  i;
 
     if (!s_log_path[0])
@@ -51,7 +51,7 @@ static void do_rotate(void)
 
 /* ── 公开 API ── */
 
-int ztk_log_open_file(const char *path)
+int ntk_log_open_file(const char *path)
 {
     if (!path || !path[0])
         return -1;
@@ -66,7 +66,7 @@ int ztk_log_open_file(const char *path)
     return s_log_file ? 0 : -1;
 }
 
-void ztk_log_close_file(void)
+void ntk_log_close_file(void)
 {
     if (s_log_file) {
         fclose(s_log_file);
@@ -76,7 +76,7 @@ void ztk_log_close_file(void)
     s_written_bytes = 0;
 }
 
-void ztk_log_reopen_file(void)
+void ntk_log_reopen_file(void)
 {
     if (!s_log_path[0])
         return;
@@ -88,30 +88,30 @@ void ztk_log_reopen_file(void)
     s_written_bytes = 0;
 }
 
-void ztk_log_set_rotate(size_t max_bytes, int keep_count)
+void ntk_log_set_rotate(size_t max_bytes, int keep_count)
 {
     s_rotate_max_bytes  = max_bytes;
     s_rotate_keep_count = keep_count > 0 ? keep_count : 1;
 }
 
-static const char *level_name(ztk_log_level_t l)
+static const char *level_name(ntk_log_level_t l)
 {
     switch (l) {
-    case ZTK_LOG_TRACE: return "T";
-    case ZTK_LOG_DEBUG: return "D";
-    case ZTK_LOG_INFO:  return "I";
-    case ZTK_LOG_WARN:  return "W";
-    case ZTK_LOG_ERROR: return "E";
+    case NTK_LOG_TRACE: return "T";
+    case NTK_LOG_DEBUG: return "D";
+    case NTK_LOG_INFO:  return "I";
+    case NTK_LOG_WARN:  return "W";
+    case NTK_LOG_ERROR: return "E";
     default:            return "?";
     }
 }
 
-void ztk_log_set_level(ztk_log_level_t level)
+void ntk_log_set_level(ntk_log_level_t level)
 {
     s_level = level;
 }
 
-void ztk_log_writev(ztk_log_level_t level, const char *file, int line, const char *fmt, va_list ap)
+void ntk_log_writev(ntk_log_level_t level, const char *file, int line, const char *fmt, va_list ap)
 {
     if (level < s_level)
         return;
@@ -130,7 +130,7 @@ void ztk_log_writev(ztk_log_level_t level, const char *file, int line, const cha
 
     plen = snprintf(prefix, sizeof(prefix), "[%s][%llu][%s:%d] ",
         level_name(level),
-        (unsigned long long)ztk_monotonic_ms(),
+        (unsigned long long)ntk_monotonic_ms(),
         base,
         line);
     (void)plen;
@@ -155,10 +155,10 @@ void ztk_log_writev(ztk_log_level_t level, const char *file, int line, const cha
     }
 }
 
-void ztk_log_write(ztk_log_level_t level, const char *file, int line, const char *fmt, ...)
+void ntk_log_write(ntk_log_level_t level, const char *file, int line, const char *fmt, ...)
 {
     va_list ap;
     va_start(ap, fmt);
-    ztk_log_writev(level, file, line, fmt, ap);
+    ntk_log_writev(level, file, line, fmt, ap);
     va_end(ap);
 }

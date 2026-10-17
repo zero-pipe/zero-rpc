@@ -15,11 +15,11 @@ uint32_t zri_node_ttl_ms(const node_t *node) {
     return node ? node->node_ttl_ms : 0;
 }
 
-ztk_poller *zri_node_poller(const node_t *node) {
+ntk_poller *zri_node_poller(const node_t *node) {
     return node ? node->poller : NULL;
 }
 
-ztk_poller_pool *zri_node_pool(const node_t *node) {
+ntk_poller_pool *zri_node_pool(const node_t *node) {
     return node ? node->pool : NULL;
 }
 

@@ -1,27 +1,27 @@
-#include "ztk/thread/thread.h"
+#include "thread/thread.h"
 #include <stdlib.h>
 #include <windows.h>
 
-struct ztk_thread {
+struct ntk_thread {
     HANDLE h;
-    ztk_thread_fn fn;
+    ntk_thread_fn fn;
     void *user;
-    ztk_thread_priority_t priority;
+    ntk_thread_priority_t priority;
 };
 
 static DWORD WINAPI trampoline(LPVOID arg)
 {
-    ztk_thread *t = (ztk_thread *)arg;
-    ztk_thread_set_current_priority(t->priority);
+    ntk_thread *t = (ntk_thread *)arg;
+    ntk_thread_set_current_priority(t->priority);
     t->fn(t->user);
     return 0;
 }
 
-ztk_thread *ztk_thread_create_ex(ztk_thread_fn fn, void *user, ztk_thread_priority_t priority)
+ntk_thread *ntk_thread_create_ex(ntk_thread_fn fn, void *user, ntk_thread_priority_t priority)
 {
     if (!fn)
         return NULL;
-    ztk_thread *t = (ztk_thread *)calloc(1, sizeof(*t));
+    ntk_thread *t = (ntk_thread *)calloc(1, sizeof(*t));
     if (!t)
         return NULL;
     t->fn = fn;
@@ -35,20 +35,20 @@ ztk_thread *ztk_thread_create_ex(ztk_thread_fn fn, void *user, ztk_thread_priori
     return t;
 }
 
-ztk_thread *ztk_thread_create(ztk_thread_fn fn, void *user)
+ntk_thread *ntk_thread_create(ntk_thread_fn fn, void *user)
 {
-    return ztk_thread_create_ex(fn, user, ZTK_THREAD_PRIO_NORMAL);
+    return ntk_thread_create_ex(fn, user, NTK_THREAD_PRIO_NORMAL);
 }
 
-ztk_err_t ztk_thread_join(ztk_thread *t)
+ntk_err_t ntk_thread_join(ntk_thread *t)
 {
     if (!t)
-        return ZTK_ERR_INVALID;
+        return NTK_ERR_INVALID;
     DWORD r = WaitForSingleObject(t->h, INFINITE);
-    return r == WAIT_OBJECT_0 ? ZTK_OK : ZTK_ERR_PLATFORM;
+    return r == WAIT_OBJECT_0 ? NTK_OK : NTK_ERR_PLATFORM;
 }
 
-void ztk_thread_destroy(ztk_thread *t)
+void ntk_thread_destroy(ntk_thread *t)
 {
     if (!t)
         return;
@@ -57,7 +57,7 @@ void ztk_thread_destroy(ztk_thread *t)
     free(t);
 }
 
-unsigned int ztk_thread_hardware_concurrency(void)
+unsigned int ntk_thread_hardware_concurrency(void)
 {
     SYSTEM_INFO info;
     GetSystemInfo(&info);

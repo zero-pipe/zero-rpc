@@ -127,7 +127,7 @@ static uint64_t stream_send_task_fn(void *user) {
     message.peer_port = stream->port;
     rc = zri_node_send(stream->node, stream->transport, stream->scheme, &message);
     if (rc == ERR_AGAIN && task->retries++ < 1000) {
-        if (ztk_poller_do_delay(stream->node->poller, 1, stream_send_task_fn, task) != NULL) {
+        if (ntk_poller_do_delay(stream->node->poller, 1, stream_send_task_fn, task) != NULL) {
             return 0; /* 保留 task/data，稍后重试 */
         }
     }
@@ -204,9 +204,9 @@ int proxy_stream_open(proxy_t *proxy, const char *service, const char *method,
     zri_copy_str(stream->method, sizeof(stream->method), method, "");
     zri_copy_str(stream->scheme, sizeof(stream->scheme), "udp", "udp");
     zri_copy_str(stream->ip, sizeof(stream->ip), "127.0.0.1", "127.0.0.1");
-    ztk_mutex_lock(proxy->node->id_lock);
+    ntk_mutex_lock(proxy->node->id_lock);
     stream->request_id = (uint64_t)(uint32_t)(proxy->node->next_request_id++);
-    ztk_mutex_unlock(proxy->node->id_lock);
+    ntk_mutex_unlock(proxy->node->id_lock);
     if (stream->request_id == 0) {
         stream->request_id = 1;
     }
@@ -223,7 +223,7 @@ int proxy_stream_open(proxy_t *proxy, const char *service, const char *method,
         return ERR_NOMEM;
     }
     task->stream = stream;
-    if (ztk_poller_async(proxy->node->poller, stream_open_task_fn, task, 1) != ZTK_OK) {
+    if (ntk_poller_async(proxy->node->poller, stream_open_task_fn, task, 1) != NTK_OK) {
         free(task);
         free(stream);
         return ERR_IO;
@@ -257,9 +257,9 @@ int proxy_stream_open_bidi(proxy_t *proxy, const char *service, const char *meth
     zri_copy_str(stream->method, sizeof(stream->method), method, "");
     zri_copy_str(stream->scheme, sizeof(stream->scheme), "udp", "udp");
     zri_copy_str(stream->ip, sizeof(stream->ip), "127.0.0.1", "127.0.0.1");
-    ztk_mutex_lock(proxy->node->id_lock);
+    ntk_mutex_lock(proxy->node->id_lock);
     stream->request_id = (uint64_t)(uint32_t)(proxy->node->next_request_id++);
-    ztk_mutex_unlock(proxy->node->id_lock);
+    ntk_mutex_unlock(proxy->node->id_lock);
     if (stream->request_id == 0) {
         stream->request_id = 1;
     }
@@ -276,7 +276,7 @@ int proxy_stream_open_bidi(proxy_t *proxy, const char *service, const char *meth
         return ERR_NOMEM;
     }
     task->stream = stream;
-    if (ztk_poller_async(proxy->node->poller, stream_open_task_fn, task, 1) != ZTK_OK) {
+    if (ntk_poller_async(proxy->node->poller, stream_open_task_fn, task, 1) != NTK_OK) {
         free(task);
         free(stream);
         return ERR_IO;
@@ -325,7 +325,7 @@ int proxy_stream_send(stream_t *stream, const chunk_t *chunk) {
         }
         memcpy(task->data, chunk->data, chunk->len);
     }
-    if (ztk_poller_async(stream->node->poller, stream_send_async_fn, task, 1) != ZTK_OK) {
+    if (ntk_poller_async(stream->node->poller, stream_send_async_fn, task, 1) != NTK_OK) {
         free(task->data);
         free(task);
         return ERR_IO;
@@ -337,11 +337,11 @@ int proxy_stream_cancel(stream_t *stream) {
     if (!stream || stream->closed) {
         return ERR_NOTFOUND;
     }
-    if (ztk_poller_is_current_thread(stream->node->poller)) {
+    if (ntk_poller_is_current_thread(stream->node->poller)) {
         stream_cancel_task_fn(stream);
         return OK;
     }
-    if (ztk_poller_async(stream->node->poller, stream_cancel_task_fn, stream, 1) != ZTK_OK) {
+    if (ntk_poller_async(stream->node->poller, stream_cancel_task_fn, stream, 1) != NTK_OK) {
         return ERR_IO;
     }
     return OK;
