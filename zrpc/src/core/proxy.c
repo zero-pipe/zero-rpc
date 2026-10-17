@@ -85,6 +85,8 @@ static void cancel_task_fn(void *user) {
     free(t);
 }
 
+/* ---- 生命周期 ---- */
+
 int zrpc_proxy_create(zrpc_node_t *node, const zrpc_proxy_options_t *options, zrpc_proxy_t **out) {
     zrpc_proxy_t *p;
     zrpc_stub_options_t stub_options;
@@ -120,6 +122,8 @@ void zrpc_proxy_destroy(zrpc_proxy_t *proxy) {
     free(proxy);
 }
 
+/* ---- 目标端点 ---- */
+
 int zrpc_proxy_set_endpoint(zrpc_proxy_t *proxy, const char *ip, uint16_t port,
                             zrpc_transport_kind_t transport) {
     if (!proxy || !ip || !port) {
@@ -148,6 +152,8 @@ int zrpc_proxy_set_endpoint_uri(zrpc_proxy_t *proxy, const char *endpoint) {
     return ZRPC_OK;
 }
 
+/* ---- Unary 调用 ---- */
+
 int zrpc_proxy_call_async(zrpc_proxy_t *proxy, const char *service, const char *method,
                           const zrpc_payload_t *payload, zrpc_response_fn cb, void *user,
                           uint64_t timeout_ms, uint64_t *out_request_id) {
@@ -173,16 +179,7 @@ int zrpc_proxy_call_event(zrpc_proxy_t *proxy, const char *service, const char *
     return zrpc_stub_call(proxy->stub, service, method, payload, out_request_id);
 }
 
-int zrpc_proxy_call_stream(zrpc_proxy_t *proxy, const char *service, const char *method,
-                           const zrpc_payload_t *request, zrpc_response_chunk_fn on_chunk,
-                           zrpc_stream_done_fn on_done, void *user, uint64_t timeout_ms,
-                           uint64_t *out_request_id) {
-    if (!proxy || !proxy->node || !proxy->stub || !service || !method || !on_chunk || !on_done) {
-        return ZRPC_ERR_INVALID;
-    }
-    return zri_stub_call_ex(proxy->stub, service, method, request, NULL, on_chunk, on_done, 1, user,
-                             timeout_ms, out_request_id);
-}
+/* ---- 调用控制 ---- */
 
 int zrpc_proxy_cancel(zrpc_proxy_t *proxy, uint64_t request_id) {
     zri_cancel_task_t *t;
@@ -200,6 +197,19 @@ int zrpc_proxy_cancel(zrpc_proxy_t *proxy, uint64_t request_id) {
         return ZRPC_ERR_IO;
     }
     return ZRPC_OK;
+}
+
+/* ---- 流式调用 ---- */
+
+int zrpc_proxy_call_stream(zrpc_proxy_t *proxy, const char *service, const char *method,
+                           const zrpc_payload_t *request, zrpc_response_chunk_fn on_chunk,
+                           zrpc_stream_done_fn on_done, void *user, uint64_t timeout_ms,
+                           uint64_t *out_request_id) {
+    if (!proxy || !proxy->node || !proxy->stub || !service || !method || !on_chunk || !on_done) {
+        return ZRPC_ERR_INVALID;
+    }
+    return zri_stub_call_ex(proxy->stub, service, method, request, NULL, on_chunk, on_done, 1, user,
+                             timeout_ms, out_request_id);
 }
 
 /* RTO 重传：按保存的请求参数重发（同一 msg_id）。 */

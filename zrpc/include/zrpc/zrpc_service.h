@@ -33,6 +33,18 @@ typedef int (*zrpc_sync_handler_fn)(const zrpc_request_t *req, zrpc_message_view
 typedef void (*zrpc_chunk_handler_fn)(zrpc_call_t *call, const zrpc_request_t *req,
                                       const zrpc_chunk_t *chunk, void *user);
 
+/* ---- 服务生命周期 ---- */
+int zrpc_service_create(zrpc_node_t *node, const char *service_name, zrpc_service_t **out);
+void zrpc_service_destroy(zrpc_service_t *svc);
+
+/* ---- 方法注册 ---- */
+int zrpc_service_add_method(zrpc_service_t *svc, const char *method, zrpc_handler_fn fn, void *user);
+/* 注册同步风格方法（handler 返回后框架自动回复）。 */
+int zrpc_service_add_sync_method(zrpc_service_t *svc, const char *method,
+                                 zrpc_sync_handler_fn fn, void *user);
+int zrpc_service_add_stream_method(zrpc_service_t *svc, const char *method,
+                                    zrpc_chunk_handler_fn fn, void *user);
+
 /* ---- 回复 ---- */
 /* 一次性、异步回复。status 由应用定义；EVENT 请求上的回复会被静默忽略。 */
 void zrpc_reply(zrpc_call_t *call, int status, const zrpc_payload_t *payload);
@@ -40,16 +52,6 @@ void zrpc_reply(zrpc_call_t *call, int status, const zrpc_payload_t *payload);
 void zrpc_reply_bytes(zrpc_call_t *call, int status, const void *data, size_t len);
 /* 分多次发送 response chunk；最后一个 chunk 必须带 ZRPC_STREAM_LAST。 */
 int zrpc_reply_stream(zrpc_call_t *call, int status, const zrpc_chunk_t *chunk);
-
-/* ---- 服务生命周期与方法注册 ---- */
-int zrpc_service_create(zrpc_node_t *node, const char *service_name, zrpc_service_t **out);
-void zrpc_service_destroy(zrpc_service_t *svc);
-int zrpc_service_add_method(zrpc_service_t *svc, const char *method, zrpc_handler_fn fn, void *user);
-/* 注册同步风格方法（handler 返回后框架自动回复）。 */
-int zrpc_service_add_sync_method(zrpc_service_t *svc, const char *method,
-                                 zrpc_sync_handler_fn fn, void *user);
-int zrpc_service_add_stream_method(zrpc_service_t *svc, const char *method,
-                                   zrpc_chunk_handler_fn fn, void *user);
 
 #ifdef __cplusplus
 }

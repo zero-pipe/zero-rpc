@@ -252,6 +252,8 @@ void zri_service_expire_streams(zrpc_node_t *node, uint64_t now_ms) {
     }
 }
 
+/* ---- 服务生命周期 ---- */
+
 int zrpc_service_create(zrpc_node_t *node, const char *service_name, zrpc_service_t **out) {
     zrpc_service_t *svc;
     zri_svc_task_t *t;
@@ -286,6 +288,8 @@ void zrpc_service_destroy(zrpc_service_t *svc) {
     /* v1：不在运行期注销；节点销毁时统一释放。 */
     (void)svc;
 }
+
+/* ---- 方法注册 ---- */
 
 static int service_add_method_ex(zrpc_service_t *svc, const char *method, zrpc_handler_fn fn,
                                  zrpc_chunk_handler_fn stream_fn, void *user, int owns_user) {

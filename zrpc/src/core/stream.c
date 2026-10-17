@@ -179,6 +179,8 @@ static void stream_cancel_task_fn(void *user) {
     }
 }
 
+/* ---- 流打开 ---- */
+
 int zrpc_proxy_stream_open(zrpc_proxy_t *proxy, const char *service, const char *method,
                            zrpc_response_fn cb, void *user, uint64_t timeout_ms,
                            zrpc_stream_t **out_stream) {
@@ -282,6 +284,8 @@ int zrpc_proxy_stream_open_bidi(zrpc_proxy_t *proxy, const char *service, const 
     *out_stream = stream;
     return ZRPC_OK;
 }
+
+/* ---- 流数据与生命周期 ---- */
 
 int zrpc_proxy_stream_send(zrpc_stream_t *stream, const zrpc_chunk_t *chunk) {
     zri_stream_send_task_t *task;

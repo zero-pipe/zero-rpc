@@ -30,10 +30,13 @@ typedef struct zrpc_message_view {
     void *owned;      /* 内部：set_* 分配的所有权缓冲，勿手动修改 */
 } zrpc_message_view_t;
 
-/* ---- 构造与写入 ---- */
+/* ---- 生命周期 ---- */
 /* 初始化为空视图。 */
 void zrpc_message_view_init(zrpc_message_view_t *view);
+/* 释放 owned 缓冲并清空视图。借用视图调用它也安全。 */
+void zrpc_message_view_release(zrpc_message_view_t *view);
 
+/* ---- 写入 ---- */
 /* 借用外部内存（不拷贝、不接管生命周期）。 */
 int zrpc_message_view_set_borrowed(zrpc_message_view_t *view, const void *data, size_t len);
 
@@ -44,10 +47,7 @@ int zrpc_message_view_set_string(zrpc_message_view_t *view, const char *text);
 /* 按 payload 设置视图；设置 encoding，data 拷贝进视图。 */
 int zrpc_message_view_set_payload(zrpc_message_view_t *view, const zrpc_payload_t *payload);
 
-/* ---- 生命周期与导出 ---- */
-/* 释放 owned 缓冲并清空视图。借用视图调用它也安全。 */
-void zrpc_message_view_release(zrpc_message_view_t *view);
-
+/* ---- 导出 ---- */
 /* 导出为 payload（data 指向视图缓冲，仅在视图存续期内有效）。 */
 void zrpc_message_view_to_payload(const zrpc_message_view_t *view, zrpc_payload_t *out);
 

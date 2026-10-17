@@ -295,12 +295,18 @@ void zrpc_node_destroy(zrpc_node_t *node) {
     free(node);
 }
 
+/* ---- 节点状态与端点 ---- */
+
 const char *zrpc_node_name(const zrpc_node_t *node) {
     return node ? node->name : NULL;
 }
 
 zrpc_transport_kind_t zrpc_node_transport(const zrpc_node_t *node) {
     return (node && node->transport) ? node->transport->kind : ZRPC_TRANSPORT_UDP;
+}
+
+uint16_t zrpc_node_discovery_port(const zrpc_node_t *node) {
+    return node ? node->discovery_port : 0;
 }
 
 uint16_t zrpc_node_data_port(const zrpc_node_t *node) {
@@ -324,38 +330,7 @@ int zrpc_node_binding_endpoint(const zrpc_node_t *node, size_t index, char *out,
     return zrpc_endpoint_format(&endpoint, out, cap);
 }
 
-uint16_t zrpc_node_discovery_port(const zrpc_node_t *node) {
-    return node ? node->discovery_port : 0;
-}
-
-int zrpc_node_add_discovery_peer(zrpc_node_t *node, const char *ip, uint16_t discovery_port) {
-    int i;
-    if (!node || !ip || !discovery_port) {
-        return ZRPC_ERR_INVALID;
-    }
-    for (i = 0; i < ZRPC_DISC_TARGET_MAX; i++) {
-        if (!node->discovery.targets[i].used) {
-            node->discovery.targets[i].used = 1;
-            zri_copy_str(node->discovery.targets[i].ip, sizeof(node->discovery.targets[i].ip), ip,
-                          "127.0.0.1");
-            node->discovery.targets[i].port = discovery_port;
-            if (node->registry_backend && node->registry_backend->ops->announce) {
-                node->registry_backend->ops->announce(node, 0);
-            }
-            return ZRPC_OK;
-        }
-    }
-    return ZRPC_ERR_NOMEM;
-}
-
-int zrpc_node_add_static_route(zrpc_node_t *node, const char *service, const char *ip,
-                               uint16_t port, zrpc_transport_kind_t transport) {
-    return zri_route_set(&node->routes, service, ip, port, transport);
-}
-
-int zrpc_node_add_static_endpoint(zrpc_node_t *node, const char *service, const char *endpoint) {
-    return zri_route_add_endpoint(&node->routes, service, endpoint, 1);
-}
+/* ---- 指标与对端质量 ---- */
 
 void zrpc_node_metrics(const zrpc_node_t *node, zrpc_metrics_t *out) {
     if (!out) {
@@ -407,6 +382,68 @@ int zrpc_node_rtcp_peer(const zrpc_node_t *node, const char *ip, uint16_t port,
     out->sr_sent = stats.feedback_sent;
     out->sr_received = stats.feedback_received;
     return ZRPC_OK;
+}
+
+/* ---- 发现与路由 ---- */
+
+int zrpc_node_add_discovery_peer(zrpc_node_t *node, const char *ip, uint16_t discovery_port) {
+    int i;
+    if (!node || !ip || !discovery_port) {
+        return ZRPC_ERR_INVALID;
+    }
+    for (i = 0; i < ZRPC_DISC_TARGET_MAX; i++) {
+        if (!node->discovery.targets[i].used) {
+            node->discovery.targets[i].used = 1;
+            zri_copy_str(node->discovery.targets[i].ip, sizeof(node->discovery.targets[i].ip), ip,
+                          "127.0.0.1");
+            node->discovery.targets[i].port = discovery_port;
+            if (node->registry_backend && node->registry_backend->ops->announce) {
+                node->registry_backend->ops->announce(node, 0);
+            }
+            return ZRPC_OK;
+        }
+    }
+    return ZRPC_ERR_NOMEM;
+}
+
+int zrpc_node_add_static_route(zrpc_node_t *node, const char *service, const char *ip,
+                               uint16_t port, zrpc_transport_kind_t transport) {
+    return zri_route_set(&node->routes, service, ip, port, transport);
+}
+
+int zrpc_node_add_static_endpoint(zrpc_node_t *node, const char *service, const char *endpoint) {
+    return zri_route_add_endpoint(&node->routes, service, endpoint, 1);
+}
+
+/* ---- 服务等待与调度 ---- */
+
+int zrpc_node_wait_for_service(zrpc_node_t *node, const char *service, uint64_t timeout_ms) {
+    uint64_t deadline;
+    char ip[ZRPC_ENDPOINT_MAX];
+    uint16_t port = 0;
+    if (!node || !service) {
+        return ZRPC_ERR_INVALID;
+    }
+    if (node->mode == ZRPC_MODE_STATIC) {
+        return ZRPC_OK;
+    }
+    deadline = zri_now_ms() + (timeout_ms ? timeout_ms : ZRPC_DEFAULT_TIMEOUT_MS);
+    for (;;) {
+        if (zri_route_lookup(&node->routes, service, ip, sizeof(ip), &port, NULL, NULL, 0) ==
+            ZRPC_OK) {
+            return ZRPC_OK;
+        }
+        {
+            zrpc_endpoint_t endpoint;
+            if (zri_registry_select(&node->registry, service, &endpoint) == ZRPC_OK) {
+                return ZRPC_OK;
+            }
+        }
+        if (zri_now_ms() >= deadline) {
+            return ZRPC_ERR_TIMEOUT;
+        }
+        ztk_sleep_ms(10);
+    }
 }
 
 /* ---- 在 poller 线程投递任务 ---- */
@@ -465,35 +502,6 @@ int zrpc_node_post_delay(zrpc_node_t *node, uint64_t delay_ms, void (*fn)(void *
         return ZRPC_ERR_IO;
     }
     return ZRPC_OK;
-}
-
-int zrpc_node_wait_for_service(zrpc_node_t *node, const char *service, uint64_t timeout_ms) {
-    uint64_t deadline;
-    char ip[ZRPC_ENDPOINT_MAX];
-    uint16_t port = 0;
-    if (!node || !service) {
-        return ZRPC_ERR_INVALID;
-    }
-    if (node->mode == ZRPC_MODE_STATIC) {
-        return ZRPC_OK;
-    }
-    deadline = zri_now_ms() + (timeout_ms ? timeout_ms : ZRPC_DEFAULT_TIMEOUT_MS);
-    for (;;) {
-        if (zri_route_lookup(&node->routes, service, ip, sizeof(ip), &port, NULL, NULL, 0) ==
-            ZRPC_OK) {
-            return ZRPC_OK;
-        }
-        {
-            zrpc_endpoint_t endpoint;
-            if (zri_registry_select(&node->registry, service, &endpoint) == ZRPC_OK) {
-                return ZRPC_OK;
-            }
-        }
-        if (zri_now_ms() >= deadline) {
-            return ZRPC_ERR_TIMEOUT;
-        }
-        ztk_sleep_ms(10);
-    }
 }
 
 /* ---- 阻塞运行 ---- */

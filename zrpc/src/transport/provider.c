@@ -7,6 +7,8 @@
 static const zrpc_transport_provider_t *g_providers[ZRPC_PROVIDER_MAX];
 static size_t g_provider_count;
 
+/* ---- Provider 注册 ---- */
+
 int zrpc_transport_provider_register(const zrpc_transport_provider_t *provider) {
     size_t i;
     if (!provider || !provider->scheme || !provider->scheme[0] || !provider->ops ||

@@ -13,6 +13,8 @@ static int copy_part(char *out, size_t cap, const char *begin, size_t len) {
     return ZRPC_OK;
 }
 
+/* ---- Scheme 与传输映射 ---- */
+
 zrpc_transport_kind_t zrpc_transport_kind_from_scheme(const char *scheme) {
     if (!scheme) {
         return (zrpc_transport_kind_t)-1;
@@ -25,6 +27,8 @@ zrpc_transport_kind_t zrpc_transport_kind_from_scheme(const char *scheme) {
     }
     return ZRPC_TRANSPORT_CUSTOM;
 }
+
+/* ---- 解析与格式化 ---- */
 
 int zrpc_endpoint_parse(const char *uri, zrpc_endpoint_t *out) {
     const char *scheme_end;

@@ -58,6 +58,8 @@ static void sync_response_cb(int status, const zrpc_response_t *resp, void *user
     sync_ctx_put(c);
 }
 
+/* ---- 同步调用 ---- */
+
 int zrpc_proxy_call_sync(zrpc_proxy_t *proxy, const char *service, const char *method,
                          const zrpc_payload_t *request, zrpc_response_t *response,
                          uint64_t timeout_ms, uint64_t *out_request_id) {

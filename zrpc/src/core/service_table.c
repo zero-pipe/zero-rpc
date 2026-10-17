@@ -34,6 +34,8 @@ static const zrpc_method_descriptor_t *find_method(const char *service, const ch
     return NULL;
 }
 
+/* ---- 安装 ---- */
+
 int zrpc_install_service_table(const zrpc_service_table_t *table) {
     size_t i;
     if (!table || (!table->services && table->service_count > 0)) {
@@ -80,6 +82,8 @@ int zrpc_install_service_table(const zrpc_service_table_t *table) {
     g_tables[g_table_count++] = table;
     return ZRPC_OK;
 }
+
+/* ---- 状态与查询 ---- */
 
 void zrpc_reset_service_table(void) {
     g_table_count = 0;

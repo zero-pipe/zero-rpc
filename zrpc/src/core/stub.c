@@ -227,6 +227,8 @@ static int stub_payload_prepare(const zrpc_stub_t *stub, const zrpc_payload_t *p
     return ZRPC_OK;
 }
 
+/* ---- 生命周期 ---- */
+
 int zrpc_stub_create(zrpc_node_t *node, const zrpc_stub_options_t *options, zrpc_stub_t **out) {
     zrpc_stub_t *stub;
     if (!node || !out) {
@@ -252,6 +254,8 @@ void zrpc_stub_destroy(zrpc_stub_t *stub) {
 zrpc_node_t *zrpc_stub_node(const zrpc_stub_t *stub) {
     return stub ? stub->node : NULL;
 }
+
+/* ---- 调用 ---- */
 
 int zrpc_stub_call(zrpc_stub_t *stub, const char *service, const char *method,
                    const zrpc_payload_t *payload, uint64_t *out_request_id) {

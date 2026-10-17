@@ -3,6 +3,8 @@
 
 #include <stdlib.h>
 
+/* ---- Codec 注册与查询 ---- */
+
 int zrpc_node_register_codec(zrpc_node_t *node, const zrpc_codec_t *codec) {
     zri_codec_entry_t *e;
     if (!node || !codec) {

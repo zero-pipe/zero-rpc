@@ -19,15 +19,16 @@ typedef struct zrpc_endpoint {
     zrpc_transport_kind_t transport;
 } zrpc_endpoint_t;
 
+/* ---- Scheme 与传输映射 ---- */
+/* Map a provider scheme to a built-in transport kind, if any. */
+zrpc_transport_kind_t zrpc_transport_kind_from_scheme(const char *scheme);
+
 /* ---- 解析与格式化 ---- */
 /* Parse scheme://host:port. The input is not retained. */
 int zrpc_endpoint_parse(const char *uri, zrpc_endpoint_t *out);
 
 /* Format an endpoint URI into out. */
 int zrpc_endpoint_format(const zrpc_endpoint_t *endpoint, char *out, size_t cap);
-
-/* Map a provider scheme to a built-in transport kind, if any. */
-zrpc_transport_kind_t zrpc_transport_kind_from_scheme(const char *scheme);
 
 #ifdef __cplusplus
 }

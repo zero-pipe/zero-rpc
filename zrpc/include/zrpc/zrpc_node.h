@@ -59,16 +59,16 @@ typedef struct zrpc_node_config {
 int zrpc_node_create(const zrpc_node_config_t *cfg, zrpc_node_t **out);
 void zrpc_node_destroy(zrpc_node_t *node);
 
-/* ---- 状态与指标 ---- */
+/* ---- 节点状态与端点 ---- */
 const char *zrpc_node_name(const zrpc_node_t *node);
 zrpc_transport_kind_t zrpc_node_transport(const zrpc_node_t *node);
-uint16_t zrpc_node_data_port(const zrpc_node_t *node);
 uint16_t zrpc_node_discovery_port(const zrpc_node_t *node);
+uint16_t zrpc_node_data_port(const zrpc_node_t *node);
 size_t zrpc_node_binding_count(const zrpc_node_t *node);
 int zrpc_node_binding_endpoint(const zrpc_node_t *node, size_t index, char *out, size_t cap);
-void zrpc_node_metrics(const zrpc_node_t *node, zrpc_metrics_t *out);
 
-/* ---- 对端质量 ---- */
+/* ---- 指标与对端质量 ---- */
+void zrpc_node_metrics(const zrpc_node_t *node, zrpc_metrics_t *out);
 /* 查询某对端（ip:port）的链路统计；无此对端返回 ZRPC_ERR_NOTFOUND。 */
 int zrpc_node_peer_stats(const zrpc_node_t *node, const char *ip, uint16_t port,
                          zrpc_peer_stats_t *out);
@@ -85,7 +85,10 @@ int zrpc_node_add_static_route(zrpc_node_t *node, const char *service, const cha
                                uint16_t port, zrpc_transport_kind_t transport);
 int zrpc_node_add_static_endpoint(zrpc_node_t *node, const char *service, const char *endpoint);
 
-/* ---- 调度与运行 ---- */
+/* ---- 服务等待与调度 ---- */
+/* 等待目标服务出现在路由表（MESH 启动期用）。STATIC 立即返回 OK。 */
+int zrpc_node_wait_for_service(zrpc_node_t *node, const char *service, uint64_t timeout_ms);
+
 /*
  * 在节点的 poller 线程投递任务（异步、不阻塞调用方）。
  * 高吞吐客户端可在回调/任务里直接发起下一次调用，zrpc_proxy_call_async 会识别
@@ -94,13 +97,11 @@ int zrpc_node_add_static_endpoint(zrpc_node_t *node, const char *service, const 
 int zrpc_node_post(zrpc_node_t *node, void (*fn)(void *user), void *user);
 int zrpc_node_post_delay(zrpc_node_t *node, uint64_t delay_ms, void (*fn)(void *user), void *user);
 
-/* 等待目标服务出现在路由表（MESH 启动期用）。STATIC 立即返回 OK。 */
-int zrpc_node_wait_for_service(zrpc_node_t *node, const char *service, uint64_t timeout_ms);
-
-/* 阻塞运行直到进程收到 SIGINT/SIGTERM（用于服务端 main）。 */
-int zrpc_node_spin(zrpc_node_t *node);
+/* ---- 阻塞运行 ---- */
 /* 同上，但最多等待 timeout_ms，返回 ZRPC_ERR_TIMEOUT。 */
 int zrpc_node_spin_once(zrpc_node_t *node, uint64_t timeout_ms);
+/* 阻塞运行直到进程收到 SIGINT/SIGTERM（用于服务端 main）。 */
+int zrpc_node_spin(zrpc_node_t *node);
 
 #ifdef __cplusplus
 }

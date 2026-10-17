@@ -52,6 +52,8 @@ void zri_service_send_status(zri_transport_t *transport, const zri_message_t *re
     (void)send_reply(transport, request, status, &empty, NULL);
 }
 
+/* ---- 回复 ---- */
+
 void zrpc_reply(zrpc_call_t *call, int status, const zrpc_payload_t *payload) {
     zri_message_t request;
     if (!call || call->replied) {

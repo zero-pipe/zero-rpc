@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* ---- 生命周期 ---- */
+
 void zrpc_message_view_init(zrpc_message_view_t *view) {
     if (!view) {
         return;
@@ -25,6 +27,8 @@ void zrpc_message_view_release(zrpc_message_view_t *view) {
     view->data = NULL;
     view->len = 0;
 }
+
+/* ---- 写入 ---- */
 
 int zrpc_message_view_set_borrowed(zrpc_message_view_t *view, const void *data, size_t len) {
     if (!view || (len > 0 && !data)) {
@@ -88,6 +92,8 @@ int zrpc_message_view_set_payload(zrpc_message_view_t *view, const zrpc_payload_
     }
     return rc;
 }
+
+/* ---- 导出 ---- */
 
 void zrpc_message_view_to_payload(const zrpc_message_view_t *view, zrpc_payload_t *out) {
     if (!out) {

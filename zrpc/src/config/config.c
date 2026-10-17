@@ -131,6 +131,8 @@ static void cfg_binding(zrpc_config_t *out, const cJSON *item) {
     out->binding_count++;
 }
 
+/* ---- 配置加载 ---- */
+
 int zrpc_config_load(const char *json, zrpc_config_t *out) {
     cJSON *root;
     const cJSON *node;
@@ -304,6 +306,8 @@ int zrpc_config_load_file(const char *path, zrpc_config_t *out) {
     free(buf);
     return rc;
 }
+
+/* ---- 节点创建 ---- */
 
 int zrpc_node_create_from_config(const zrpc_config_t *cfg, zrpc_node_t **out) {
     int rc;
