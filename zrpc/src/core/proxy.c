@@ -61,8 +61,6 @@ static int proxy_stub_send(zrpc_stub_t *stub, const char *service, const char *m
     zrpc_node_t *node = zrpc_stub_node(stub);
     zrpc_transport_kind_t transport = ZRPC_TRANSPORT_UDP;
     int prefer_stream;
-    char route[ZRPC_SERVICE_NAME_MAX + ZRPC_METHOD_NAME_MAX + 2];
-    int n;
     if (!proxy || !node) {
         return ZRPC_ERR_STATE;
     }
@@ -73,13 +71,9 @@ static int proxy_stub_send(zrpc_stub_t *stub, const char *service, const char *m
         return ZRPC_ERR_NOTFOUND;
     }
     target->transport = transport;
-    n = snprintf(route, sizeof(route), "%s.%s", service, method);
-    if (n < 0 || (size_t)n >= sizeof(route)) {
-        return ZRPC_ERR_INVALID;
-    }
-    return zri_node_send(node, target->ip, target->port,
-                          kind == ZRPC_STUB_EVENT ? ZRPC_KIND_EVENT : ZRPC_KIND_REQUEST,
-                          0, (uint32_t)request_id, transport, target->scheme, route, payload, NULL);
+    return zri_node_send_call(node, target, service, method, payload,
+                              kind == ZRPC_STUB_EVENT ? ZRPC_KIND_EVENT : ZRPC_KIND_REQUEST,
+                              request_id);
 }
 
 static void cancel_task_fn(void *user) {
@@ -154,14 +148,29 @@ int zrpc_proxy_set_endpoint_uri(zrpc_proxy_t *proxy, const char *endpoint) {
     return ZRPC_OK;
 }
 
-int zrpc_proxy_call(zrpc_proxy_t *proxy, const char *service, const char *method,
-                    const zrpc_payload_t *payload, zrpc_response_fn cb, void *user,
-                    uint64_t timeout_ms, uint64_t *out_request_id) {
+int zrpc_proxy_call_async(zrpc_proxy_t *proxy, const char *service, const char *method,
+                          const zrpc_payload_t *payload, zrpc_response_fn cb, void *user,
+                          uint64_t timeout_ms, uint64_t *out_request_id) {
     if (!proxy || !proxy->node || !proxy->stub || !service || !method || !cb) {
         return ZRPC_ERR_INVALID;
     }
     return zri_stub_call_ex(proxy->stub, service, method, payload, cb, NULL, NULL, 0, user,
                              timeout_ms, out_request_id);
+}
+
+int zrpc_proxy_call(zrpc_proxy_t *proxy, const char *service, const char *method,
+                    const zrpc_payload_t *payload, zrpc_response_fn cb, void *user,
+                    uint64_t timeout_ms, uint64_t *out_request_id) {
+    return zrpc_proxy_call_async(proxy, service, method, payload, cb, user, timeout_ms,
+                                 out_request_id);
+}
+
+int zrpc_proxy_call_event(zrpc_proxy_t *proxy, const char *service, const char *method,
+                          const zrpc_payload_t *payload, uint64_t *out_request_id) {
+    if (!proxy || !proxy->node || !proxy->stub || !service || !method) {
+        return ZRPC_ERR_INVALID;
+    }
+    return zrpc_stub_call(proxy->stub, service, method, payload, out_request_id);
 }
 
 int zrpc_proxy_call_stream(zrpc_proxy_t *proxy, const char *service, const char *method,
@@ -195,16 +204,20 @@ int zrpc_proxy_cancel(zrpc_proxy_t *proxy, uint64_t request_id) {
 
 /* RTO 重传：按保存的请求参数重发（同一 msg_id）。 */
 void zri_pending_retx(zrpc_node_t *node, zri_pending_t *p) {
-    char route[ZRPC_SERVICE_NAME_MAX + ZRPC_METHOD_NAME_MAX + 2];
+    zrpc_stub_target_t target;
     zrpc_payload_t pl;
     if (!node || !p || !p->has_req) {
         return;
     }
-    snprintf(route, sizeof(route), "%s.%s", p->service, p->method);
+    memset(&target, 0, sizeof(target));
+    zri_copy_str(target.ip, sizeof(target.ip), p->ip, "0.0.0.0");
+    zri_copy_str(target.scheme, sizeof(target.scheme), p->scheme, "udp");
+    target.port = p->port;
+    target.transport = p->transport;
     pl.data = p->data;
     pl.len = p->len;
     pl.encoding = p->encoding;
-    (void)zri_node_send(node, p->ip, p->port, ZRPC_KIND_REQUEST, 0, (uint32_t)p->request_id,
-                         p->transport, p->scheme, route, &pl, NULL);
+    (void)zri_node_send_call(node, &target, p->service, p->method, &pl, ZRPC_KIND_REQUEST,
+                             p->request_id);
     node->metrics.retries++;
 }

@@ -17,18 +17,28 @@ static zri_transport_t *create_transport(zrpc_transport_kind_t kind) {
 static void provider_on_receive(void *receiver, void *reply_token, const char *peer_host,
                                 uint16_t peer_port, const zrpc_transport_message_t *message) {
     zri_transport_t *transport = (zri_transport_t *)receiver;
+    zri_message_t msg;
+    int has_stream;
     if (!transport || !transport->node || !message) {
         return;
     }
-    zri_node_on_message(transport->node, peer_host, peer_port, reply_token, transport,
-                         message->kind, message->status, message->request_id, message->route,
-                         &message->payload,
-                         (message->stream.flags & ZRPC_STREAM_FIRST) ||
-                                 (message->stream.flags & ZRPC_STREAM_LAST) ||
-                                 (message->stream.flags & ZRPC_STREAM_CANCEL) ||
-                                 message->stream.stream_id
-                             ? &message->stream
-                             : NULL);
+    has_stream = (message->stream.flags &
+                  (ZRPC_STREAM_FIRST | ZRPC_STREAM_LAST | ZRPC_STREAM_CANCEL)) != 0 ||
+                 message->stream.stream_id != 0;
+    memset(&msg, 0, sizeof(msg));
+    msg.kind = message->kind;
+    msg.status = message->status;
+    msg.request_id = message->request_id;
+    msg.route = message->route;
+    msg.payload = message->payload;
+    if (has_stream) {
+        msg.stream = message->stream;
+        msg.has_stream = 1;
+    }
+    msg.peer_ip = peer_host;
+    msg.peer_port = peer_port;
+    msg.peer_token = reply_token;
+    zri_node_on_message(transport->node, transport, &msg);
 }
 
 /*
@@ -43,35 +53,41 @@ static void provider_op_stop(zri_transport_t *t) {
     t->provider->ops->stop(t->provider_instance);
 }
 
-static int provider_op_send(zri_transport_t *t, const char *ip, uint16_t port, uint8_t kind,
-                            int status, uint32_t msg_id, const char *route,
-                            const zrpc_payload_t *payload, const zrpc_stream_meta_t *stream) {
-    zrpc_transport_message_t message;
-    message.kind = kind;
-    message.status = status;
-    message.request_id = msg_id;
-    message.stream = stream ? *stream : (zrpc_stream_meta_t){0};
-    message.route = route;
-    message.payload = payload ? *payload : (zrpc_payload_t){0};
-    return t->provider->ops->send(t->provider_instance, ip, port, &message);
+/* 把统一消息上下文转换成公开 provider SPI 的消息结构。 */
+static void provider_message_from(const zri_message_t *src, zrpc_transport_message_t *dst) {
+    memset(dst, 0, sizeof(*dst));
+    dst->kind = src->kind;
+    dst->status = src->status;
+    dst->request_id = src->request_id;
+    if (src->has_stream) {
+        dst->stream = src->stream;
+    }
+    dst->route = src->route;
+    dst->payload = src->payload;
 }
 
-static int provider_op_reply(zri_transport_t *t, zri_peer_token_t token, const char *ip,
-                             uint16_t port, uint8_t kind, int status, uint32_t msg_id,
-                             const char *route, const zrpc_payload_t *payload,
-                             const zrpc_stream_meta_t *stream) {
-    zrpc_transport_message_t message;
-    message.kind = kind;
-    message.status = status;
-    message.request_id = msg_id;
-    message.stream = stream ? *stream : (zrpc_stream_meta_t){0};
-    message.route = route;
-    message.payload = payload ? *payload : (zrpc_payload_t){0};
-    return t->provider->ops->reply(t->provider_instance, token, ip, port, &message);
+static int provider_op_send(zri_transport_t *t, const zri_message_t *message) {
+    zrpc_transport_message_t provider_message;
+    if (!t || !t->provider || !message) {
+        return ZRPC_ERR_INVALID;
+    }
+    provider_message_from(message, &provider_message);
+    return t->provider->ops->send(t->provider_instance, message->peer_ip, message->peer_port,
+                                  &provider_message);
 }
 
-static int provider_op_rtcp_peer(zri_transport_t *t, const char *ip, uint16_t port,
-                                 zrpc_rtcp_peer_stats_t *out) {
+static int provider_op_reply(zri_transport_t *t, const zri_message_t *message) {
+    zrpc_transport_message_t provider_message;
+    if (!t || !t->provider || !message) {
+        return ZRPC_ERR_INVALID;
+    }
+    provider_message_from(message, &provider_message);
+    return t->provider->ops->reply(t->provider_instance, message->peer_token, message->peer_ip,
+                                   message->peer_port, &provider_message);
+}
+
+static int provider_op_peer_stats(zri_transport_t *t, const char *ip, uint16_t port,
+                                  zrpc_peer_stats_t *out) {
     (void)t;
     (void)ip;
     (void)port;
@@ -84,7 +100,7 @@ static const zri_transport_ops_t g_provider_ops = {
     provider_op_stop,
     provider_op_send,
     provider_op_reply,
-    provider_op_rtcp_peer,
+    provider_op_peer_stats,
 };
 
 int zri_node_transport_add(zrpc_node_t *node, const char *scheme, const char *host,

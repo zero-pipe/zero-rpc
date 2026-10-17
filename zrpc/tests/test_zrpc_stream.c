@@ -1,5 +1,6 @@
 /* Streaming RPC：分片上传请求，服务端逐 chunk 回调并在 LAST 回复。 */
-#include <zrpc/zrpc.h>
+#include <zrpc/zrpc_client.h>
+#include <zrpc/zrpc_server.h>
 #include <ztk/platform.h>
 #include <ztk/thread/sem.h>
 

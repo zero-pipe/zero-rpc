@@ -4,7 +4,8 @@
  *
  * 用法：zrpc_example_08_config_server [config.json]
  */
-#include <zrpc/zrpc.h>
+#include <zrpc/zrpc_server.h>
+#include <zrpc/zrpc_config.h>
 
 #include <stdio.h>
 

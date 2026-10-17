@@ -2,7 +2,7 @@
  * 07 Direct Endpoint：客户端。对应 fastcall-c 的 07_direct_endpoint。
  * 通过 zrpc_proxy_set_endpoint_uri 直接指定目标端点，跳过发现与路由表。
  */
-#include <zrpc/zrpc.h>
+#include <zrpc/zrpc_client.h>
 
 #include <stdio.h>
 #include <string.h>

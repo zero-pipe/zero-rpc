@@ -1,6 +1,6 @@
 # zrpc
 
-基于 [zero-tool-kit](../../3rdpart/zero-tool-kit) 的**异步 RPC**，内置 **UDP** 与 **TCP**
+基于 [zero-tool-kit](../../3rdpart/zero-tool-kit) 的**异步核心 RPC**，内置 **UDP** 与 **TCP**
 传输，唯一底层依赖为 ZTK。整体分层解耦：上层只面对 `node / service / proxy / payload`，
 传输与序列化都是可替换的实现细节。
 
@@ -10,10 +10,12 @@
 
 ## 特性
 
-- **只提供异步接口**：`zrpc_proxy_call(...)` 发送后立即返回，结果通过回调送达；无阻塞/同步等待 API。
+- **三种调用形态**：`zrpc_proxy_call_async(...)` 异步回调、`zrpc_proxy_call_sync(...)` 阻塞等待、
+  `zrpc_proxy_call_event(...)` 单向事件。核心仍是异步的，sync 只是可选的阻塞封装。
 - **不新增线程**：全部运行在 ZTK 的 `ztk_poller_pool` 线程上；回调都在 poller 线程触发（禁止阻塞）。
 - **可组合传输**：node 管理一个或多个 binding；每个 binding 用 `scheme://host:port` 标识。
-  `UDP` 走 RTP + 分片/重组 + NACK/RTX + RTCP(SR/RR)；`TCP` 走基于 `ztk_tcp_server/ztk_tcp_client` 的长度前缀分帧。
+  上层只看到统一的 envelope + 消息上下文。UDP 在内部用 RTP/RTCP 承载分片、NACK/RTX 与
+  链路反馈来实现可靠性；TCP 本身可靠，只加长度前缀分帧，不引入 RTP/RTCP。
 - **路由**：静态路由（显式登记 `service -> endpoint`）与 **mesh 服务发现**（UDP 广播 HELLO/BYE）统一进路由表。
 - **payload 对框架透明**：框架只透传字节 + `encoding` 标签；序列化/反序列化通过可插拔 `zrpc_codec_t` 留给应用层。
 - **简单 JSON 配置**：内置 cJSON，`zrpc_config_load[_file]` 一行加载。
@@ -33,20 +35,20 @@
 ```
 zrpc/
   include/zrpc/
-    zrpc.h            伞头（包含全部）
-     zrpc_types.h      状态码 / transport / payload 视图
-     zrpc_metrics.h    节点运行指标
-     zrpc_node.h       节点：生命周期 / binding / 发现 / 静态路由
-    zrpc_endpoint.h   endpoint URI 与 provider scheme
-    zrpc_transport_provider.h 传输 provider 扩展 SPI
-    zrpc_service.h    服务端：注册方法 / 处理请求 / reply
-    zrpc_proxy.h      客户端：异步 call / cancel / endpoint
-    zrpc_codec.h      payload codec 扩展点（预留）
-    zrpc_message_view.h 请求/响应统一视图（同步 handler 用）
-    zrpc_service_table.h 服务/方法声明契约（ZRPC_SERVICE_DEFINE）
-    zrpc_stub.h       node 之上的传输无关调用原语
-    zrpc_sync.h       同步调用便捷层（可选）
-    zrpc_config.h     JSON 配置
+    zrpc_runtime.h    运行时入口：node / metrics
+    zrpc_server.h     服务端入口：service / reply / message view
+    zrpc_client.h     客户端入口：proxy / stub / async / sync / stream
+    zrpc_transport.h  传输扩展入口：endpoint / provider
+    zrpc_extensions.h 扩展入口：codec / message view / service table
+    zrpc_config.h     JSON 配置入口
+    zrpc_types.h      状态码 / transport / payload 视图
+    zrpc_node.h       节点的细粒度接口
+    zrpc_service.h    服务端的细粒度接口
+    zrpc_proxy.h      客户端 proxy 的细粒度接口
+    zrpc_stub.h       客户端 stub 的细粒度接口
+    zrpc_endpoint.h / zrpc_transport_provider.h
+    zrpc_codec.h / zrpc_message_view.h / zrpc_service_table.h
+    zrpc_metrics.h    运行指标细粒度接口
   src/                内部实现（文件用短名，目录已表达归属）
     core/             组合根与内部子模块（按文件/职责切分）
       node.c              节点生命周期 + 传输装配 + 阻塞运行
@@ -58,7 +60,7 @@ zrpc/
       stub.c              传输无关调用原语
       pending.c           pending 关联表
       sync.c              同步便捷层
-      message_view.c / service_table.c / codec.c / mem.c
+      message_view.c / service_table.c / codec.c / mem.c / util.c
       内部头按模块拆分（无聚合“上帝头”，各模块只 include 自己需要的）：
         caps.h               容量常量
         pending.h            pending 表
@@ -70,10 +72,13 @@ zrpc/
     discovery/        registry backend（UDP mesh 广播）；node 作用域的控制面后端
                       自持对端表/发现 socket/单播目标（node->discovery）
                       只经 node_access.h 门面访问 node，不穿透 struct zrpc_node
-    message/          provider-neutral RPC envelope 编解码
+    message/          provider-neutral RPC envelope 编解码 + 统一消息上下文
+      message.h          zri_message_t：kind/status/request_id/route/payload/stream/peer
+      envelope          编解码，以及 envelope -> zri_message_t 的转换
     transport/        传输 facade + provider SPI + UDP/TCP 驱动 + framing
       只读 zri_transport_t 上的配置快照，不穿透 node 内部
-      framing         RTP/分片/NACK、RTCP SR/RR/SDES 与 TCP 长度前缀分帧
+      framing         UDP 的 RTP/分片/NACK、RTCP SR/RR/SDES 与 TCP 长度前缀分帧
+                      （均为传输内部实现，不进入上层消息抽象）
       rx_window       UDP 接收窗口与缺口检测
       reasm           UDP 分片重组
       tx_ring         UDP RTX 重传环
@@ -87,17 +92,50 @@ zrpc/
   examples/           编号示例（对齐 fastcall-c：node / service / proxy / stub / table / 路由）
 ```
 
+## 公共 API 分层
+
+新代码按使用角色选择入口头文件；这些入口只负责组合现有细粒度头，不改变已有类型和函数名。
+
+| 入口 | 适用场景 | 主要内容 |
+| --- | --- | --- |
+| `zrpc_runtime.h` | 所有程序 | 节点生命周期、调度、发现、路由、指标 |
+| `zrpc_server.h` | 提供 RPC 服务 | service、handler、reply、消息视图 |
+| `zrpc_client.h` | 调用 RPC 服务 | proxy、stub、异步/同步/事件/流式调用 |
+| `zrpc_transport.h` | 自定义传输或端点处理 | endpoint URI、provider SPI |
+| `zrpc_extensions.h` | 接入业务序列化或共享契约 | codec、消息视图、service table |
+| `zrpc_config.h` | 使用 JSON 配置 | 配置加载和按配置创建节点 |
+
+例如，服务端通常只需要：
+
+```c
+#include <zrpc/zrpc_server.h>
+#include <zrpc/zrpc_config.h>  /* 使用 JSON 配置时再引入 */
+```
+
+客户端通常只需要：
+
+```c
+#include <zrpc/zrpc_client.h>
+```
+
+细粒度的 `zrpc_node.h`、`zrpc_proxy.h`、`zrpc_service.h` 等头文件继续保留，适合库封装层
+或需要最小 include 集合的项目。
+
 ## 分层抽象
 
 ```
 node            生命周期 / binding / 发现 / 静态路由
-  └─ stub       service.method + payload -> 关联(request_id) + 重传 + send 钩子
-       └─ proxy 在 stub 上注入端点覆盖 / 路由
-service         注册方法；handler 可异步 reply，或用同步风格直接返回
+  ├─ service    注册方法；handler 可异步 reply，或用同步风格直接返回
+  ├─ stub       service.method + payload -> 关联(request_id) + 重传 + send 钩子
+  └─ proxy      在 stub 上注入端点覆盖 / 路由；提供 call_async / call_sync / call_event
 ```
 
+- **node 的角色**：一个 node 可以只做客户端（创建 proxy）、只做服务端（创建 service），
+  也可以两者兼具。proxy 借用 node 的 poller/路由，不持有独立线程。
+- **统一消息上下文**：传输层与 core 之间只传一个 `zri_message_t`（kind/status/request_id/
+  route/payload/stream/peer），不再用一长串位置参数穿过 dispatch / service / reply。
 - **stub**：不注入 send 时走节点默认路由；`zrpc_proxy_create` 会自动创建一个注入了
-  `proxy` send 钩子的 stub，因此 `zrpc_proxy_call` 与 `zrpc_stub_call_async` 共享同一条
+  `proxy` send 钩子的 stub，因此 `zrpc_proxy_call_async` 与 `zrpc_stub_call_async` 共享同一条
   发送/重传路径。
 - **service_table**：把 service/method 及数字 ID 声明在一个共享头文件里，两端 install
   同一张表；`zrpc_node_config_t::service_table` 会在节点创建时自动 install。
@@ -136,7 +174,8 @@ ctest -C Debug --output-on-failure
 ## 最小用法
 
 ```c
-#include <zrpc/zrpc.h>
+#include <zrpc/zrpc_client.h>
+#include <zrpc/zrpc_server.h>
 
 static void handler(zrpc_call_t *call, const zrpc_request_t *req, void *user) {
     zrpc_reply(call, 0, &req->payload); /* 异步回显，payload 原样返回 */
@@ -163,7 +202,7 @@ zrpc_service_add_method(svc, "ping", handler, NULL);
 zrpc_proxy_t *proxy = NULL;
 zrpc_proxy_create(node, NULL, &proxy);
 zrpc_payload_t pl = { "hi", 2, 0 };
-zrpc_proxy_call(proxy, "echo", "ping", &pl, on_resp, NULL, 1000, NULL);
+zrpc_proxy_call_async(proxy, "echo", "ping", &pl, on_resp, NULL, 1000, NULL);
 ```
 
 完整可运行见 `examples/`（编号对齐 fastcall-c）：
@@ -191,7 +230,7 @@ zrpc_node_register_codec(node, &my_codec);
 void *bytes; size_t len;
 my_codec.encode(NULL, &order, &bytes, &len);
 zrpc_payload_t pl = { bytes, len, my_codec.encoding };
-zrpc_proxy_call(proxy, "OrderService", "get", &pl, on_resp, NULL, 1000, NULL);
+zrpc_proxy_call_async(proxy, "OrderService", "get", &pl, on_resp, NULL, 1000, NULL);
 ```
 
 `encoding` 随消息透传，接收端用 `zrpc_node_find_codec(node, resp->payload.encoding)` 找到对应 codec 解码。

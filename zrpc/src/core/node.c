@@ -368,8 +368,8 @@ void zrpc_node_metrics(const zrpc_node_t *node, zrpc_metrics_t *out) {
     *out = node->metrics;
 }
 
-int zrpc_node_rtcp_peer(const zrpc_node_t *node, const char *ip, uint16_t port,
-                        zrpc_rtcp_peer_stats_t *out) {
+int zrpc_node_peer_stats(const zrpc_node_t *node, const char *ip, uint16_t port,
+                         zrpc_peer_stats_t *out) {
     size_t i;
     if (!node || !ip || !out) {
         return ZRPC_ERR_INVALID;
@@ -377,12 +377,36 @@ int zrpc_node_rtcp_peer(const zrpc_node_t *node, const char *ip, uint16_t port,
     memset(out, 0, sizeof(*out));
     for (i = 0; i < node->transport_count; i++) {
         zri_transport_t *t = node->transports[i];
-        if (t && t->ops && t->ops->rtcp_peer && t->ops->rtcp_peer(t, ip, port, out) == 1) {
+        if (t && t->ops && t->ops->peer_stats && t->ops->peer_stats(t, ip, port, out) == 1) {
             return ZRPC_OK;
         }
     }
     memset(out, 0, sizeof(*out));
     return ZRPC_ERR_NOTFOUND;
+}
+
+int zrpc_node_rtcp_peer(const zrpc_node_t *node, const char *ip, uint16_t port,
+                        zrpc_rtcp_peer_stats_t *out) {
+    zrpc_peer_stats_t stats;
+    int rc;
+
+    if (!out) {
+        return ZRPC_ERR_INVALID;
+    }
+    memset(out, 0, sizeof(*out));
+    rc = zrpc_node_peer_stats(node, ip, port, &stats);
+    if (rc != ZRPC_OK) {
+        return rc;
+    }
+    out->ssrc_local = stats.local_id;
+    out->ssrc_remote = stats.remote_id;
+    out->rtt_ms = stats.rtt_ms;
+    out->jitter_ms = stats.jitter_ms;
+    out->remote_lost = stats.lost;
+    /* 旧接口无法区分 SR/RR，只能把统一反馈计数映射到 SR。 */
+    out->sr_sent = stats.feedback_sent;
+    out->sr_received = stats.feedback_received;
+    return ZRPC_OK;
 }
 
 /* ---- 在 poller 线程投递任务 ---- */

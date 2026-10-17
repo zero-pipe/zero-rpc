@@ -144,43 +144,18 @@ static int rx_acc_reserve(zri_rx_acc_t *a, size_t extra) {
 
 static void tcp_link_dispatch(zri_tcp_transport_t *t, zri_tcp_link_t *link, const uint8_t *body,
                               size_t body_len) {
-    zrpc_node_t *node = t->base.node;
     zri_envelope_t env;
+    zri_message_t msg;
+    char route[ZRPC_MAX_ROUTE];
 
     if (zri_envelope_decode(body, body_len, &env) != ZRPC_OK) {
         return;
     }
-    {
-        zrpc_payload_t pl;
-        char route[ZRPC_MAX_ROUTE];
-        uint16_t rl = env.route_len;
-        if (rl >= ZRPC_MAX_ROUTE) {
-            rl = ZRPC_MAX_ROUTE - 1;
-        }
-        if (rl > 0 && env.route) {
-            memcpy(route, env.route, rl);
-        } else {
-            rl = 0;
-        }
-        route[rl] = '\0';
-        pl.data = env.payload;
-        pl.len = env.payload_len;
-        pl.encoding = env.encoding;
-        {
-            zrpc_stream_meta_t sm;
-            const zrpc_stream_meta_t *smp = NULL;
-            if (env.stream_flags & ZRPC_STREAM_FLAG_STREAM) {
-                sm.flags = env.stream_flags &
-                           (ZRPC_STREAM_FIRST | ZRPC_STREAM_LAST | ZRPC_STREAM_CANCEL);
-                sm.stream_id = env.stream_id;
-                sm.offset = env.stream_offset;
-                sm.total_size = env.stream_total_size;
-                smp = &sm;
-            }
-            zri_node_on_message(node, link->ip, link->port, link, &t->base, env.kind, env.status,
-                                 env.request_id, route, &pl, smp);
-        }
-    }
+    zri_envelope_to_message(&env, route, sizeof(route), &msg);
+    msg.peer_ip = link->ip;
+    msg.peer_port = link->port;
+    msg.peer_token = link;
+    zri_node_on_message(t->base.node, &t->base, &msg);
 }
 
 static void tcp_link_consume(zri_tcp_transport_t *t, zri_tcp_link_t *link) {
@@ -639,22 +614,23 @@ static void tcp_stop(zri_transport_t *base) {
     }
 }
 
-static int tcp_send_common(zri_tcp_transport_t *t, zri_tcp_link_t *link, const char *ip,
-                           uint16_t port, uint8_t kind, int status, uint32_t msg_id,
-                           const char *route, const zrpc_payload_t *payload,
-                           const zrpc_stream_meta_t *stream) {
-    size_t route_len = route ? strlen(route) : 0;
-    size_t payload_len = (payload && payload->len) ? payload->len : 0;
+static int tcp_send_common(zri_tcp_transport_t *t, zri_tcp_link_t *link,
+                           const zri_message_t *msg) {
+    size_t route_len = (msg && msg->route) ? strlen(msg->route) : 0;
+    size_t payload_len = msg ? msg->payload.len : 0;
     size_t body_len = zri_envelope_size(route_len, payload_len);
     size_t need = ZRPC_TCP_HDR_LEN + body_len;
     zri_envelope_t header_envelope;
 
+    if (!t || !msg) {
+        return ZRPC_ERR_INVALID;
+    }
     if (body_len > (size_t)t->base.max_msg_bytes + ZRPC_MAX_ROUTE + ZRPC_ENVELOPE_HDR_LEN ||
         need > (size_t)t->base.max_msg_bytes + ZRPC_MAX_ROUTE + 64) {
         return ZRPC_ERR_TOOBIG;
     }
     if (!link) {
-        link = link_find_out(t, ip, port, 1);
+        link = link_find_out(t, msg->peer_ip, msg->peer_port, 1);
         if (!link) {
             return ZRPC_ERR_NOMEM;
         }
@@ -666,16 +642,16 @@ static int tcp_send_common(zri_tcp_transport_t *t, zri_tcp_link_t *link, const c
     }
 
     memset(&header_envelope, 0, sizeof(header_envelope));
-    header_envelope.kind = kind;
-    header_envelope.status = status;
-    header_envelope.encoding = payload ? payload->encoding : 0;
-    header_envelope.request_id = msg_id;
-    header_envelope.route = route;
-    if (stream) {
-        header_envelope.stream_flags = (uint8_t)(ZRPC_STREAM_FLAG_STREAM | stream->flags);
-        header_envelope.stream_id = stream->stream_id;
-        header_envelope.stream_offset = stream->offset;
-        header_envelope.stream_total_size = stream->total_size;
+    header_envelope.kind = msg->kind;
+    header_envelope.status = msg->status;
+    header_envelope.encoding = msg->payload.encoding;
+    header_envelope.request_id = msg->request_id;
+    header_envelope.route = msg->route;
+    if (msg->has_stream) {
+        header_envelope.stream_flags = (uint8_t)(ZRPC_STREAM_FLAG_STREAM | msg->stream.flags);
+        header_envelope.stream_id = msg->stream.stream_id;
+        header_envelope.stream_offset = msg->stream.offset;
+        header_envelope.stream_total_size = msg->stream.total_size;
     }
     header_envelope.payload = NULL;
     header_envelope.payload_len = 0;
@@ -688,8 +664,7 @@ static int tcp_send_common(zri_tcp_transport_t *t, zri_tcp_link_t *link, const c
                                  &header_envelope) != ZRPC_ENVELOPE_HDR_LEN + route_len) {
             return ZRPC_ERR_INVALID;
         }
-        return tcp_link_emit(t, link, header, header_len, payload ? payload->data : NULL,
-                             payload_len);
+        return tcp_link_emit(t, link, header, header_len, msg->payload.data, payload_len);
     }
     /* 超长 route（正常不会走到）：用池化 header，避免 body+frame 两次分配。 */
     {
@@ -705,33 +680,31 @@ static int tcp_send_common(zri_tcp_transport_t *t, zri_tcp_link_t *link, const c
             free(header);
             return ZRPC_ERR_INVALID;
         }
-        rc = tcp_link_emit(t, link, header, header_len, payload ? payload->data : NULL,
-                           payload_len);
+        rc = tcp_link_emit(t, link, header, header_len, msg->payload.data, payload_len);
         free(header);
         return rc;
     }
 }
 
-static int tcp_send(zri_transport_t *base, const char *ip, uint16_t port, uint8_t kind, int status,
-                    uint32_t msg_id, const char *route, const zrpc_payload_t *payload,
-                    const zrpc_stream_meta_t *stream) {
+static int tcp_send(zri_transport_t *base, const zri_message_t *msg) {
     zri_tcp_transport_t *t = (zri_tcp_transport_t *)base;
-    if (!ip || !port) {
+    if (!msg || !msg->peer_ip || !msg->peer_port) {
         return ZRPC_ERR_INVALID;
     }
-    return tcp_send_common(t, NULL, ip, port, kind, status, msg_id, route, payload, stream);
+    return tcp_send_common(t, NULL, msg);
 }
 
-static int tcp_reply(zri_transport_t *base, zri_peer_token_t token, const char *ip, uint16_t port,
-                     uint8_t kind, int status, uint32_t msg_id, const char *route,
-                     const zrpc_payload_t *payload, const zrpc_stream_meta_t *stream) {
+static int tcp_reply(zri_transport_t *base, const zri_message_t *msg) {
     zri_tcp_transport_t *t = (zri_tcp_transport_t *)base;
-    zri_tcp_link_t *link = (zri_tcp_link_t *)token;
-    if (!link || !link->used) {
-        return tcp_send(base, ip, port, kind, status, msg_id, route, payload, stream);
+    zri_tcp_link_t *link;
+    if (!msg) {
+        return ZRPC_ERR_INVALID;
     }
-    return tcp_send_common(t, link, link->ip, link->port, kind, status, msg_id, route, payload,
-                           stream);
+    link = (zri_tcp_link_t *)msg->peer_token;
+    if (!link || !link->used) {
+        return tcp_send(base, msg);
+    }
+    return tcp_send_common(t, link, msg);
 }
 
 static void tcp_tick_cb(void *user) {

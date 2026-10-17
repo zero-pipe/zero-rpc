@@ -29,14 +29,14 @@ extern "C" {
 #define ZRPC_ERR_TOOBIG (-8)
 #define ZRPC_ERR_CLOSED (-9)
 
-/* 不透明句柄 */
+/* ---- 不透明句柄 ---- */
 typedef struct zrpc_node zrpc_node_t;
 typedef struct zrpc_service zrpc_service_t;
 typedef struct zrpc_proxy zrpc_proxy_t;
 typedef struct zrpc_call zrpc_call_t;
 typedef struct zrpc_stream zrpc_stream_t;
 
-/* 流式 chunk 标志 */
+/* ---- 流式消息 ---- */
 #define ZRPC_STREAM_FIRST 0x01u
 #define ZRPC_STREAM_LAST 0x02u
 #define ZRPC_STREAM_CANCEL 0x04u
@@ -58,6 +58,7 @@ typedef struct zrpc_stream_meta {
     uint64_t total_size;
 } zrpc_stream_meta_t;
 
+/* ---- 传输与节点模式 ---- */
 /* 传输种类。默认 binding 使用 UDP；显式 bindings 可按 scheme 选择不同传输。 */
 typedef enum zrpc_transport_kind {
     ZRPC_TRANSPORT_UDP = 0,
@@ -71,6 +72,7 @@ typedef enum zrpc_node_mode {
     ZRPC_MODE_STATIC = 1
 } zrpc_node_mode_t;
 
+/* ---- 应用消息视图 ---- */
 /*
  * 应用 payload 视图（对框架不透明）。
  *
@@ -106,11 +108,13 @@ typedef struct zrpc_response {
     zrpc_payload_t payload;
 } zrpc_response_t;
 
+/* ---- 回调 ---- */
 /* 客户端响应回调。status：ZRPC_OK 或错误码；resp 仅在回调内有效。 */
 typedef void (*zrpc_response_fn)(int status, const zrpc_response_t *resp, void *user);
 typedef void (*zrpc_response_chunk_fn)(int status, const zrpc_chunk_t *chunk, void *user);
 typedef void (*zrpc_stream_done_fn)(int status, void *user);
 
+/* ---- 默认值与容量 ---- */
 /* 默认发现端口（广播） */
 #ifndef ZRPC_DISCOVERY_PORT
 #define ZRPC_DISCOVERY_PORT 41953

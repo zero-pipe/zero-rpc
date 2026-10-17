@@ -2,9 +2,13 @@
 #define ZRPC_PROXY_H
 
 /*
- * 客户端代理：发起异步调用。
+ * 客户端代理：call_sync / call_async / call_event 三种调用形态。
  *
- * 发现/路由在框架内部完成；代理只负责把 payload 送出去并把响应回调回来。
+ * 一个 node 可以同时承载 service（服务端）与 proxy（客户端），也可以只有其一。
+ * 发现/路由在框架内部完成；proxy 只负责把 payload 送出去并把响应回调回来。
+ *
+ * 线程约定：call_async / call_event 可在任意线程调用（内部投递到 poller）；
+ * call_sync 会阻塞等待，禁止在 poller 回调内使用。
  */
 
 #include <zrpc/zrpc_types.h>
@@ -21,26 +25,9 @@ typedef struct zrpc_proxy_options {
     uint32_t prefer_stream_threshold; /* 0=disabled; larger payloads prefer TCP */
 } zrpc_proxy_options_t;
 
+/* ---- 生命周期与目标 ---- */
 int zrpc_proxy_create(zrpc_node_t *node, const zrpc_proxy_options_t *options, zrpc_proxy_t **out);
 void zrpc_proxy_destroy(zrpc_proxy_t *proxy);
-
-/*
- * 发起异步调用。发现并发送后立即返回；响应或超时通过 cb 回调。
- * timeout_ms：0 表示使用默认（ZRPC_DEFAULT_TIMEOUT_MS）。
- * out_request_id：非空时回填关联 ID，可用于 zrpc_proxy_cancel。
- */
-int zrpc_proxy_call(zrpc_proxy_t *proxy, const char *service, const char *method,
-                    const zrpc_payload_t *payload, zrpc_response_fn cb, void *user,
-                    uint64_t timeout_ms, uint64_t *out_request_id);
-
-/* 请求为普通 unary，响应按 chunk 回调，直到 LAST。 */
-int zrpc_proxy_call_stream(zrpc_proxy_t *proxy, const char *service, const char *method,
-                           const zrpc_payload_t *request, zrpc_response_chunk_fn on_chunk,
-                           zrpc_stream_done_fn on_done, void *user, uint64_t timeout_ms,
-                           uint64_t *out_request_id);
-
-/* 取消未完成的调用；若已回调则返回 ZRPC_ERR_NOTFOUND。 */
-int zrpc_proxy_cancel(zrpc_proxy_t *proxy, uint64_t request_id);
 
 /*
  * 直接指定目标数据端点（ip:port + 传输种类），调用跳过服务发现。
@@ -51,8 +38,53 @@ int zrpc_proxy_set_endpoint(zrpc_proxy_t *proxy, const char *ip, uint16_t port,
 /* 直接指定目标端点 URI（如 tcp://127.0.0.1:8080、dds://...），跳过服务发现。 */
 int zrpc_proxy_set_endpoint_uri(zrpc_proxy_t *proxy, const char *endpoint);
 
+/* ---- Unary 调用 ---- */
 /*
- * 流式调用：分片发送请求。最后一个 chunk 必须带 ZRPC_STREAM_LAST。
+ * 异步请求：发现并发送后立即返回；响应或超时通过 cb 回调（poller 线程）。
+ * timeout_ms：0 表示使用默认（ZRPC_DEFAULT_TIMEOUT_MS）。
+ * out_request_id：非空时回填关联 ID，可用于 zrpc_proxy_cancel。
+ */
+int zrpc_proxy_call_async(zrpc_proxy_t *proxy, const char *service, const char *method,
+                          const zrpc_payload_t *payload, zrpc_response_fn cb, void *user,
+                          uint64_t timeout_ms, uint64_t *out_request_id);
+
+/* 兼容旧名，等价于 zrpc_proxy_call_async。 */
+int zrpc_proxy_call(zrpc_proxy_t *proxy, const char *service, const char *method,
+                    const zrpc_payload_t *payload, zrpc_response_fn cb, void *user,
+                    uint64_t timeout_ms, uint64_t *out_request_id);
+
+/*
+ * 单向事件：只发送、不等待响应（EVENT）。发送在 poller 线程完成。
+ * out_request_id 可空；非空时回填本次事件的关联 ID。
+ */
+int zrpc_proxy_call_event(zrpc_proxy_t *proxy, const char *service, const char *method,
+                          const zrpc_payload_t *payload, uint64_t *out_request_id);
+
+/*
+ * 同步请求：阻塞直到响应、错误或超时。成功时 response->payload 由内部缓冲持有，
+ * 用完调用 zrpc_response_release()。禁止在 poller 线程回调里调用。
+ */
+int zrpc_proxy_call_sync(zrpc_proxy_t *proxy, const char *service, const char *method,
+                         const zrpc_payload_t *request, zrpc_response_t *response,
+                         uint64_t timeout_ms, uint64_t *out_request_id);
+
+/* 释放 zrpc_proxy_call_sync 填出的响应缓冲并清零。 */
+void zrpc_response_release(zrpc_response_t *response);
+
+/* ---- 调用控制 ---- */
+/* 取消未完成的调用；若已回调则返回 ZRPC_ERR_NOTFOUND。 */
+int zrpc_proxy_cancel(zrpc_proxy_t *proxy, uint64_t request_id);
+
+/* ---- Unary 请求的分片响应 ---- */
+/* 请求为普通 unary，响应按 chunk 回调，直到 LAST。 */
+int zrpc_proxy_call_stream(zrpc_proxy_t *proxy, const char *service, const char *method,
+                           const zrpc_payload_t *request, zrpc_response_chunk_fn on_chunk,
+                           zrpc_stream_done_fn on_done, void *user, uint64_t timeout_ms,
+                           uint64_t *out_request_id);
+
+/* ---- 客户端流 ---- */
+/*
+ * 流式调用：分片发送请求，最后一个 chunk 必须带 ZRPC_STREAM_LAST。
  * chunk 在 send 返回后即可释放；框架已复制必要数据。
  */
 int zrpc_proxy_stream_open(zrpc_proxy_t *proxy, const char *service, const char *method,

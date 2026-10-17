@@ -1,4 +1,5 @@
-#include <zrpc/zrpc.h>
+#include <zrpc/zrpc_client.h>
+#include <zrpc/zrpc_server.h>
 #include <ztk/platform.h>
 #include <ztk/thread/sem.h>
 
@@ -47,7 +48,7 @@ static int run_call(zrpc_proxy_t *proxy, client_state_t *st, const void *data, s
         int rc;
         st->status = -999;
         st->len = 0;
-        rc = zrpc_proxy_call(proxy, "echo", "ping", &pl, on_response, st, 1000, NULL);
+        rc = zrpc_proxy_call_async(proxy, "echo", "ping", &pl, on_response, st, 1000, NULL);
         if (rc != ZRPC_OK) {
             return rc;
         }
@@ -207,11 +208,11 @@ static int run_case(zrpc_transport_kind_t kind, const char *label) {
         } else {
             char ep[128];
             zrpc_endpoint_t e;
-            zrpc_rtcp_peer_stats_t peer;
+            zrpc_peer_stats_t peer;
             if (zrpc_node_binding_endpoint(server, 0, ep, sizeof(ep)) == ZRPC_OK &&
                 zrpc_endpoint_parse(ep, &e) == ZRPC_OK &&
-                zrpc_node_rtcp_peer(client, e.host, e.port, &peer) == ZRPC_OK) {
-                if (peer.sr_sent == 0) {
+                zrpc_node_peer_stats(client, e.host, e.port, &peer) == ZRPC_OK) {
+                if (peer.feedback_sent == 0) {
                     printf("[%s] rtcp peer stats empty\n", label);
                     failed = 1;
                 }

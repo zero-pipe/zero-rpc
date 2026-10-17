@@ -11,7 +11,6 @@
 #include "pending.h"
 #include "util.h"
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -94,7 +93,8 @@ static uint64_t stream_send_task_fn(void *user) {
     zrpc_stream_t *stream = task->stream;
     zrpc_payload_t payload;
     zrpc_stream_meta_t meta;
-    char route[ZRPC_SERVICE_NAME_MAX + ZRPC_METHOD_NAME_MAX + 2];
+    char route[ZRPC_ROUTE_MAX];
+    zri_message_t message;
     int rc;
     if (stream->closed) {
         free(task->data);
@@ -102,7 +102,10 @@ static uint64_t stream_send_task_fn(void *user) {
         return 0;
     }
     if (task->first) {
-        snprintf(route, sizeof(route), "%s.%s", stream->service, stream->method);
+        if (zri_route_format(route, sizeof(route), stream->service, stream->method) != ZRPC_OK) {
+            rc = ZRPC_ERR_INVALID;
+            goto done;
+        }
     } else {
         route[0] = '\0';
     }
@@ -113,14 +116,22 @@ static uint64_t stream_send_task_fn(void *user) {
     meta.stream_id = stream->stream_id;
     meta.offset = task->offset;
     meta.total_size = 0;
-    rc = zri_node_send(stream->node, stream->ip, stream->port, ZRPC_KIND_REQUEST, 0,
-                        (uint32_t)stream->request_id, stream->transport, stream->scheme, route,
-                        &payload, &meta);
+    memset(&message, 0, sizeof(message));
+    message.kind = ZRPC_KIND_REQUEST;
+    message.request_id = (uint32_t)stream->request_id;
+    message.route = route;
+    message.payload = payload;
+    message.stream = meta;
+    message.has_stream = 1;
+    message.peer_ip = stream->ip;
+    message.peer_port = stream->port;
+    rc = zri_node_send(stream->node, stream->transport, stream->scheme, &message);
     if (rc == ZRPC_ERR_AGAIN && task->retries++ < 1000) {
         if (ztk_poller_do_delay(stream->node->poller, 1, stream_send_task_fn, task) != NULL) {
             return 0; /* 保留 task/data，稍后重试 */
         }
     }
+done:
     if (rc != ZRPC_OK) {
         zri_pending_t *pending = zri_pending_find(stream->node, stream->request_id);
         if (pending) {
@@ -141,15 +152,24 @@ static void stream_cancel_task_fn(void *user) {
     {
         zrpc_payload_t empty;
         zrpc_stream_meta_t meta;
-        char route[ZRPC_SERVICE_NAME_MAX + ZRPC_METHOD_NAME_MAX + 2];
+        zri_message_t message;
+        char route[ZRPC_ROUTE_MAX];
         memset(&empty, 0, sizeof(empty));
         memset(&meta, 0, sizeof(meta));
         meta.flags = ZRPC_STREAM_CANCEL;
         meta.stream_id = stream->stream_id;
-        snprintf(route, sizeof(route), "%s.%s", stream->service, stream->method);
-        (void)zri_node_send(stream->node, stream->ip, stream->port, ZRPC_KIND_REQUEST, 0,
-                             (uint32_t)stream->request_id, stream->transport, stream->scheme, route,
-                             &empty, &meta);
+        if (zri_route_format(route, sizeof(route), stream->service, stream->method) == ZRPC_OK) {
+            memset(&message, 0, sizeof(message));
+            message.kind = ZRPC_KIND_REQUEST;
+            message.request_id = (uint32_t)stream->request_id;
+            message.route = route;
+            message.payload = empty;
+            message.stream = meta;
+            message.has_stream = 1;
+            message.peer_ip = stream->ip;
+            message.peer_port = stream->port;
+            (void)zri_node_send(stream->node, stream->transport, stream->scheme, &message);
+        }
     }
     pending = zri_pending_find(stream->node, stream->request_id);
     if (pending) {

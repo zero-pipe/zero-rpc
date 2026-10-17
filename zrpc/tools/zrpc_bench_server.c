@@ -5,7 +5,7 @@
  * tests/perf/framework/rpc_bench_server.c (OrderService.get), so the same
  * load generator conventions apply. Not a shipped example.
  */
-#include <zrpc/zrpc.h>
+#include <zrpc/zrpc_server.h>
 #include <ztk/platform.h>
 
 #include <signal.h>

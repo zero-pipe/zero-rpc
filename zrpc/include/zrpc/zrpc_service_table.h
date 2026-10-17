@@ -25,6 +25,7 @@
 extern "C" {
 #endif
 
+/* ---- 声明结构 ---- */
 typedef struct zrpc_method_descriptor {
     uint16_t id;
     const char *name;
@@ -42,6 +43,7 @@ typedef struct zrpc_service_table {
     size_t service_count;
 } zrpc_service_table_t;
 
+/* ---- 安装与查询 ---- */
 /*
  * 安装一张声明表。可在创建节点前多次安装（多张表并存）；重复安装同一声明是
  * 幂等的。同名 service/method 但 ID 不同会被拒绝并返回 ZRPC_ERR_INVALID。
@@ -58,6 +60,7 @@ int zrpc_service_table_active(void);
 /* 查询 service.method 的数字 ID；找到返回 ZRPC_OK。任何参数为空均返回 ZRPC_ERR_INVALID。 */
 int zrpc_service_table_find_id(const char *service, const char *method, uint16_t *out_id);
 
+/* ---- 声明宏 ---- */
 /* 声明一行方法，只在 ZRPC_SERVICE_DEFINE() 内使用。 */
 #define ZRPC_SERVICE_METHOD(id, name) {(uint16_t)(id), (name)}
 

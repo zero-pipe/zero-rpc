@@ -14,6 +14,7 @@ add_library(zrpc STATIC
     src/core/pending.c
     src/core/codec.c
     src/core/mem.c
+    src/core/util.c
     src/core/iobuf.c
     src/core/endpoint.c
     src/message/envelope.c
@@ -33,7 +34,9 @@ add_library(zrpc STATIC
 )
 
 target_include_directories(zrpc
-    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/core
         ${CMAKE_CURRENT_SOURCE_DIR}/src/message
@@ -45,6 +48,16 @@ target_include_directories(zrpc
         ${CMAKE_SOURCE_DIR}/3rdpart/uthash
         ${CMAKE_SOURCE_DIR}/3rdpart/cjson
 )
+
+# Keep the public layout usable from an installed package as well as from the
+# build tree.  The role based headers are convenience entry points; the
+# existing zrpc_*.h headers remain available for fine grained includes.
+install(TARGETS zrpc
+    ARCHIVE DESTINATION lib
+    LIBRARY DESTINATION lib
+    RUNTIME DESTINATION bin
+)
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/zrpc DESTINATION include)
 
 target_link_libraries(zrpc PUBLIC ztk)
 

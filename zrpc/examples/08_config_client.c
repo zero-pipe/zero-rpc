@@ -3,7 +3,8 @@
  *
  * 用法：zrpc_example_08_config_client [config.json]
  */
-#include <zrpc/zrpc.h>
+#include <zrpc/zrpc_client.h>
+#include <zrpc/zrpc_config.h>
 
 #include <stdio.h>
 #include <string.h>

@@ -6,6 +6,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "message.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -59,6 +61,13 @@ typedef struct zri_envelope {
 size_t zri_envelope_size(size_t route_len, size_t payload_len);
 size_t zri_envelope_encode(uint8_t *buf, size_t cap, const zri_envelope_t *envelope);
 int zri_envelope_decode(const uint8_t *buf, size_t len, zri_envelope_t *view);
+
+/*
+ * 把解码后的 envelope 转成统一消息上下文。route 会被拷贝到调用方提供的
+ * route_buf（保证 NUL 结尾），其余字段直接借用 envelope 所在缓冲。
+ */
+void zri_envelope_to_message(const zri_envelope_t *envelope, char *route_buf, size_t route_cap,
+                             zri_message_t *out);
 
 #ifdef __cplusplus
 }

@@ -1,4 +1,4 @@
-#include <zrpc/zrpc.h>
+#include <zrpc/zrpc_config.h>
 
 #include <stdio.h>
 #include <string.h>

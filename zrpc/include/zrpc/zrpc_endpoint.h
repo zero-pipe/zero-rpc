@@ -10,6 +10,7 @@
 extern "C" {
 #endif
 
+/* ---- 数据结构 ---- */
 /* A transport-neutral endpoint. The scheme selects a transport provider. */
 typedef struct zrpc_endpoint {
     char scheme[ZRPC_SCHEME_MAX];
@@ -18,6 +19,7 @@ typedef struct zrpc_endpoint {
     zrpc_transport_kind_t transport;
 } zrpc_endpoint_t;
 
+/* ---- 解析与格式化 ---- */
 /* Parse scheme://host:port. The input is not retained. */
 int zrpc_endpoint_parse(const char *uri, zrpc_endpoint_t *out);
 

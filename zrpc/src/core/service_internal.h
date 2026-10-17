@@ -35,6 +35,7 @@ struct zrpc_call {
     uint16_t peer_port;
     uint32_t msg_id;
     int replied;
+    int one_way; /* EVENT：handler 可复用，但不产生响应 */
     int stream_owned;
 };
 
@@ -51,17 +52,13 @@ typedef struct zri_recv_stream {
     uint64_t bytes;
 } zri_recv_stream_t;
 
-void zri_service_handle_request(zrpc_node_t *node, zri_peer_token_t token, const char *ip,
-                                 zri_transport_t *transport, uint16_t port, uint32_t msg_id,
-                                 const char *route, const zrpc_payload_t *payload);
-void zri_service_handle_stream_chunk(zrpc_node_t *node, zri_peer_token_t token, const char *ip,
-                                      zri_transport_t *transport, uint16_t port, uint32_t msg_id,
-                                      const char *route, const zrpc_stream_meta_t *stream,
-                                      const zrpc_payload_t *payload);
+void zri_service_handle_request(zrpc_node_t *node, zri_transport_t *transport,
+                                const zri_message_t *message);
+void zri_service_handle_stream_chunk(zrpc_node_t *node, zri_transport_t *transport,
+                                     const zri_message_t *message);
 void zri_service_expire_streams(zrpc_node_t *node, uint64_t now_ms);
 
 /* reply.c：错误状态回包（路由/分配失败时直接发送，无 call 上下文）。 */
-void zri_service_send_status(zri_transport_t *transport, zri_peer_token_t token, const char *ip,
-                              uint16_t port, uint32_t msg_id, int status);
+void zri_service_send_status(zri_transport_t *transport, const zri_message_t *request, int status);
 
 #endif /* ZRPC_SERVICE_INTERNAL_H */

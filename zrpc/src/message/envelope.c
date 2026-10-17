@@ -70,3 +70,39 @@ int zri_envelope_decode(const uint8_t *buf, size_t len, zri_envelope_t *view) {
     view->payload_len = len - ZRPC_ENVELOPE_HDR_LEN - route_len;
     return ZRPC_OK;
 }
+
+void zri_envelope_to_message(const zri_envelope_t *envelope, char *route_buf, size_t route_cap,
+                             zri_message_t *out) {
+    size_t route_len;
+
+    if (!envelope || !route_buf || route_cap == 0 || !out) {
+        return;
+    }
+    memset(out, 0, sizeof(*out));
+    route_len = envelope->route_len;
+    if (route_len >= route_cap) {
+        route_len = route_cap - 1;
+    }
+    if (route_len > 0 && envelope->route) {
+        memcpy(route_buf, envelope->route, route_len);
+    } else {
+        route_len = 0;
+    }
+    route_buf[route_len] = '\0';
+
+    out->kind = envelope->kind;
+    out->status = envelope->status;
+    out->request_id = envelope->request_id;
+    out->route = route_buf;
+    out->payload.data = envelope->payload;
+    out->payload.len = envelope->payload_len;
+    out->payload.encoding = envelope->encoding;
+    if (envelope->stream_flags & ZRPC_STREAM_FLAG_STREAM) {
+        out->has_stream = 1;
+        out->stream.flags =
+            envelope->stream_flags & (ZRPC_STREAM_FIRST | ZRPC_STREAM_LAST | ZRPC_STREAM_CANCEL);
+        out->stream.stream_id = envelope->stream_id;
+        out->stream.offset = envelope->stream_offset;
+        out->stream.total_size = envelope->stream_total_size;
+    }
+}

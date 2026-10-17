@@ -13,6 +13,7 @@ extern "C" {
 typedef struct zrpc_transport_provider zrpc_transport_provider_t;
 typedef struct zrpc_transport_instance zrpc_transport_instance_t;
 
+/* ---- 消息与回调 ---- */
 typedef struct zrpc_transport_message {
     uint8_t kind;
     int status; /* 应用状态码；仅 RESPONSE 有意义 */
@@ -26,6 +27,7 @@ typedef void (*zrpc_transport_receive_fn)(void *receiver, void *reply_token, con
                                           uint16_t peer_port,
                                           const zrpc_transport_message_t *message);
 
+/* ---- Provider 生命周期与操作 ---- */
 typedef struct zrpc_transport_provider_options {
     const char *scheme;
     const char *endpoint;
@@ -51,6 +53,7 @@ struct zrpc_transport_provider {
     const zrpc_transport_provider_ops_t *ops;
 };
 
+/* ---- 注册 ---- */
 /* Register before creating nodes. Provider descriptors and ops must have static lifetime. */
 int zrpc_transport_provider_register(const zrpc_transport_provider_t *provider);
 

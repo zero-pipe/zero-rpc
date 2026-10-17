@@ -4,7 +4,7 @@
  * 在真实项目里，ZRPC_SERVICE_DEFINE 放在客户端与服务端共享的头文件里；这里为
  * 单文件示例直接内联。install 之后即可按名字查到数字 ID。
  */
-#include <zrpc/zrpc.h>
+#include <zrpc/zrpc_extensions.h>
 
 #include <stdio.h>
 

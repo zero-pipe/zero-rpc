@@ -1,5 +1,7 @@
 /* 覆盖新增抽象：service_table、message_view、stub 与 sync 便捷层。 */
-#include <zrpc/zrpc.h>
+#include <zrpc/zrpc_client.h>
+#include <zrpc/zrpc_extensions.h>
+#include <zrpc/zrpc_server.h>
 #include <ztk/platform.h>
 
 #include <stdio.h>
@@ -191,6 +193,23 @@ static int test_stub_and_sync(void) {
         failed = 1;
     }
     zrpc_response_release(&response);
+
+    /* proxy 的单向事件入口：同一 node 既可作为 service 也可作为 client。 */
+    {
+        int before = calls;
+        uint64_t event_id = 0;
+        rc = zrpc_proxy_call_event(proxy, "OrderService", "get", &pl, &event_id);
+        if (rc != ZRPC_OK || event_id == 0) {
+            printf("call_event failed: %d\n", rc);
+            failed = 1;
+        } else {
+            ztk_sleep_ms(100);
+            if (calls <= before) {
+                printf("call_event was not delivered\n");
+                failed = 1;
+            }
+        }
+    }
 
 cleanup:
     if (stub) {

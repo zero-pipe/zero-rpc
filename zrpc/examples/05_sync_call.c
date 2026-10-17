@@ -5,7 +5,7 @@
  * 注意：zrpc 核心仍是异步的；zrpc_proxy_call_sync 只是阻塞等待，禁止在
  * poller 线程回调里使用。
  */
-#include <zrpc/zrpc.h>
+#include <zrpc/zrpc_client.h>
 
 #include <stdio.h>
 #include <stdlib.h>

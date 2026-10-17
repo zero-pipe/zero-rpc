@@ -21,6 +21,7 @@
 extern "C" {
 #endif
 
+/* ---- 目标与发送钩子 ---- */
 typedef struct zrpc_stub zrpc_stub_t;
 
 /* 一次调用的目标，由 send 回调解析后回填（用于出错重传）。 */
@@ -50,12 +51,14 @@ typedef struct zrpc_stub_options {
     void *user_data;          /* 传给 send 的用户数据，stub 不负责释放 */
 } zrpc_stub_options_t;
 
+/* ---- 生命周期 ---- */
 int zrpc_stub_create(zrpc_node_t *node, const zrpc_stub_options_t *options, zrpc_stub_t **out);
 void zrpc_stub_destroy(zrpc_stub_t *stub);
 
 /* 借用底层节点。 */
 zrpc_node_t *zrpc_stub_node(const zrpc_stub_t *stub);
 
+/* ---- 调用 ---- */
 /* 单向发送（EVENT）。不等待响应；发送在节点 poller 线程上完成。 */
 int zrpc_stub_call(zrpc_stub_t *stub, const char *service, const char *method,
                    const zrpc_payload_t *payload, uint64_t *out_request_id);

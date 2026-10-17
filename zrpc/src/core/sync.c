@@ -87,7 +87,8 @@ int zrpc_proxy_call_sync(zrpc_proxy_t *proxy, const char *service, const char *m
     }
     c->refs = 2;
 
-    rc = zrpc_proxy_call(proxy, service, method, request, sync_response_cb, c, timeout_ms, &id);
+    rc = zrpc_proxy_call_async(proxy, service, method, request, sync_response_cb, c, timeout_ms,
+                               &id);
     if (rc != ZRPC_OK) {
         sync_ctx_put(c);
         sync_ctx_put(c);

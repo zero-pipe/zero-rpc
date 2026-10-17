@@ -12,43 +12,61 @@
 
 #include <string.h>
 
-static int send_reply(zri_transport_t *transport, zri_peer_token_t token, const char *ip,
-                      uint16_t port, int status, uint32_t msg_id, const zrpc_payload_t *payload) {
-    if (!transport) {
+/*
+ * 由请求上下文派生响应上下文：保留路由/回程 token，切换 kind 与 payload。
+ * 这样 reply 路径与普通发送共用同一个 zri_message_t 抽象。
+ */
+static int send_reply(zri_transport_t *transport, const zri_message_t *request, int status,
+                      const zrpc_payload_t *payload, const zrpc_stream_meta_t *stream) {
+    zri_message_t reply;
+    if (!transport || !request) {
         return ZRPC_ERR_STATE;
     }
-    return zri_transport_reply(transport, token, ip, port, ZRPC_KIND_RESPONSE, status, msg_id, NULL,
-                                payload, NULL);
-}
-
-static int send_reply_stream(zri_transport_t *transport, zri_peer_token_t token, const char *ip,
-                             uint16_t port, int status, uint32_t msg_id,
-                             const zrpc_payload_t *payload, const zrpc_stream_meta_t *stream) {
-    if (!transport) {
-        return ZRPC_ERR_STATE;
+    reply = *request;
+    reply.kind = ZRPC_KIND_RESPONSE;
+    reply.status = status;
+    reply.route = NULL;
+    reply.payload = payload ? *payload : (zrpc_payload_t){0};
+    if (stream) {
+        reply.stream = *stream;
+        reply.has_stream = 1;
     }
-    return zri_transport_reply(transport, token, ip, port, ZRPC_KIND_RESPONSE, status, msg_id, NULL,
-                                payload, stream);
+    return zri_transport_reply(transport, &reply);
 }
 
-void zri_service_send_status(zri_transport_t *transport, zri_peer_token_t token, const char *ip,
-                              uint16_t port, uint32_t msg_id, int status) {
-    zrpc_payload_t pl;
-    memset(&pl, 0, sizeof(pl));
-    (void)send_reply(transport, token, ip, port, status, msg_id, &pl);
+/* 从 zrpc_call_t 还原请求上下文（异步 reply 时请求视图已失效，只保留寻址信息）。 */
+static void call_request_context(const zrpc_call_t *call, zri_message_t *out) {
+    memset(out, 0, sizeof(*out));
+    out->request_id = call->msg_id;
+    out->peer_ip = call->peer_ip;
+    out->peer_port = call->peer_port;
+    out->peer_token = call->token;
+}
+
+void zri_service_send_status(zri_transport_t *transport, const zri_message_t *request, int status) {
+    zrpc_payload_t empty;
+    if (!request || request->kind == ZRPC_KIND_EVENT) {
+        return;
+    }
+    memset(&empty, 0, sizeof(empty));
+    (void)send_reply(transport, request, status, &empty, NULL);
 }
 
 void zrpc_reply(zrpc_call_t *call, int status, const zrpc_payload_t *payload) {
+    zri_message_t request;
     if (!call || call->replied) {
         return;
     }
     call->replied = 1;
+    if (call->one_way) {
+        return;
+    }
     if (!call->node || !call->transport) {
         zri_mem_free(call);
         return;
     }
-    (void)send_reply(call->transport, call->token, call->peer_ip, call->peer_port, status,
-                     call->msg_id, payload);
+    call_request_context(call, &request);
+    (void)send_reply(call->transport, &request, status, payload, NULL);
     if (!call->stream_owned) {
         zri_mem_free(call);
     }
@@ -63,6 +81,7 @@ void zrpc_reply_bytes(zrpc_call_t *call, int status, const void *data, size_t le
 }
 
 int zrpc_reply_stream(zrpc_call_t *call, int status, const zrpc_chunk_t *chunk) {
+    zri_message_t request;
     zrpc_payload_t payload;
     zrpc_stream_meta_t stream;
     int rc;
@@ -80,8 +99,8 @@ int zrpc_reply_stream(zrpc_call_t *call, int status, const zrpc_chunk_t *chunk) 
     stream.stream_id = call->msg_id;
     stream.offset = chunk ? chunk->offset : 0;
     stream.total_size = 0;
-    rc = send_reply_stream(call->transport, call->token, call->peer_ip, call->peer_port, status,
-                           call->msg_id, &payload, &stream);
+    call_request_context(call, &request);
+    rc = send_reply(call->transport, &request, status, &payload, &stream);
     if (chunk && (chunk->flags & ZRPC_STREAM_LAST)) {
         call->replied = 1;
         if (!call->stream_owned) {

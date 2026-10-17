@@ -78,14 +78,14 @@ struct zrpc_node {
 
 /* node.c */
 uint64_t zri_now_ms(void);
-void zri_node_on_message(zrpc_node_t *node, const char *ip, uint16_t port, zri_peer_token_t token,
-                          zri_transport_t *transport, uint8_t kind, int status, uint32_t msg_id,
-                          const char *route, const zrpc_payload_t *payload,
-                          const zrpc_stream_meta_t *stream);
-int zri_node_send(zrpc_node_t *node, const char *ip, uint16_t port, uint8_t kind, int status,
-                   uint32_t msg_id, zrpc_transport_kind_t transport_kind, const char *scheme,
-                   const char *route, const zrpc_payload_t *payload,
-                   const zrpc_stream_meta_t *stream);
+void zri_node_on_message(zrpc_node_t *node, zri_transport_t *transport,
+                         const zri_message_t *message);
+int zri_node_send(zrpc_node_t *node, zrpc_transport_kind_t transport_kind, const char *scheme,
+                  const zri_message_t *message);
+/* 组装 "service.method" 路由并发送一次调用（stub/proxy/重传共用）。 */
+int zri_node_send_call(zrpc_node_t *node, const zrpc_stub_target_t *target, const char *service,
+                       const char *method, const zrpc_payload_t *payload, uint8_t kind,
+                       uint64_t request_id);
 /* 默认解析：静态路由表 / 服务发现（不含 proxy 的端点覆盖）。 */
 int zri_node_resolve(zrpc_node_t *node, const char *service, int prefer_stream,
                       zrpc_stub_target_t *out);

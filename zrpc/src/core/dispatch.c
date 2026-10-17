@@ -38,35 +38,32 @@ int zri_node_resolve(zrpc_node_t *node, const char *service, int prefer_stream,
     return ZRPC_OK;
 }
 
-static void node_dispatch(zrpc_node_t *node, const char *ip, uint16_t port, zri_peer_token_t token,
-                          zri_transport_t *transport, uint8_t kind, int status, uint32_t msg_id,
-                          const char *route, const zrpc_payload_t *payload,
-                          const zrpc_stream_meta_t *stream) {
-    if (kind == ZRPC_KIND_REQUEST || kind == ZRPC_KIND_EVENT) {
-        if (stream) {
-            zri_service_handle_stream_chunk(node, token, ip, transport, port, msg_id, route,
-                                             stream, payload);
+static void node_dispatch(zrpc_node_t *node, zri_transport_t *transport,
+                          const zri_message_t *msg) {
+    if (msg->kind == ZRPC_KIND_REQUEST || msg->kind == ZRPC_KIND_EVENT) {
+        if (msg->has_stream) {
+            zri_service_handle_stream_chunk(node, transport, msg);
         } else {
-            zri_service_handle_request(node, token, ip, transport, port, msg_id, route, payload);
+            zri_service_handle_request(node, transport, msg);
         }
         return;
     }
-    if (kind == ZRPC_KIND_RESPONSE) {
-        zri_pending_t *p = zri_pending_find(node, msg_id);
+    if (msg->kind == ZRPC_KIND_RESPONSE) {
+        zri_pending_t *p = zri_pending_find(node, msg->request_id);
         zrpc_response_t resp;
         if (!p) {
             return;
         }
         node->metrics.responses_received++;
-        node->metrics.bytes_received += payload ? payload->len : 0;
+        node->metrics.bytes_received += msg->payload.len;
         if (p->streaming) {
-            int app_status = status;
+            int app_status = msg->status;
             zrpc_chunk_t chunk;
-            chunk.data = payload ? payload->data : NULL;
-            chunk.len = payload ? payload->len : 0;
-            chunk.encoding = payload ? payload->encoding : 0;
-            chunk.offset = stream ? stream->offset : p->expected_offset;
-            chunk.flags = stream ? stream->flags : 0;
+            chunk.data = msg->payload.data;
+            chunk.len = msg->payload.len;
+            chunk.encoding = msg->payload.encoding;
+            chunk.offset = msg->has_stream ? msg->stream.offset : p->expected_offset;
+            chunk.flags = msg->has_stream ? msg->stream.flags : 0;
             if (p->chunk_cb) {
                 p->chunk_cb(app_status, &chunk, p->stream_user);
             }
@@ -83,32 +80,26 @@ static void node_dispatch(zrpc_node_t *node, const char *ip, uint16_t port, zri_
             }
             return;
         }
-        resp.status = status;
-        resp.payload.data = payload ? payload->data : NULL;
-        resp.payload.len = payload ? payload->len : 0;
-        resp.payload.encoding = payload ? payload->encoding : 0;
+        resp.status = msg->status;
+        resp.payload = msg->payload;
         zri_pending_invoke(p, ZRPC_OK, &resp);
         return;
     }
     /* EVENT: 预留，忽略 */
 }
 
-void zri_node_on_message(zrpc_node_t *node, const char *ip, uint16_t port, zri_peer_token_t token,
-                          zri_transport_t *transport, uint8_t kind, int status, uint32_t msg_id,
-                          const char *route, const zrpc_payload_t *payload,
-                          const zrpc_stream_meta_t *stream) {
-    if (!node) {
+void zri_node_on_message(zrpc_node_t *node, zri_transport_t *transport,
+                         const zri_message_t *msg) {
+    if (!node || !transport || !msg) {
         return;
     }
-    node_dispatch(node, ip, port, token, transport, kind, status, msg_id, route, payload, stream);
+    node_dispatch(node, transport, msg);
 }
 
-int zri_node_send(zrpc_node_t *node, const char *ip, uint16_t port, uint8_t kind, int status,
-                   uint32_t msg_id, zrpc_transport_kind_t transport_kind, const char *scheme,
-                   const char *route, const zrpc_payload_t *payload,
-                   const zrpc_stream_meta_t *stream) {
+int zri_node_send(zrpc_node_t *node, zrpc_transport_kind_t transport_kind, const char *scheme,
+                   const zri_message_t *msg) {
     size_t i;
-    if (!node || !ip || !port) {
+    if (!node || !msg || !msg->peer_ip || !msg->peer_port) {
         return ZRPC_ERR_INVALID;
     }
     for (i = 0; i < node->transport_count; i++) {
@@ -122,10 +113,29 @@ int zri_node_send(zrpc_node_t *node, const char *ip, uint16_t port, uint8_t kind
         if ((!scheme || !scheme[0]) && transport->kind != transport_kind) {
             continue;
         }
-        if (transport->provider || transport->ops) {
-            return zri_transport_send(transport, ip, port, kind, status, msg_id, route, payload,
-                                       stream);
-        }
+        return zri_transport_send(transport, msg);
     }
     return ZRPC_ERR_NOTFOUND;
+}
+
+int zri_node_send_call(zrpc_node_t *node, const zrpc_stub_target_t *target, const char *service,
+                       const char *method, const zrpc_payload_t *payload, uint8_t kind,
+                       uint64_t request_id) {
+    zri_message_t message;
+    char route[ZRPC_ROUTE_MAX];
+
+    if (!node || !target || !service || !method || !target->ip[0] || !target->port) {
+        return ZRPC_ERR_INVALID;
+    }
+    if (zri_route_format(route, sizeof(route), service, method) != ZRPC_OK) {
+        return ZRPC_ERR_INVALID;
+    }
+    memset(&message, 0, sizeof(message));
+    message.kind = kind;
+    message.request_id = (uint32_t)request_id;
+    message.route = route;
+    message.payload = payload ? *payload : (zrpc_payload_t){0};
+    message.peer_ip = target->ip;
+    message.peer_port = target->port;
+    return zri_node_send(node, target->transport, target->scheme, &message);
 }

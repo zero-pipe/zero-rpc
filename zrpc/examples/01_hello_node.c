@@ -4,7 +4,7 @@
  * 与 fastcall-c 的 01_hello_node 对应：创建 -> 查询 -> 销毁。
  * 这里用 STATIC 模式，不启动服务发现，离线即可运行。
  */
-#include <zrpc/zrpc.h>
+#include <zrpc/zrpc_runtime.h>
 
 #include <stdio.h>
 #include <string.h>

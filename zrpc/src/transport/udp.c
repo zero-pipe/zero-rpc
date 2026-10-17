@@ -444,14 +444,12 @@ static void fec_on_parity(zri_udp_transport_t *udp, zri_session_t *s, const zri_
     fec_try_reconstruct(udp, s, v->msg_id, now_ms);
 }
 
-static int session_send(zri_udp_transport_t *udp, zri_session_t *s, uint8_t kind, int status,
-                        uint32_t msg_id, const char *route, const zrpc_payload_t *payload,
-                        const zrpc_stream_meta_t *stream) {
+static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_message_t *msg) {
     ztk_udp_dgram_t msgs[ZRPC_TX_BATCH_MAX];
     unsigned nm = 0;
-    size_t route_len = route ? strlen(route) : 0;
-    const uint8_t *data = payload ? (const uint8_t *)payload->data : NULL;
-    size_t len = payload ? payload->len : 0;
+    size_t route_len;
+    const uint8_t *data;
+    size_t len;
     zri_envelope_t envelope;
     uint8_t prefix[ZRPC_ENVELOPE_HDR_LEN + ZRPC_MAX_ROUTE];
     zri_env_view_t view;
@@ -462,9 +460,12 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, uint8_t kind
     uint32_t i;
     uint64_t now = zri_now_ms();
 
-    if (!s || !s->used) {
+    if (!s || !s->used || !msg) {
         return ZRPC_ERR_INVALID;
     }
+    route_len = msg->route ? strlen(msg->route) : 0;
+    data = (const uint8_t *)msg->payload.data;
+    len = msg->payload.len;
     if (len > udp->base.max_msg_bytes || route_len >= ZRPC_MAX_ROUTE) {
         return ZRPC_ERR_TOOBIG;
     }
@@ -483,18 +484,18 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, uint8_t kind
     }
     /* 仅把 envelope 头 + route 编进栈上前缀；payload 保持借用，不做整包拷贝。 */
     memset(&envelope, 0, sizeof(envelope));
-    envelope.kind = kind;
-    envelope.status = status;
-    envelope.encoding = payload ? payload->encoding : 0;
-    envelope.request_id = msg_id;
-    envelope.route = route;
+    envelope.kind = msg->kind;
+    envelope.status = msg->status;
+    envelope.encoding = msg->payload.encoding;
+    envelope.request_id = msg->request_id;
+    envelope.route = msg->route;
     envelope.payload = NULL;
     envelope.payload_len = 0;
-    if (stream) {
-        envelope.stream_flags = (uint8_t)(ZRPC_STREAM_FLAG_STREAM | stream->flags);
-        envelope.stream_id = stream->stream_id;
-        envelope.stream_offset = stream->offset;
-        envelope.stream_total_size = stream->total_size;
+    if (msg->has_stream) {
+        envelope.stream_flags = (uint8_t)(ZRPC_STREAM_FLAG_STREAM | msg->stream.flags);
+        envelope.stream_id = msg->stream.stream_id;
+        envelope.stream_offset = msg->stream.offset;
+        envelope.stream_total_size = msg->stream.total_size;
     }
     prefix_len = zri_envelope_encode(prefix, sizeof(prefix), &envelope);
     if (prefix_len != ZRPC_ENVELOPE_HDR_LEN + route_len) {
@@ -520,7 +521,7 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, uint8_t kind
                 (void)ztk_socket_sendto_batch(s->sock, msgs, nm);
                 nm = 0;
             }
-            emit_frag(udp, s, msg_id, (uint32_t)env_len, (uint32_t)off, (uint32_t)chunk,
+            emit_frag(udp, s, msg->request_id, (uint32_t)env_len, (uint32_t)off, (uint32_t)chunk,
                       &view, last, now, msgs, &nm);
         } else {
             s->txq = (uint8_t *)malloc(env_len);
@@ -530,7 +531,7 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, uint8_t kind
             env_view_copy(&view, 0, env_len, s->txq);
             s->txq_sent = (uint32_t)off;
             s->txq_total = (uint32_t)env_len;
-            s->txq_msgid = msg_id;
+            s->txq_msgid = msg->request_id;
             break;
         }
         off += chunk;
@@ -539,7 +540,7 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, uint8_t kind
         (void)ztk_socket_sendto_batch(s->sock, msgs, nm);
     }
     if (nfrag >= 2 && s->txq == NULL && udp_fec_enabled()) {
-        send_fec(udp, s, &view, env_len, msg_id);
+        send_fec(udp, s, &view, env_len, msg->request_id);
     }
     return ZRPC_OK;
 }
@@ -586,12 +587,28 @@ static void session_txq_drain(zri_udp_transport_t *udp, zri_session_t *s, uint64
 
 /* ---- 接收 ---- */
 
+/* 解码 envelope 并以统一消息上下文上抛给 core。 */
+static void deliver_message(zri_udp_transport_t *udp, zri_session_t *s, const uint8_t *buf,
+                            size_t len) {
+    zri_envelope_t env;
+    zri_message_t msg;
+    char route[ZRPC_MAX_ROUTE];
+
+    if (zri_envelope_decode(buf, len, &env) != ZRPC_OK) {
+        return;
+    }
+    zri_envelope_to_message(&env, route, sizeof(route), &msg);
+    msg.peer_ip = s->peer_ip_s;
+    msg.peer_port = s->peer_port;
+    msg.peer_token = s;
+    zri_node_on_message(udp->base.node, &udp->base, &msg);
+}
+
 static int session_on_data(zri_udp_transport_t *udp, zri_session_t *s, const zri_frag_t *v,
                            uint64_t now_ms) {
     zri_reasm_slot_t *r;
     uint32_t frag_count;
     uint32_t fidx;
-    zrpc_node_t *node = udp->base.node;
 
     if (!s || !v) {
         return ZRPC_ERR_INVALID;
@@ -658,38 +675,7 @@ static int session_on_data(zri_udp_transport_t *udp, zri_session_t *s, const zri
 
     /* 单分片快路径：解码完整 envelope 后投递。 */
     if (frag_count == 1) {
-        zri_envelope_t env;
-        if (zri_envelope_decode(v->chunk, v->frag_len, &env) == ZRPC_OK) {
-            char route[ZRPC_MAX_ROUTE];
-            uint16_t rl = env.route_len;
-            zrpc_payload_t pl;
-            if (rl >= ZRPC_MAX_ROUTE) {
-                rl = ZRPC_MAX_ROUTE - 1;
-            }
-            if (rl > 0 && env.route) {
-                memcpy(route, env.route, rl);
-            } else {
-                rl = 0;
-            }
-            route[rl] = '\0';
-            pl.data = env.payload;
-            pl.len = env.payload_len;
-            pl.encoding = env.encoding;
-            {
-                zrpc_stream_meta_t sm;
-                const zrpc_stream_meta_t *smp = NULL;
-                if (env.stream_flags & ZRPC_STREAM_FLAG_STREAM) {
-                    sm.flags = env.stream_flags &
-                               (ZRPC_STREAM_FIRST | ZRPC_STREAM_LAST | ZRPC_STREAM_CANCEL);
-                    sm.stream_id = env.stream_id;
-                    sm.offset = env.stream_offset;
-                    sm.total_size = env.stream_total_size;
-                    smp = &sm;
-                }
-                zri_node_on_message(node, s->peer_ip_s, s->peer_port, s, &udp->base, env.kind,
-                                     env.status, env.request_id, route, &pl, smp);
-            }
-        }
+        deliver_message(udp, s, v->chunk, v->frag_len);
         return ZRPC_OK;
     }
 
@@ -704,38 +690,7 @@ static int session_on_data(zri_udp_transport_t *udp, zri_session_t *s, const zri
     (void)zri_reasm_put(r, fidx, v->frag_off, v->chunk, v->frag_len);
 
     if (r->got == r->frag_count) {
-        zri_envelope_t env;
-        if (zri_envelope_decode(r->buf, r->total_len, &env) == ZRPC_OK) {
-            char route[ZRPC_MAX_ROUTE];
-            uint16_t rl = env.route_len;
-            zrpc_payload_t pl;
-            if (rl >= ZRPC_MAX_ROUTE) {
-                rl = ZRPC_MAX_ROUTE - 1;
-            }
-            if (rl > 0 && env.route) {
-                memcpy(route, env.route, rl);
-            } else {
-                rl = 0;
-            }
-            route[rl] = '\0';
-            pl.data = env.payload;
-            pl.len = env.payload_len;
-            pl.encoding = env.encoding;
-            {
-                zrpc_stream_meta_t sm;
-                const zrpc_stream_meta_t *smp = NULL;
-                if (env.stream_flags & ZRPC_STREAM_FLAG_STREAM) {
-                    sm.flags = env.stream_flags &
-                               (ZRPC_STREAM_FIRST | ZRPC_STREAM_LAST | ZRPC_STREAM_CANCEL);
-                    sm.stream_id = env.stream_id;
-                    sm.offset = env.stream_offset;
-                    sm.total_size = env.stream_total_size;
-                    smp = &sm;
-                }
-                zri_node_on_message(node, s->peer_ip_s, s->peer_port, s, &udp->base, env.kind,
-                                     env.status, env.request_id, route, &pl, smp);
-            }
-        }
+        deliver_message(udp, s, r->buf, r->total_len);
         zri_reasm_release(r);
         return ZRPC_OK;
     }
@@ -1249,40 +1204,40 @@ static void udp_stop(zri_transport_t *t) {
     }
 }
 
-static int udp_send(zri_transport_t *t, const char *ip, uint16_t port, uint8_t kind, int status,
-                    uint32_t msg_id, const char *route, const zrpc_payload_t *payload,
-                    const zrpc_stream_meta_t *stream) {
+static int udp_send(zri_transport_t *t, const zri_message_t *msg) {
     zri_udp_transport_t *udp = (zri_udp_transport_t *)t;
     zri_session_t *s;
-    if (!ip || !port || udp->io_count == 0) {
+    if (!msg || !msg->peer_ip || !msg->peer_port || udp->io_count == 0) {
         return ZRPC_ERR_INVALID;
     }
-    s = session_for(udp, 0, udp->socks[0], ip, port, zri_now_ms());
+    s = session_for(udp, 0, udp->socks[0], msg->peer_ip, msg->peer_port, zri_now_ms());
     if (!s) {
         return ZRPC_ERR_NOMEM;
     }
-    return session_send(udp, s, kind, status, msg_id, route, payload, stream);
+    return session_send(udp, s, msg);
 }
 
-static int udp_reply(zri_transport_t *t, zri_peer_token_t token, const char *ip, uint16_t port,
-                     uint8_t kind, int status, uint32_t msg_id, const char *route,
-                     const zrpc_payload_t *payload, const zrpc_stream_meta_t *stream) {
+static int udp_reply(zri_transport_t *t, const zri_message_t *msg) {
     zri_udp_transport_t *udp = (zri_udp_transport_t *)t;
-    zri_session_t *s = (zri_session_t *)token;
+    zri_session_t *s;
+    if (!msg) {
+        return ZRPC_ERR_INVALID;
+    }
+    s = (zri_session_t *)msg->peer_token;
     if (!s || !s->used) {
-        if (!ip || !port || udp->io_count == 0) {
+        if (!msg->peer_ip || !msg->peer_port || udp->io_count == 0) {
             return ZRPC_ERR_INVALID;
         }
-        s = session_for(udp, 0, udp->socks[0], ip, port, zri_now_ms());
+        s = session_for(udp, 0, udp->socks[0], msg->peer_ip, msg->peer_port, zri_now_ms());
         if (!s) {
             return ZRPC_ERR_NOMEM;
         }
     }
-    return session_send(udp, s, kind, status, msg_id, route, payload, stream);
+    return session_send(udp, s, msg);
 }
 
-static int udp_rtcp_peer(zri_transport_t *t, const char *ip, uint16_t port,
-                         zrpc_rtcp_peer_stats_t *out) {
+static int udp_peer_stats(zri_transport_t *t, const char *ip, uint16_t port,
+                          zrpc_peer_stats_t *out) {
     zri_udp_transport_t *udp = (zri_udp_transport_t *)t;
     int io;
     int i;
@@ -1293,15 +1248,13 @@ static int udp_rtcp_peer(zri_transport_t *t, const char *ip, uint16_t port,
         for (i = 0; i < ZRPC_PEERS_PER_IO; i++) {
             zri_session_t *s = &udp->sessions[io][i];
             if (s->used && s->peer_port == port && strcmp(s->peer_ip_s, ip) == 0) {
-                out->ssrc_local = s->ssrc_local;
-                out->ssrc_remote = s->ssrc_remote;
+                out->local_id = s->ssrc_local;
+                out->remote_id = s->ssrc_remote;
                 out->rtt_ms = s->last_rtt_ms;
                 out->jitter_ms = (uint32_t)s->jitter;
-                out->remote_lost = s->rtcp_remote_lost;
-                out->sr_sent = s->rtcp_sr_sent;
-                out->rr_sent = s->rtcp_rr_sent;
-                out->sr_received = s->rtcp_sr_received;
-                out->rr_received = s->rtcp_rr_received;
+                out->lost = s->rtcp_remote_lost;
+                out->feedback_sent = s->rtcp_sr_sent + s->rtcp_rr_sent;
+                out->feedback_received = s->rtcp_sr_received + s->rtcp_rr_received;
                 return 1;
             }
         }
@@ -1314,7 +1267,7 @@ static const zri_transport_ops_t g_udp_ops = {
     udp_stop,
     udp_send,
     udp_reply,
-    udp_rtcp_peer,
+    udp_peer_stats,
 };
 
 zri_transport_t *zri_udp_transport_create(void) {

@@ -23,6 +23,7 @@
 extern "C" {
 #endif
 
+/* ---- Codec 描述 ---- */
 typedef struct zrpc_codec {
     const char *name;
     uint8_t encoding; /* 与 zrpc_payload_t.encoding 对应 */
@@ -37,6 +38,7 @@ typedef struct zrpc_codec {
     void *ctx;
 } zrpc_codec_t;
 
+/* ---- 节点注册 ---- */
 /* 在节点上注册/查找 codec。encoding 需唯一；查找失败返回 NULL。 */
 int zrpc_node_register_codec(zrpc_node_t *node, const zrpc_codec_t *codec);
 const zrpc_codec_t *zrpc_node_find_codec(const zrpc_node_t *node, uint8_t encoding);

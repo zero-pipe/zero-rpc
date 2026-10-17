@@ -43,10 +43,12 @@
 extern "C" {
 #endif
 
+/* ---- 容量 ---- */
 #define ZRPC_CONFIG_MAX_ROUTES 32
 #define ZRPC_CONFIG_MAX_PEERS 32
 #define ZRPC_CONFIG_MAX_BINDINGS ZRPC_MAX_BINDINGS
 
+/* ---- 解析结果 ---- */
 typedef struct zrpc_static_route {
     char service[ZRPC_SERVICE_NAME_MAX];
     char ip[ZRPC_ENDPOINT_MAX];
@@ -79,6 +81,7 @@ typedef struct zrpc_config {
     size_t binding_count;
 } zrpc_config_t;
 
+/* ---- 加载与创建 ---- */
 /* 解析 JSON 字符串；成功返回 ZRPC_OK 并填充 out。 */
 int zrpc_config_load(const char *json, zrpc_config_t *out);
 /* 读取文件后解析。 */

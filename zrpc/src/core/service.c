@@ -2,6 +2,7 @@
 #include "node_internal.h"
 #include "service_internal.h"
 
+#include "envelope.h"
 #include "mem.h"
 #include "util.h"
 
@@ -49,10 +50,8 @@ static void svc_method_task(void *user) {
     free(t);
 }
 
-void zri_service_handle_request(zrpc_node_t *node, zri_peer_token_t token, const char *ip,
-                                 zri_transport_t *transport, uint16_t port, uint32_t msg_id,
-                                 const char *route,
-                                 const zrpc_payload_t *payload) {
+void zri_service_handle_request(zrpc_node_t *node, zri_transport_t *transport,
+                                const zri_message_t *msg) {
     char tmp[ZRPC_MAX_ROUTE];
     char *dot;
     zrpc_service_t *svc;
@@ -60,10 +59,13 @@ void zri_service_handle_request(zrpc_node_t *node, zri_peer_token_t token, const
     zrpc_handler_fn fn = NULL;
     void *user = NULL;
 
-    zri_copy_str(tmp, sizeof(tmp), route, "");
+    if (!node || !msg) {
+        return;
+    }
+    zri_copy_str(tmp, sizeof(tmp), msg->route, "");
     dot = strchr(tmp, '.');
     if (!dot) {
-        zri_service_send_status(transport, token, ip, port, msg_id, ZRPC_ERR_NOTFOUND);
+        zri_service_send_status(transport, msg, ZRPC_ERR_NOTFOUND);
         return;
     }
     *dot = '\0';
@@ -81,48 +83,51 @@ void zri_service_handle_request(zrpc_node_t *node, zri_peer_token_t token, const
         break;
     }
     if (!fn) {
-        zri_service_send_status(transport, token, ip, port, msg_id, ZRPC_ERR_NOTFOUND);
+        zri_service_send_status(transport, msg, ZRPC_ERR_NOTFOUND);
         return;
     }
     {
         zrpc_call_t *call = (zrpc_call_t *)zri_mem_alloc(sizeof(*call));
         zrpc_request_t req;
         if (!call) {
-            zri_service_send_status(transport, token, ip, port, msg_id, ZRPC_ERR_NOMEM);
+            zri_service_send_status(transport, msg, ZRPC_ERR_NOMEM);
             return;
         }
         memset(call, 0, sizeof(*call));
         call->node = node;
         call->transport = transport;
-        call->token = token;
-        zri_copy_str(call->peer_ip, sizeof(call->peer_ip), ip, "0.0.0.0");
-        call->peer_port = port;
-        call->msg_id = msg_id;
+        call->token = msg->peer_token;
+        zri_copy_str(call->peer_ip, sizeof(call->peer_ip), msg->peer_ip, "0.0.0.0");
+        call->peer_port = msg->peer_port;
+        call->msg_id = msg->request_id;
+        call->one_way = msg->kind == ZRPC_KIND_EVENT;
         req.service = tmp;
         req.method = dot + 1;
-        req.payload = payload ? *payload : (zrpc_payload_t){0};
+        req.payload = msg->payload;
         req.peer_ip = call->peer_ip;
-        req.peer_port = port;
+        req.peer_port = msg->peer_port;
         fn(call, &req, user);
+        if (call->one_way) {
+            zri_mem_free(call);
+        }
     }
 }
 
-static zri_recv_stream_t *find_recv_stream(zrpc_node_t *node, uint32_t request_id,
-                                            const char *ip, uint16_t port) {
+static zri_recv_stream_t *find_recv_stream(zrpc_node_t *node, const zri_message_t *msg) {
     int i;
     for (i = 0; i < ZRPC_MAX_RECV_STREAMS; i++) {
         zri_recv_stream_t *stream = &node->recv_streams[i];
-        if (stream->used && stream->request_id == request_id && stream->peer_port == port &&
-            strcmp(stream->peer_ip, ip ? ip : "") == 0) {
+        if (stream->used && stream->request_id == msg->request_id &&
+            stream->peer_port == msg->peer_port &&
+            strcmp(stream->peer_ip, msg->peer_ip ? msg->peer_ip : "") == 0) {
             return stream;
         }
     }
     return NULL;
 }
 
-static zri_recv_stream_t *alloc_recv_stream(zrpc_node_t *node, uint32_t request_id,
-                                             const char *ip, uint16_t port,
-                                             zri_transport_t *transport, zri_peer_token_t token) {
+static zri_recv_stream_t *alloc_recv_stream(zrpc_node_t *node, zri_transport_t *transport,
+                                             const zri_message_t *msg) {
     int i;
     for (i = 0; i < ZRPC_MAX_RECV_STREAMS; i++) {
         zri_recv_stream_t *stream = &node->recv_streams[i];
@@ -133,18 +138,18 @@ static zri_recv_stream_t *alloc_recv_stream(zrpc_node_t *node, uint32_t request_
             }
             memset(call, 0, sizeof(*call));
             stream->used = 1;
-            stream->request_id = request_id;
-            zri_copy_str(stream->peer_ip, sizeof(stream->peer_ip), ip, "0.0.0.0");
-            stream->peer_port = port;
+            stream->request_id = msg->request_id;
+            zri_copy_str(stream->peer_ip, sizeof(stream->peer_ip), msg->peer_ip, "0.0.0.0");
+            stream->peer_port = msg->peer_port;
             stream->call = call;
             stream->last_ms = zri_now_ms();
             stream->bytes = 0;
             call->node = node;
             call->transport = transport;
-            call->token = token;
-            zri_copy_str(call->peer_ip, sizeof(call->peer_ip), ip, "0.0.0.0");
-            call->peer_port = port;
-            call->msg_id = request_id;
+            call->token = msg->peer_token;
+            zri_copy_str(call->peer_ip, sizeof(call->peer_ip), msg->peer_ip, "0.0.0.0");
+            call->peer_port = msg->peer_port;
+            call->msg_id = msg->request_id;
             call->stream_owned = 1;
             return stream;
         }
@@ -152,10 +157,8 @@ static zri_recv_stream_t *alloc_recv_stream(zrpc_node_t *node, uint32_t request_
     return NULL;
 }
 
-void zri_service_handle_stream_chunk(zrpc_node_t *node, zri_peer_token_t token, const char *ip,
-                                      zri_transport_t *transport, uint16_t port, uint32_t msg_id,
-                                      const char *route, const zrpc_stream_meta_t *stream_meta,
-                                      const zrpc_payload_t *payload) {
+void zri_service_handle_stream_chunk(zrpc_node_t *node, zri_transport_t *transport,
+                                     const zri_message_t *msg) {
     char tmp[ZRPC_MAX_ROUTE];
     char *dot;
     zrpc_service_t *svc;
@@ -163,11 +166,13 @@ void zri_service_handle_stream_chunk(zrpc_node_t *node, zri_peer_token_t token, 
     zri_recv_stream_t *state;
     zrpc_request_t request;
     zrpc_chunk_t chunk;
+    const zrpc_stream_meta_t *stream_meta;
 
-    if (!node || !stream_meta) {
+    if (!node || !msg || !msg->has_stream) {
         return;
     }
-    state = find_recv_stream(node, msg_id, ip, port);
+    stream_meta = &msg->stream;
+    state = find_recv_stream(node, msg);
 
     if (stream_meta->flags & ZRPC_STREAM_CANCEL) {
         if (state) {
@@ -183,7 +188,7 @@ void zri_service_handle_stream_chunk(zrpc_node_t *node, zri_peer_token_t token, 
         if (!(stream_meta->flags & ZRPC_STREAM_FIRST)) {
             return; /* 没有 FIRST 也没有已有状态：协议错误 */
         }
-        zri_copy_str(tmp, sizeof(tmp), route, "");
+        zri_copy_str(tmp, sizeof(tmp), msg->route, "");
         dot = strchr(tmp, '.');
         if (!dot) {
             return;
@@ -203,7 +208,7 @@ void zri_service_handle_stream_chunk(zrpc_node_t *node, zri_peer_token_t token, 
         if (!method) {
             return;
         }
-        state = alloc_recv_stream(node, msg_id, ip, port, transport, token);
+        state = alloc_recv_stream(node, transport, msg);
         if (state) {
             state->method = method;
             zri_copy_str(state->service, sizeof(state->service), tmp, "");
@@ -214,15 +219,15 @@ void zri_service_handle_stream_chunk(zrpc_node_t *node, zri_peer_token_t token, 
         return;
     }
     state->last_ms = zri_now_ms();
-    state->bytes += payload ? payload->len : 0;
+    state->bytes += msg->payload.len;
     request.service = state->service;
     request.method = state->method_name;
-    request.payload = payload ? *payload : (zrpc_payload_t){0};
+    request.payload = msg->payload;
     request.peer_ip = state->call->peer_ip;
-    request.peer_port = port;
-    chunk.data = payload ? payload->data : NULL;
-    chunk.len = payload ? payload->len : 0;
-    chunk.encoding = payload ? payload->encoding : 0;
+    request.peer_port = msg->peer_port;
+    chunk.data = msg->payload.data;
+    chunk.len = msg->payload.len;
+    chunk.encoding = msg->payload.encoding;
     chunk.offset = stream_meta->offset;
     chunk.flags = stream_meta->flags;
     method->stream_fn(state->call, &request, &chunk, method->user);

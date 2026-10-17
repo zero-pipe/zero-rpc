@@ -6,7 +6,6 @@
 #include "mem.h"
 #include "util.h"
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -32,6 +31,8 @@ typedef struct zri_stub_resend_task {
     uint64_t id;
 } zri_stub_resend_task_t;
 
+static void stub_task_free(zri_stub_task_t *task);
+
 static uint8_t stub_msg_kind(zrpc_stub_kind_t kind) {
     return kind == ZRPC_STUB_EVENT ? ZRPC_KIND_EVENT : ZRPC_KIND_REQUEST;
 }
@@ -41,19 +42,12 @@ static int stub_default_send(zrpc_stub_t *stub, const char *service, const char 
                              const zrpc_payload_t *payload, zrpc_stub_kind_t kind,
                              uint64_t request_id, zrpc_stub_target_t *target, void *user_data) {
     zrpc_node_t *node = stub->node;
-    char route[ZRPC_SERVICE_NAME_MAX + ZRPC_METHOD_NAME_MAX + 2];
-    int n;
     (void)user_data;
     if (zri_node_resolve(node, service, 0, target) != ZRPC_OK) {
         return ZRPC_ERR_NOTFOUND;
     }
-    n = snprintf(route, sizeof(route), "%s.%s", service, method);
-    if (n < 0 || (size_t)n >= sizeof(route)) {
-        return ZRPC_ERR_INVALID;
-    }
-    return zri_node_send(node, target->ip, target->port, stub_msg_kind(kind),
-                          0, (uint32_t)request_id, target->transport, target->scheme, route,
-                          payload, NULL);
+    return zri_node_send_call(node, target, service, method, payload, stub_msg_kind(kind),
+                              request_id);
 }
 
 static uint64_t stub_resend_task_fn(void *user) {
@@ -160,10 +154,7 @@ static void stub_call_task_fn(void *user) {
         stub_call_now(t->stub, t->id, t->service, t->method, t->data, t->len, t->encoding, t->cb,
                       t->chunk_cb, t->done_cb, t->streaming, t->user, t->timeout_ms);
     }
-    if (t->data) {
-        free(t->data);
-    }
-    free(t);
+    stub_task_free(t);
 }
 
 static uint64_t stub_next_id(zrpc_node_t *node) {
@@ -172,6 +163,68 @@ static uint64_t stub_next_id(zrpc_node_t *node) {
     id = (uint64_t)(uint32_t)(node->next_request_id++);
     ztk_mutex_unlock(node->id_lock);
     return id ? id : 1;
+}
+
+static void stub_task_free(zri_stub_task_t *task) {
+    if (!task) {
+        return;
+    }
+    free(task->data);
+    free(task);
+}
+
+/* 创建一次调用的任务快照（service/method/payload 全部深拷贝）。 */
+static zri_stub_task_t *stub_task_create(zrpc_stub_t *stub, uint64_t id, const char *service,
+                                          const char *method, const uint8_t *data, size_t len,
+                                          uint8_t encoding) {
+    zri_stub_task_t *task;
+
+    task = (zri_stub_task_t *)calloc(1, sizeof(*task));
+    if (!task) {
+        return NULL;
+    }
+    task->stub = stub;
+    task->id = id;
+    zri_copy_str(task->service, sizeof(task->service), service, "");
+    zri_copy_str(task->method, sizeof(task->method), method, "");
+    task->encoding = encoding;
+    task->len = len;
+    if (len > 0) {
+        task->data = (uint8_t *)malloc(len);
+        if (!task->data) {
+            free(task);
+            return NULL;
+        }
+        memcpy(task->data, data, len);
+    }
+    return task;
+}
+
+/* 跨线程投递；失败时释放任务并返回错误码。 */
+static int stub_task_submit(zrpc_stub_t *stub, zri_stub_task_t *task) {
+    if (ztk_poller_async(stub->node->poller, stub_call_task_fn, task, 1) != ZTK_OK) {
+        stub_task_free(task);
+        return ZRPC_ERR_IO;
+    }
+    return ZRPC_OK;
+}
+
+/* 校验并归一化 payload（长度上限、空指针、默认 encoding）。 */
+static int stub_payload_prepare(const zrpc_stub_t *stub, const zrpc_payload_t *payload,
+                                const uint8_t **data, size_t *len, uint8_t *encoding) {
+    if (!stub || !stub->node || !data || !len || !encoding) {
+        return ZRPC_ERR_INVALID;
+    }
+    *data = payload ? (const uint8_t *)payload->data : NULL;
+    *len = payload ? payload->len : 0;
+    *encoding = payload ? payload->encoding : 0;
+    if (*len > stub->node->max_msg_bytes || (*len > 0 && !*data)) {
+        return ZRPC_ERR_INVALID;
+    }
+    if (*encoding == 0) {
+        *encoding = stub->payload_encoding;
+    }
+    return ZRPC_OK;
 }
 
 int zrpc_stub_create(zrpc_node_t *node, const zrpc_stub_options_t *options, zrpc_stub_t **out) {
@@ -204,18 +257,17 @@ int zrpc_stub_call(zrpc_stub_t *stub, const char *service, const char *method,
                    const zrpc_payload_t *payload, uint64_t *out_request_id) {
     zri_stub_task_t *t;
     uint64_t id;
-    const uint8_t *data = payload ? (const uint8_t *)payload->data : NULL;
-    size_t len = payload ? payload->len : 0;
-    uint8_t encoding = payload ? payload->encoding : 0;
+    const uint8_t *data;
+    size_t len;
+    uint8_t encoding;
+    int rc;
 
     if (!stub || !stub->node || !service || !method) {
         return ZRPC_ERR_INVALID;
     }
-    if (len > stub->node->max_msg_bytes || (len > 0 && !data)) {
-        return ZRPC_ERR_INVALID;
-    }
-    if (encoding == 0) {
-        encoding = stub->payload_encoding;
+    rc = stub_payload_prepare(stub, payload, &data, &len, &encoding);
+    if (rc != ZRPC_OK) {
+        return rc;
     }
     id = stub_next_id(stub->node);
     if (ztk_poller_is_current_thread(stub->node->poller)) {
@@ -225,29 +277,14 @@ int zrpc_stub_call(zrpc_stub_t *stub, const char *service, const char *method,
         }
         return ZRPC_OK;
     }
-    t = (zri_stub_task_t *)calloc(1, sizeof(*t));
+    t = stub_task_create(stub, id, service, method, data, len, encoding);
     if (!t) {
         return ZRPC_ERR_NOMEM;
     }
-    t->stub = stub;
-    t->id = id;
     t->event = 1;
-    zri_copy_str(t->service, sizeof(t->service), service, "");
-    zri_copy_str(t->method, sizeof(t->method), method, "");
-    t->len = len;
-    t->encoding = encoding;
-    if (len > 0) {
-        t->data = (uint8_t *)malloc(len);
-        if (!t->data) {
-            free(t);
-            return ZRPC_ERR_NOMEM;
-        }
-        memcpy(t->data, data, len);
-    }
-    if (ztk_poller_async(stub->node->poller, stub_call_task_fn, t, 1) != ZTK_OK) {
-        free(t->data);
-        free(t);
-        return ZRPC_ERR_IO;
+    rc = stub_task_submit(stub, t);
+    if (rc != ZRPC_OK) {
+        return rc;
     }
     if (out_request_id) {
         *out_request_id = id;
@@ -261,9 +298,10 @@ int zri_stub_call_ex(zrpc_stub_t *stub, const char *service, const char *method,
                       void *user, uint64_t timeout_ms, uint64_t *out_request_id) {
     zri_stub_task_t *t;
     uint64_t id;
-    const uint8_t *data = payload ? (const uint8_t *)payload->data : NULL;
-    size_t len = payload ? payload->len : 0;
-    uint8_t encoding = payload ? payload->encoding : 0;
+    const uint8_t *data;
+    size_t len;
+    uint8_t encoding;
+    int rc;
 
     if (!stub || !stub->node || !service || !method) {
         return ZRPC_ERR_INVALID;
@@ -274,11 +312,9 @@ int zri_stub_call_ex(zrpc_stub_t *stub, const char *service, const char *method,
     if (streaming && (!chunk_cb || !done_cb)) {
         return ZRPC_ERR_INVALID;
     }
-    if (len > stub->node->max_msg_bytes || (len > 0 && !data)) {
-        return ZRPC_ERR_INVALID;
-    }
-    if (encoding == 0) {
-        encoding = stub->payload_encoding;
+    rc = stub_payload_prepare(stub, payload, &data, &len, &encoding);
+    if (rc != ZRPC_OK) {
+        return rc;
     }
     id = stub_next_id(stub->node);
 
@@ -291,34 +327,19 @@ int zri_stub_call_ex(zrpc_stub_t *stub, const char *service, const char *method,
         return ZRPC_OK;
     }
 
-    t = (zri_stub_task_t *)calloc(1, sizeof(*t));
+    t = stub_task_create(stub, id, service, method, data, len, encoding);
     if (!t) {
         return ZRPC_ERR_NOMEM;
     }
-    t->stub = stub;
-    t->id = id;
     t->timeout_ms = timeout_ms;
     t->cb = cb;
     t->chunk_cb = chunk_cb;
     t->done_cb = done_cb;
     t->streaming = streaming;
     t->user = user;
-    zri_copy_str(t->service, sizeof(t->service), service, "");
-    zri_copy_str(t->method, sizeof(t->method), method, "");
-    t->len = len;
-    t->encoding = encoding;
-    if (len > 0) {
-        t->data = (uint8_t *)malloc(len);
-        if (!t->data) {
-            free(t);
-            return ZRPC_ERR_NOMEM;
-        }
-        memcpy(t->data, data, len);
-    }
-    if (ztk_poller_async(stub->node->poller, stub_call_task_fn, t, 1) != ZTK_OK) {
-        free(t->data);
-        free(t);
-        return ZRPC_ERR_IO;
+    rc = stub_task_submit(stub, t);
+    if (rc != ZRPC_OK) {
+        return rc;
     }
     if (out_request_id) {
         *out_request_id = id;

@@ -4,7 +4,7 @@
  *
  * 形状：单进程单"热连接"，同一时刻 1 个 outstanding RPC（对齐 gRPC 单 channel）。
  */
-#include <zrpc/zrpc.h>
+#include <zrpc/zrpc_client.h>
 #include <ztk/platform.h>
 #include <ztk/thread/sem.h>
 

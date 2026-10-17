@@ -55,9 +55,11 @@ typedef struct zrpc_node_config {
     const zrpc_service_table_t *service_table;
 } zrpc_node_config_t;
 
+/* ---- 生命周期 ---- */
 int zrpc_node_create(const zrpc_node_config_t *cfg, zrpc_node_t **out);
 void zrpc_node_destroy(zrpc_node_t *node);
 
+/* ---- 状态与指标 ---- */
 const char *zrpc_node_name(const zrpc_node_t *node);
 zrpc_transport_kind_t zrpc_node_transport(const zrpc_node_t *node);
 uint16_t zrpc_node_data_port(const zrpc_node_t *node);
@@ -66,10 +68,15 @@ size_t zrpc_node_binding_count(const zrpc_node_t *node);
 int zrpc_node_binding_endpoint(const zrpc_node_t *node, size_t index, char *out, size_t cap);
 void zrpc_node_metrics(const zrpc_node_t *node, zrpc_metrics_t *out);
 
-/* 查询某对端（ip:port）的 RTCP 统计；无此对端返回 ZRPC_ERR_NOTFOUND。 */
+/* ---- 对端质量 ---- */
+/* 查询某对端（ip:port）的链路统计；无此对端返回 ZRPC_ERR_NOTFOUND。 */
+int zrpc_node_peer_stats(const zrpc_node_t *node, const char *ip, uint16_t port,
+                         zrpc_peer_stats_t *out);
+/* 兼容旧名称；新代码请使用 zrpc_node_peer_stats。 */
 int zrpc_node_rtcp_peer(const zrpc_node_t *node, const char *ip, uint16_t port,
                         zrpc_rtcp_peer_stats_t *out);
 
+/* ---- 发现与路由 ---- */
 /* 显式加入一个发现对端（单播 HELLO 目标）；用于定向发现/测试。 */
 int zrpc_node_add_discovery_peer(zrpc_node_t *node, const char *ip, uint16_t discovery_port);
 
@@ -78,9 +85,10 @@ int zrpc_node_add_static_route(zrpc_node_t *node, const char *service, const cha
                                uint16_t port, zrpc_transport_kind_t transport);
 int zrpc_node_add_static_endpoint(zrpc_node_t *node, const char *service, const char *endpoint);
 
+/* ---- 调度与运行 ---- */
 /*
  * 在节点的 poller 线程投递任务（异步、不阻塞调用方）。
- * 高吞吐客户端可在回调/任务里直接发起下一次调用，zrpc_proxy_call 会识别
+ * 高吞吐客户端可在回调/任务里直接发起下一次调用，zrpc_proxy_call_async 会识别
  * "已在 poller 线程"并内联执行，消除跨线程开销。
  */
 int zrpc_node_post(zrpc_node_t *node, void (*fn)(void *user), void *user);

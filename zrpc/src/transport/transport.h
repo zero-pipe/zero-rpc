@@ -1,13 +1,14 @@
-#ifndef ZRPC_TRANSPORT_H
+﻿#ifndef ZRPC_TRANSPORT_H
 #define ZRPC_TRANSPORT_H
 
 /*
  * 传输抽象：node 只依赖该接口，不感知 UDP/TCP 差异。
  *
- * 一个传输负责：绑定本地端口、把一条完整 RPC 消息发给某个对端、
- * 把收到的完整消息上抛给 node（zri_node_on_message），以及自身的周期性驱动。
+ * 一个传输负责：绑定本地端口、把一条完整消息发给某个对端、
+ * 把收到的完整消息上抛给 core（zri_node_on_message），以及自身的周期性驱动。
  *
- * payload 在传输层是纯字节；kind/msg_id/route 由上层（core）解释。
+ * 消息统一用 zri_message_t 承载（见 message/message.h）；传输层只搬运字节，
+ * kind/status/route/request_id 由 core 解释。
  */
 
 #include <zrpc/zrpc_types.h>
@@ -19,6 +20,7 @@
 #include <stdint.h>
 
 #include "caps.h"
+#include "message.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -27,27 +29,20 @@ extern "C" {
 typedef struct zri_transport zri_transport_t;
 typedef struct zrpc_node zrpc_node_t;
 
-/* 收到的完整消息上抛给 node 时携带的回程标识（传输私有，仅用于 reply）。 */
-typedef void *zri_peer_token_t;
-
 typedef struct zri_transport_ops {
     /* 绑定/监听，成功后 t->port 为实际端口。 */
     int (*start)(zri_transport_t *t);
     void (*stop)(zri_transport_t *t);
 
-    /* 发起（首次）发送：按 ip:port 找到/建立通道。status 仅 RESPONSE 有意义。 */
-    int (*send)(zri_transport_t *t, const char *ip, uint16_t port, uint8_t kind, int status,
-                uint32_t msg_id, const char *route, const zrpc_payload_t *payload,
-                const zrpc_stream_meta_t *stream);
+    /* 发起发送：目标由 message->peer_ip / message->peer_port 指定。 */
+    int (*send)(zri_transport_t *t, const zri_message_t *message);
 
-    /* 回复：优先使用 接收（recv）回调给出的 peer_token（回程通道），token 为空时回退到 ip:port。 */
-    int (*reply)(zri_transport_t *t, zri_peer_token_t token, const char *ip, uint16_t port,
-                 uint8_t kind, int status, uint32_t msg_id, const char *route,
-                 const zrpc_payload_t *payload, const zrpc_stream_meta_t *stream);
+    /* 回复：优先使用 message->peer_token，缺失时回退到 peer_ip:peer_port。 */
+    int (*reply)(zri_transport_t *t, const zri_message_t *message);
 
-    /* 查询某对端的 RTCP 统计（可选）：1 = 找到，0 = 无此对端，<0 = 出错。 */
-    int (*rtcp_peer)(zri_transport_t *t, const char *ip, uint16_t port,
-                     zrpc_rtcp_peer_stats_t *out);
+    /* 查询某对端的链路统计（可选）：1 = 找到，0 = 无此对端，负数 = 出错。 */
+    int (*peer_stats)(zri_transport_t *t, const char *ip, uint16_t port,
+                      zrpc_peer_stats_t *out);
 } zri_transport_ops_t;
 
 struct zri_transport {
@@ -76,11 +71,9 @@ struct zri_transport {
     zrpc_metrics_t *metrics;
 };
 
-/* 传输层把收到的完整消息上抛给 core 的回调（实现于 node.c）。 */
-void zri_node_on_message(zrpc_node_t *node, const char *ip, uint16_t port, zri_peer_token_t token,
-                          zri_transport_t *transport, uint8_t kind, int status, uint32_t msg_id,
-                          const char *route, const zrpc_payload_t *payload,
-                          const zrpc_stream_meta_t *stream);
+/* 传输层把收到的完整消息上抛给 core（实现在 dispatch.c）。 */
+void zri_node_on_message(zrpc_node_t *node, zri_transport_t *transport,
+                         const zri_message_t *message);
 
 /* 具体驱动工厂（返回已初始化 ops/kind 的对象，未 start）。 */
 zri_transport_t *zri_udp_transport_create(void);
@@ -90,13 +83,8 @@ zri_transport_t *zri_tcp_transport_create(void);
 int zri_transport_start(zri_transport_t *t);
 void zri_transport_stop(zri_transport_t *t);
 void zri_transport_destroy(zri_transport_t *t);
-int zri_transport_send(zri_transport_t *t, const char *ip, uint16_t port, uint8_t kind,
-                         int status, uint32_t msg_id, const char *route,
-                         const zrpc_payload_t *payload, const zrpc_stream_meta_t *stream);
-int zri_transport_reply(zri_transport_t *t, zri_peer_token_t token, const char *ip,
-                         uint16_t port, uint8_t kind, int status, uint32_t msg_id,
-                         const char *route, const zrpc_payload_t *payload,
-                         const zrpc_stream_meta_t *stream);
+int zri_transport_send(zri_transport_t *t, const zri_message_t *message);
+int zri_transport_reply(zri_transport_t *t, const zri_message_t *message);
 const zrpc_transport_provider_t *zri_transport_provider_find(const char *scheme);
 
 #ifdef __cplusplus

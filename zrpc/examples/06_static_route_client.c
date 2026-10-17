@@ -3,7 +3,7 @@
  * 通过 zrpc_node_add_static_route 登记 OrderService -> 127.0.0.1:42420，
  * 跳过服务发现直接路由。
  */
-#include <zrpc/zrpc.h>
+#include <zrpc/zrpc_client.h>
 
 #include <stdio.h>
 #include <string.h>

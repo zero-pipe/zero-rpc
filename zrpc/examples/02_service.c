@@ -5,7 +5,7 @@
  * 用法：zrpc_example_02_service [port]
  * 默认 TCP 127.0.0.1:42410（STATIC 模式，无需发现）。
  */
-#include <zrpc/zrpc.h>
+#include <zrpc/zrpc_server.h>
 
 #include <stdio.h>
 #include <stdlib.h>

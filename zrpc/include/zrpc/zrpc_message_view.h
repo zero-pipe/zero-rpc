@@ -22,6 +22,7 @@
 extern "C" {
 #endif
 
+/* ---- 视图结构 ---- */
 typedef struct zrpc_message_view {
     const void *data; /* 字节视图 */
     size_t len;       /* 字节数 */
@@ -29,6 +30,7 @@ typedef struct zrpc_message_view {
     void *owned;      /* 内部：set_* 分配的所有权缓冲，勿手动修改 */
 } zrpc_message_view_t;
 
+/* ---- 构造与写入 ---- */
 /* 初始化为空视图。 */
 void zrpc_message_view_init(zrpc_message_view_t *view);
 
@@ -42,6 +44,7 @@ int zrpc_message_view_set_string(zrpc_message_view_t *view, const char *text);
 /* 按 payload 设置视图；设置 encoding，data 拷贝进视图。 */
 int zrpc_message_view_set_payload(zrpc_message_view_t *view, const zrpc_payload_t *payload);
 
+/* ---- 生命周期与导出 ---- */
 /* 释放 owned 缓冲并清空视图。借用视图调用它也安全。 */
 void zrpc_message_view_release(zrpc_message_view_t *view);
 

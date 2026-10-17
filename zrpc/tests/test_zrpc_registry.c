@@ -1,5 +1,5 @@
 /* registry / selector：service instance 隔离、多 endpoint 轮询、删除与过期。 */
-#include <zrpc/zrpc.h>
+#include <zrpc/zrpc_runtime.h>
 
 #include "registry.h"
 
