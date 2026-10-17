@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-command gate for zrpc. Run before merging any change.
+# One-command gate for rpc. Run before merging any change.
 #
 #   scripts/check.sh            # build + unit/integration + perf smoke + stress
 #   scripts/check.sh --full     # also run the stability soak

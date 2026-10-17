@@ -28,8 +28,8 @@ __pycache__/
 *.so
 
 # Bundled test libraries are intentional repository inputs.
-!zrpc/tests/google/benchmark/lib/**/*.a
-!zrpc/tests/google/gtest/lib/**/*.a
+!tests/google/benchmark/lib/**/*.a
+!tests/google/gtest/lib/**/*.a
 
 # Local vendored dependency metadata
-3rdpart/zero-tool-kit/.git/
+3rdpart/ntk/.git/

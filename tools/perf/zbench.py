@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""zbench - unified perf / stress / stability harness for zrpc.
+"""zbench - unified perf / stress / stability harness for rpc.
 
-One entry point that drives the C load engines (zrpc_bench_server +
-zrpc_loadgen) and the CTest unit/integration suites, and produces
+One entry point that drives the C load engines (bench_server +
+loadgen) and the CTest unit/integration suites, and produces
 machine-readable + HTML reports so any change can be gated.
 
 Commands
@@ -499,7 +499,7 @@ def run_scenario(server: Path, loadgen: Path, s: Dict[str, Any], ports: PortAllo
 
     env = dict(env_base)
     if s["drop_percent"]:
-        env["ZRPC_DROP_PERCENT"] = str(s["drop_percent"])
+        env["DROP_PERCENT"] = str(s["drop_percent"])
 
     server_log = run_dir / "server.log"
     srv: Optional[subprocess.Popen] = None
@@ -654,7 +654,7 @@ def render_report(results: List[Dict[str, Any]], title: str) -> str:
             "<table><tr><th>scenario</th><th>suite</th><th>transport</th><th>payload</th>"
             "<th>clients</th><th>err%</th><th>ok</th><th>fail</th><th>qps</th>"
             "<th>p50 us</th><th>p99 us</th><th>errors</th></tr>{rows}</table>"
-            "<p class='muted'>zbench · zrpc perf/stress/stability harness</p>"
+            "<p class='muted'>zbench · rpc perf/stress/stability harness</p>"
             "</div></body></html>").format(
                 t=html.escape(title), css=REPORT_CSS, ts=timestamp(), n=len(results),
                 cls="ok" if passed else "bad", verdict="ALL PASS" if passed else "FAILURES",
@@ -713,11 +713,11 @@ def resolve_binaries(args: argparse.Namespace) -> Tuple[Path, Path]:
     if args.binary_dir:
         base = Path(args.binary_dir).resolve()
     else:
-        base = Path(args.build_dir).resolve() / "zrpc" / "tools"
+        base = Path(args.build_dir).resolve() / "tools"
         if IS_WINDOWS:
             base = base / (args.build_type or "Debug")
-    server = base / ("zrpc_bench_server" + EXE)
-    loadgen = base / ("zrpc_loadgen" + EXE)
+    server = base / ("bench_server" + EXE)
+    loadgen = base / ("loadgen" + EXE)
     if not server.exists() or not loadgen.exists():
         raise FileNotFoundError("bench binaries not found under {}".format(base))
     return server, loadgen
@@ -725,7 +725,7 @@ def resolve_binaries(args: argparse.Namespace) -> Tuple[Path, Path]:
 
 def build_tree(args: argparse.Namespace, build_dir: Path, sanitize: bool = False) -> None:
     cfg = ["cmake", "-S", str(ROOT), "-B", str(build_dir)]
-    cfg += ["-DZRPC_BUILD_GTESTS=ON"]
+    cfg += ["-DBUILD_GTESTS=ON"]
     if sanitize:
         cfg += ["-DCMAKE_BUILD_TYPE=Debug",
                 "-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer -g",
@@ -853,19 +853,19 @@ def _run_suite(args: argparse.Namespace, scenarios: List[Dict[str, Any]], sample
 def cmd_perf(args: argparse.Namespace) -> int:
     if not args.no_build:
         build_tree(args, Path(args.build_dir).resolve())
-    return _run_suite(args, perf_scenarios(args), sample=False, title="zrpc perf matrix")
+    return _run_suite(args, perf_scenarios(args), sample=False, title="rpc perf matrix")
 
 
 def cmd_stress(args: argparse.Namespace) -> int:
     if not args.no_build:
         build_tree(args, Path(args.build_dir).resolve())
-    return _run_suite(args, stress_scenarios(args), sample=False, title="zrpc stress scenarios")
+    return _run_suite(args, stress_scenarios(args), sample=False, title="rpc stress scenarios")
 
 
 def cmd_soak(args: argparse.Namespace) -> int:
     if not args.no_build:
         build_tree(args, Path(args.build_dir).resolve())
-    return _run_suite(args, soak_scenarios(args), sample=True, title="zrpc stability soak")
+    return _run_suite(args, soak_scenarios(args), sample=True, title="rpc stability soak")
 
 
 def cmd_all(args: argparse.Namespace) -> int:
@@ -874,13 +874,13 @@ def cmd_all(args: argparse.Namespace) -> int:
         return rc
     if not args.no_build:
         build_tree(args, Path(args.build_dir).resolve())
-    rc = _run_suite(args, perf_scenarios(args), sample=False, title="zrpc perf matrix")
+    rc = _run_suite(args, perf_scenarios(args), sample=False, title="rpc perf matrix")
     if rc != 0:
         return rc
-    rc = _run_suite(args, stress_scenarios(args), sample=False, title="zrpc stress scenarios")
+    rc = _run_suite(args, stress_scenarios(args), sample=False, title="rpc stress scenarios")
     if rc != 0 or not args.soak:
         return rc
-    return _run_suite(args, soak_scenarios(args), sample=True, title="zrpc stability soak")
+    return _run_suite(args, soak_scenarios(args), sample=True, title="rpc stability soak")
 
 
 def cmd_analyze(args: argparse.Namespace) -> int:
@@ -893,7 +893,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         log("{} has no briefing.json".format(run_dir))
         return 1
     results = json.loads(briefing.read_text(encoding="utf-8"))
-    write_reports(run_dir, results, "zrpc report ({})".format(run_dir.name))
+    write_reports(run_dir, results, "rpc report ({})".format(run_dir.name))
     summarize_console(results)
     regressions: List[Dict[str, Any]] = []
     if args.baseline and Path(args.baseline).exists():
@@ -915,7 +915,7 @@ def latest_run(out_dir: Path) -> Optional[Path]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="zbench", description="zrpc perf/stress/stability harness")
+    p = argparse.ArgumentParser(prog="zbench", description="rpc perf/stress/stability harness")
     p.add_argument("command", nargs="?",
                    choices=["unit", "perf", "stress", "soak", "sanitizer",
                             "valgrind", "analyze", "all"])

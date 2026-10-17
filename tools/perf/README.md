@@ -1,7 +1,7 @@
-# zrpc 测试体系（unit / perf / stress / stability）
+# rpc 测试体系（unit / perf / stress / stability）
 
 单一入口，任何改动跑一遍即可把住关。C 侧只提供压测引擎
-(`zrpc_bench_server` + `zrpc_loadgen`)，所有编排、采样、报告、门禁都在
+(`bench_server` + `loadgen`)，所有编排、采样、报告、门禁都在
 `tools/perf/zbench.py`（Python 3，无第三方依赖；Linux 为主，Windows 可跑
 unit 与 perf）。
 
@@ -36,8 +36,8 @@ scripts/check.sh --full
 
 | 层 | 位置 | 门禁 |
 | --- | --- | --- |
-| unit | `zrpc/tests/`（label `unit`）、ztk tests | 硬门禁，必须全过 |
-| integration | `zrpc/tests/`（label `integration`） | 硬门禁，必须全过 |
+| unit | `tests/`（label `unit`）、ztk tests | 硬门禁，必须全过 |
+| integration | `tests/`（label `integration`） | 硬门禁，必须全过 |
 | perf | `zbench.py perf` | 出报告；有 baseline 时按 QPS/P99 容差判回归 |
 | stress | `zbench.py stress` | 场景级 `expect` 判定，必须全过 |
 | stability | `zbench.py soak` | 出报告 + 泄漏初筛 |

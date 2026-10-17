@@ -15,19 +15,35 @@ enable_testing()
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-# 基础依赖：zero-tool-kit
+# 基础依赖：network-tool-kit
 set(ZTK_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(ZTK_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(ZTK_ENABLE_OPENSSL OFF CACHE BOOL "" FORCE)
-add_subdirectory(3rdpart/zero-tool-kit)
+add_subdirectory(3rdpart/ntk)
 
-# zrpc 本体与测试
-option(ZRPC_BUILD_TESTS "Build zrpc tests" ON)
-option(ZRPC_BUILD_TOOLS "Build zrpc benchmark tools" ON)
-option(ZRPC_BUILD_EXAMPLES "Build zrpc examples" ON)
-option(ZRPC_BUILD_GTESTS "Build GoogleTest module tests" OFF)
-option(ZRPC_BUILD_BENCHMARKS "Build Google Benchmark microbenchmarks" OFF)
-if(ZRPC_BUILD_GTESTS OR ZRPC_BUILD_BENCHMARKS)
+option(BUILD_TESTS "Build rpc tests" ON)
+option(BUILD_TOOLS "Build rpc benchmark tools" ON)
+option(BUILD_EXAMPLES "Build rpc examples" ON)
+option(BUILD_GTESTS "Build GoogleTest module tests" OFF)
+option(BUILD_BENCHMARKS "Build Google Benchmark microbenchmarks" OFF)
+if(BUILD_GTESTS OR BUILD_BENCHMARKS)
     enable_language(CXX)
 endif()
-add_subdirectory(zrpc)
+
+add_subdirectory(src)
+
+if(BUILD_TESTS)
+    add_subdirectory(tests)
+endif()
+
+if(BUILD_TOOLS)
+    add_subdirectory(tools)
+endif()
+
+if(BUILD_EXAMPLES)
+    add_subdirectory(examples)
+endif()
+
+if(BUILD_GTESTS OR BUILD_BENCHMARKS)
+    add_subdirectory(tests/google)
+endif()

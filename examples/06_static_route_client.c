@@ -1,0 +1,54 @@
+/*
+ * 06 Static Route：客户端。对应 fastcall-c 的 06_static_route。
+ * 通过 node_add_static_route 登记 OrderService -> 127.0.0.1:42420，
+ * 跳过服务发现直接路由。
+ */
+#include <client.h>
+
+#include <stdio.h>
+#include <string.h>
+
+int main(void) {
+    node_config_t cfg;
+    node_t *node = NULL;
+    proxy_t *proxy = NULL;
+    response_t response;
+    payload_t request;
+    int rc;
+
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.name = "StaticClient";
+    cfg.transport = TRANSPORT_TCP;
+    cfg.bind_host = "127.0.0.1";
+    cfg.mode = MODE_STATIC;
+    cfg.io_threads = 1;
+
+    rc = node_create(&cfg, &node);
+    if (rc == OK) {
+        rc = node_add_static_route(node, "OrderService", "127.0.0.1", 42420,
+                                        TRANSPORT_TCP);
+    }
+    if (rc == OK) {
+        rc = proxy_create(node, NULL, &proxy);
+    }
+    if (rc != OK) {
+        fprintf(stderr, "client setup failed: %d\n", rc);
+        node_destroy(node);
+        return 1;
+    }
+
+    request.data = "order-1001";
+    request.len = strlen((const char *)request.data);
+    request.encoding = 0;
+    memset(&response, 0, sizeof(response));
+    rc = proxy_call_sync(proxy, "OrderService", "get", &request, &response, 3000, NULL);
+    if (rc == OK) {
+        printf("%.*s\n", (int)response.payload.len, (const char *)response.payload.data);
+    } else {
+        fprintf(stderr, "static route call failed: %d\n", rc);
+    }
+    response_release(&response);
+    proxy_destroy(proxy);
+    node_destroy(node);
+    return rc == OK ? 0 : 1;
+}
