@@ -3,6 +3,9 @@
 #include "reasm.h"
 #include "tx_ring.h"
 
+#define RPC_LOG_TAG "test"
+#include <log.h>
+
 #include <stdio.h>
 #include <string.h>
 
@@ -11,7 +14,7 @@ static int g_fail;
 #define CHECK(cond)                                                \
     do {                                                           \
         if (!(cond)) {                                             \
-            printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
+            rpc_log_error("FAIL %s:%d: %s", __FILE__, __LINE__, #cond); \
             g_fail = 1;                                            \
         }                                                          \
     } while (0)
@@ -97,9 +100,9 @@ int main(void) {
     test_reasm();
     test_tx_ring();
     if (g_fail) {
-        printf("zri_reliable: FAIL\n");
+        rpc_log_error("zri_reliable: FAIL");
         return 1;
     }
-    printf("zri_reliable: OK\n");
+    rpc_log_info("zri_reliable: OK");
     return 0;
 }

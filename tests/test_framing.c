@@ -1,6 +1,9 @@
 #include "envelope.h"
 #include "framing.h"
 
+#define RPC_LOG_TAG "test"
+#include <log.h>
+
 #include <stdio.h>
 #include <string.h>
 
@@ -9,7 +12,7 @@ static int g_fail;
 #define CHECK(cond)                                                     \
     do {                                                                \
         if (!(cond)) {                                                  \
-            printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);      \
+            rpc_log_error("FAIL %s:%d: %s", __FILE__, __LINE__, #cond); \
             g_fail = 1;                                                 \
         }                                                               \
     } while (0)
@@ -213,9 +216,9 @@ int main(void) {
     test_rtcp_sdes_and_dispatch();
     test_rtcp_bye_roundtrip();
     if (g_fail) {
-        printf("zri_framing: FAIL\n");
+        rpc_log_error("zri_framing: FAIL");
         return 1;
     }
-    printf("zri_framing: OK\n");
+    rpc_log_info("zri_framing: OK");
     return 0;
 }

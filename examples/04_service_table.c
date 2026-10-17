@@ -6,7 +6,8 @@
  */
 #include <extensions.h>
 
-#include <stdio.h>
+#define RPC_LOG_TAG "example"
+#include <log.h>
 
 SERVICE_DEFINE(order_table, 1u, "OrderService",
                     SERVICE_METHOD(1u, "get"),
@@ -18,14 +19,14 @@ int main(void) {
 
     rc = install_service_table(&order_table);
     if (rc != OK) {
-        fprintf(stderr, "install table failed: %d\n", rc);
+        rpc_log_error("install table failed: %d", rc);
         return 1;
     }
     if (service_table_find_id("OrderService", "get", &id) == OK) {
-        printf("OrderService.get -> id=%u\n", (unsigned)id);
+        rpc_log_info("OrderService.get -> id=%u", (unsigned)id);
     }
     if (service_table_find_id("OrderService", "put", &id) == OK) {
-        printf("OrderService.put -> id=%u\n", (unsigned)id);
+        rpc_log_info("OrderService.put -> id=%u", (unsigned)id);
     }
     reset_service_table();
     return 0;

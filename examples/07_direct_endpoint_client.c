@@ -4,7 +4,9 @@
  */
 #include <client.h>
 
-#include <stdio.h>
+#define RPC_LOG_TAG "example"
+#include <log.h>
+
 #include <string.h>
 
 int main(void) {
@@ -30,7 +32,7 @@ int main(void) {
         rc = proxy_set_endpoint_uri(proxy, "tcp://127.0.0.1:42430");
     }
     if (rc != OK) {
-        fprintf(stderr, "client setup failed: %d\n", rc);
+        rpc_log_error("client setup failed: %d", rc);
         node_destroy(node);
         return 1;
     }
@@ -41,9 +43,10 @@ int main(void) {
     memset(&response, 0, sizeof(response));
     rc = proxy_call_sync(proxy, "OrderService", "get", &request, &response, 3000, NULL);
     if (rc == OK) {
-        printf("%.*s\n", (int)response.payload.len, (const char *)response.payload.data);
+        rpc_log_info("%.*s", (int)response.payload.len,
+                     (const char *)response.payload.data);
     } else {
-        fprintf(stderr, "direct endpoint call failed: %d\n", rc);
+        rpc_log_error("direct endpoint call failed: %d", rc);
     }
     response_release(&response);
     proxy_destroy(proxy);

@@ -34,7 +34,7 @@
 /* setting static output log level. range: from ELOG_LVL_ASSERT to ELOG_LVL_VERBOSE */
 #define ELOG_OUTPUT_LVL                          ELOG_LVL_VERBOSE
 /* enable assert check */
-#define ELOG_ASSERT_ENABLE
+/* #define ELOG_ASSERT_ENABLE */
 /* buffer size for every line's log */
 #define ELOG_LINE_BUF_SIZE                       1024
 /* output line number max length */
@@ -49,7 +49,7 @@
 #define ELOG_NEWLINE_SIGN                        "\n"
 /*---------------------------------------------------------------------------*/
 /* enable log color */
-#define ELOG_COLOR_ENABLE
+/* #define ELOG_COLOR_ENABLE */
 /* change the some level logs to not default color if you want */
 #define ELOG_COLOR_ASSERT                        (F_MAGENTA B_NULL S_NORMAL)
 #define ELOG_COLOR_ERROR                         (F_RED B_NULL S_NORMAL)
@@ -60,12 +60,12 @@
 /*---------------------------------------------------------------------------*/
 /* enable log fmt */
 /* comment it if you don't want to output them at all */
-#define ELOG_FMT_USING_FUNC
-#define ELOG_FMT_USING_DIR
-#define ELOG_FMT_USING_LINE
+/* #define ELOG_FMT_USING_FUNC */
+/* #define ELOG_FMT_USING_DIR */
+/* #define ELOG_FMT_USING_LINE */
 /*---------------------------------------------------------------------------*/
 /* enable asynchronous output mode */
-#define ELOG_ASYNC_OUTPUT_ENABLE
+/* #define ELOG_ASYNC_OUTPUT_ENABLE */
 /* the highest output level for async mode, other level will sync output */
 #define ELOG_ASYNC_OUTPUT_LVL                    ELOG_LVL_ASSERT
 /* buffer size for asynchronous output mode */
@@ -76,7 +76,7 @@
 #define ELOG_ASYNC_OUTPUT_USING_PTHREAD
 /*---------------------------------------------------------------------------*/
 /* enable buffered output mode */
-#define ELOG_BUF_OUTPUT_ENABLE
+/* #define ELOG_BUF_OUTPUT_ENABLE */
 /* buffer size for buffered output mode */
 #define ELOG_BUF_OUTPUT_BUF_SIZE                 (ELOG_LINE_BUF_SIZE * 10)
 

@@ -3,6 +3,9 @@
 
 #include "registry.h"
 
+#define RPC_LOG_TAG "test"
+#include <log.h>
+
 #include <stdio.h>
 #include <string.h>
 
@@ -11,7 +14,7 @@ static int g_fail;
 #define CHECK(cond)                                                \
     do {                                                           \
         if (!(cond)) {                                             \
-            printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
+            rpc_log_error("FAIL %s:%d: %s", __FILE__, __LINE__, #cond); \
             g_fail = 1;                                            \
         }                                                          \
     } while (0)
@@ -75,9 +78,9 @@ int main(void) {
     zri_registry_cleanup(&registry);
 
     if (g_fail) {
-        printf("zri_registry: FAIL\n");
+        rpc_log_error("zri_registry: FAIL");
         return 1;
     }
-    printf("zri_registry: OK\n");
+    rpc_log_info("zri_registry: OK");
     return 0;
 }

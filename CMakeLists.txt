@@ -18,6 +18,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 # 基础依赖：network-tool-kit
 set(NTK_ENABLE_OPENSSL OFF CACHE BOOL "" FORCE)
 add_subdirectory(3rdpart/ntk)
+add_subdirectory(3rdpart/elog)
 
 option(BUILD_TESTS "Build rpc tests" ON)
 option(BUILD_TOOLS "Build rpc benchmark tools" ON)

@@ -8,6 +8,9 @@
 #include <platform.h>
 #include <thread/sem.h>
 
+#define RPC_LOG_TAG "loadgen"
+#include <log.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -169,14 +172,14 @@ static int parse_size(const char *s, size_t *out) {
 }
 
 static void usage(const char *argv0) {
-    fprintf(stderr,
-            "usage: %s [--config f] [--service s] [--method m] [--duration-seconds n]\n"
-            "          [--transport udp|tcp]\n"
-            "          [--max-requests n] [--payload-bytes n] [--expect-response-bytes n]\n"
-            "          [--timeout-ms n] [--rate qps] [--verify-response]\n"
-            "          [--connect-timeout-seconds n] [--worker-id id] [--output path|-]\n"
-            "          [--discovery-port p] [--data-port p] [--max-msg-bytes n] [--bind ip] [--peer host:port]\n",
-            argv0);
+    rpc_log_error(
+        "usage: %s [--config f] [--service s] [--method m] [--duration-seconds n]\n"
+        "          [--transport udp|tcp]\n"
+        "          [--max-requests n] [--payload-bytes n] [--expect-response-bytes n]\n"
+        "          [--timeout-ms n] [--rate qps] [--verify-response]\n"
+        "          [--connect-timeout-seconds n] [--worker-id id] [--output path|-]\n"
+        "          [--discovery-port p] [--data-port p] [--max-msg-bytes n] [--bind ip] [--peer host:port]",
+        argv0);
 }
 
 static void error_add(error_entry_t *errors, int *error_count, int code) {
@@ -423,7 +426,7 @@ int main(int argc, char **argv) {
 
     sem = ntk_sem_create(0);
     if (!sem) {
-        fprintf(stderr, "sem create failed\n");
+        rpc_log_error("sem create failed");
         return 1;
     }
     if (opt.payload_bytes > 0) {
@@ -438,7 +441,7 @@ int main(int argc, char **argv) {
 
     rc = node_create(&cfg, &node);
     if (rc != OK) {
-        fprintf(stderr, "node create failed: %d\n", rc);
+        rpc_log_error("node create failed: %d", rc);
         return 1;
     }
     if (opt.peer_ip) {
@@ -446,7 +449,7 @@ int main(int argc, char **argv) {
     }
     rc = proxy_create(node, NULL, &proxy);
     if (rc != OK) {
-        fprintf(stderr, "proxy create failed: %d\n", rc);
+        rpc_log_error("proxy create failed: %d", rc);
         return 1;
     }
     if (opt.target_ip && opt.target_port) {
@@ -478,7 +481,7 @@ int main(int argc, char **argv) {
             rc = proxy_call(proxy, opt.service, opt.method, &pl, on_response, &co,
                                  opt.timeout_ms, &id);
             if (rc != OK) {
-                fprintf(stderr, "proxy_call failed: %d\n", rc);
+                rpc_log_error("proxy_call failed: %d", rc);
                 node_destroy(node);
                 return 1;
             }

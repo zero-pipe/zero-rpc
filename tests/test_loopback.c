@@ -3,6 +3,9 @@
 #include <platform.h>
 #include <thread/sem.h>
 
+#define RPC_LOG_TAG "test"
+#include <log.h>
+
 #include <stdio.h>
 #include <string.h>
 
@@ -104,12 +107,12 @@ static int run_case(transport_kind_t kind, const char *label) {
 
     rc = node_create(&scfg, &server);
     if (rc != OK) {
-        printf("[%s] server create failed: %d\n", label, rc);
+        rpc_log_error("[%s] server create failed: %d", label, rc);
         return 1;
     }
     rc = node_create(&ccfg, &client);
     if (rc != OK) {
-        printf("[%s] client create failed: %d\n", label, rc);
+        rpc_log_error("[%s] client create failed: %d", label, rc);
         node_destroy(server);
         return 1;
     }
@@ -118,19 +121,19 @@ static int run_case(transport_kind_t kind, const char *label) {
 
     rc = service_create(server, "echo", &svc);
     if (rc != OK || !svc) {
-        printf("[%s] service create failed: %d\n", label, rc);
+        rpc_log_error("[%s] service create failed: %d", label, rc);
         failed = 1;
         goto cleanup;
     }
     rc = service_add_method(svc, "ping", echo_handler, NULL);
     if (rc != OK) {
-        printf("[%s] add method failed: %d\n", label, rc);
+        rpc_log_error("[%s] add method failed: %d", label, rc);
         failed = 1;
         goto cleanup;
     }
     rc = proxy_create(client, NULL, &proxy);
     if (rc != OK || !proxy) {
-        printf("[%s] proxy create failed: %d\n", label, rc);
+        rpc_log_error("[%s] proxy create failed: %d", label, rc);
         failed = 1;
         goto cleanup;
     }
@@ -147,7 +150,8 @@ static int run_case(transport_kind_t kind, const char *label) {
         const char *msg = "hello-rpc";
         rc = run_call(proxy, &st, msg, strlen(msg) + 1);
         if (rc != OK || strcmp(st.buf, msg) != 0) {
-            printf("[%s] small message failed: status=%d buf=%s\n", label, st.status, st.buf);
+            rpc_log_error("[%s] small message failed: status=%d buf=%s", label, st.status,
+                          st.buf);
             failed = 1;
         }
     }
@@ -160,10 +164,10 @@ static int run_case(transport_kind_t kind, const char *label) {
         }
         rc = run_call(proxy, &st, big, sizeof(big));
         if (rc != OK) {
-            printf("[%s] big message failed: status=%d\n", label, st.status);
+            rpc_log_error("[%s] big message failed: status=%d", label, st.status);
             failed = 1;
         } else if (st.len != sizeof(big) || memcmp(st.buf, big, sizeof(big)) != 0) {
-            printf("[%s] big message mismatch: len=%zu\n", label, st.len);
+            rpc_log_error("[%s] big message mismatch: len=%zu", label, st.len);
             failed = 1;
         }
     }
@@ -175,13 +179,13 @@ static int run_case(transport_kind_t kind, const char *label) {
         memset(&metrics, 0, sizeof(metrics));
         node_metrics(client, &metrics);
         if (metrics.requests_sent < 2 || metrics.responses_received < 2) {
-            printf("[%s] metrics mismatch: sent=%llu recv=%llu\n", label,
-                   (unsigned long long)metrics.requests_sent,
-                   (unsigned long long)metrics.responses_received);
+            rpc_log_error("[%s] metrics mismatch: sent=%llu recv=%llu", label,
+                          (unsigned long long)metrics.requests_sent,
+                          (unsigned long long)metrics.responses_received);
             failed = 1;
         }
         if (kind == TRANSPORT_UDP && metrics.udp_packets_sent == 0) {
-            printf("[%s] udp metrics missing\n", label);
+            rpc_log_error("[%s] udp metrics missing", label);
             failed = 1;
         }
     }
@@ -202,8 +206,9 @@ static int run_case(transport_kind_t kind, const char *label) {
             waited += 200;
         }
         if (!ok) {
-            printf("[%s] rtcp sr not exchanged: sent=%llu recv=%llu\n", label,
-                   (unsigned long long)m.rtcp_sr_sent, (unsigned long long)m.rtcp_sr_received);
+            rpc_log_error("[%s] rtcp sr not exchanged: sent=%llu recv=%llu", label,
+                          (unsigned long long)m.rtcp_sr_sent,
+                          (unsigned long long)m.rtcp_sr_received);
             failed = 1;
         } else {
             char ep[128];
@@ -213,11 +218,11 @@ static int run_case(transport_kind_t kind, const char *label) {
                 endpoint_parse(ep, &e) == OK &&
                 node_peer_stats(client, e.host, e.port, &peer) == OK) {
                 if (peer.feedback_sent == 0) {
-                    printf("[%s] rtcp peer stats empty\n", label);
+                    rpc_log_error("[%s] rtcp peer stats empty", label);
                     failed = 1;
                 }
             } else {
-                printf("[%s] rtcp peer query failed\n", label);
+                rpc_log_error("[%s] rtcp peer query failed", label);
                 failed = 1;
             }
         }
@@ -242,9 +247,9 @@ int main(void) {
     failed += run_case(TRANSPORT_TCP, "tcp");
 
     if (failed) {
-        printf("zri_loopback: FAIL\n");
+        rpc_log_error("zri_loopback: FAIL");
         return 1;
     }
-    printf("zri_loopback: OK\n");
+    rpc_log_info("zri_loopback: OK");
     return 0;
 }

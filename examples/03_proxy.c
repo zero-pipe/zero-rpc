@@ -4,7 +4,9 @@
  */
 #include <client.h>
 
-#include <stdio.h>
+#define RPC_LOG_TAG "example"
+#include <log.h>
+
 #include <string.h>
 
 int main(void) {
@@ -22,7 +24,7 @@ int main(void) {
     cfg.io_threads = 1;
     rc = node_create(&cfg, &node);
     if (rc != OK) {
-        fprintf(stderr, "node create failed: %d\n", rc);
+        rpc_log_error("node create failed: %d", rc);
         return 1;
     }
 
@@ -30,11 +32,11 @@ int main(void) {
     options.payload_encoding = 1; /* 默认写入请求的编码标识 */
     rc = proxy_create(node, &options, &proxy);
     if (rc != OK) {
-        fprintf(stderr, "proxy create failed: %d\n", rc);
+        rpc_log_error("proxy create failed: %d", rc);
         node_destroy(node);
         return 1;
     }
-    printf("created node=%s and proxy\n", node_name(node));
+    rpc_log_info("created node=%s and proxy", node_name(node));
 
     proxy_destroy(proxy);
     node_destroy(node);

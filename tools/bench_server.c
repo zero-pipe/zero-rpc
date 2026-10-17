@@ -8,6 +8,9 @@
 #include <server.h>
 #include <platform.h>
 
+#define RPC_LOG_TAG "bench"
+#include <log.h>
+
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -111,7 +114,7 @@ int main(int argc, char **argv) {
             node_cfg.io_threads = (unsigned)atoi(argv[++index]);
         } else if (strcmp(argv[index], "--response-bytes") == 0 && index + 1 < argc) {
             if (parse_size(argv[++index], &options.response_bytes) != 0) {
-                fprintf(stderr, "invalid --response-bytes value\n");
+                rpc_log_error("invalid --response-bytes value");
                 return 1;
             }
         } else if (strcmp(argv[index], "--delay-ms") == 0 && index + 1 < argc) {
@@ -147,13 +150,13 @@ int main(int argc, char **argv) {
                 index++;
             }
         } else {
-            fprintf(stderr,
-                    "usage: %s [--config <file>] [--transport udp|tcp] [--response-bytes <n>] "
-                    "[--delay-ms <n>] [--echo-request] "
-                    "[--service <name>] [--method <name>] [--bind <ip>] [--io-threads <n>] "
-                    "[--discovery-port <p>] [--data-port <p>] [--max-msg-bytes <n>] "
-                    "[--backpressure-bytes <n>] [--peer <ip:port>]\n",
-                    argv[0]);
+            rpc_log_error(
+                "usage: %s [--config <file>] [--transport udp|tcp] [--response-bytes <n>] "
+                "[--delay-ms <n>] [--echo-request] "
+                "[--service <name>] [--method <name>] [--bind <ip>] [--io-threads <n>] "
+                "[--discovery-port <p>] [--data-port <p>] [--max-msg-bytes <n>] "
+                "[--backpressure-bytes <n>] [--peer <ip:port>]",
+                argv[0]);
             return 1;
         }
     }
@@ -163,7 +166,7 @@ int main(int argc, char **argv) {
 
     rc = node_create(&node_cfg, &node);
     if (rc != OK) {
-        fprintf(stderr, "node_create failed: %d\n", rc);
+        rpc_log_error("node_create failed: %d", rc);
         goto done;
     }
     for (index = 0; index < peer_count; index++) {
@@ -177,10 +180,10 @@ int main(int argc, char **argv) {
         goto done;
     }
 
-    printf("ready: service=%s method=%s transport=%s data_port=%u discovery_port=%u\n", service_name,
-           method_name, node_transport(node) == TRANSPORT_TCP ? "tcp" : "udp",
-           (unsigned)node_data_port(node), (unsigned)node_discovery_port(node));
-    fflush(stdout);
+    rpc_log_info("ready: service=%s method=%s transport=%s data_port=%u discovery_port=%u",
+                 service_name, method_name,
+                 node_transport(node) == TRANSPORT_TCP ? "tcp" : "udp",
+                 (unsigned)node_data_port(node), (unsigned)node_discovery_port(node));
 
     while (!g_stop) {
         ntk_sleep_ms(100);

@@ -1,5 +1,8 @@
 #include "iobuf.h"
 
+#define RPC_LOG_TAG "test"
+#include <log.h>
+
 #include <stdio.h>
 #include <string.h>
 
@@ -8,7 +11,7 @@ static int g_fail;
 #define CHECK(cond)                                                        \
     do {                                                                   \
         if (!(cond)) {                                                     \
-            printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);       \
+            rpc_log_error("FAIL %s:%d: %s", __FILE__, __LINE__, #cond);  \
             g_fail = 1;                                                    \
         }                                                                  \
     } while (0)
@@ -92,6 +95,10 @@ int main(void) {
     test_copy_peek_consume();
     test_ref_and_borrow();
     test_view();
-    printf(g_fail ? "IOBUF FAIL\n" : "IOBUF OK\n");
+    if (g_fail) {
+        rpc_log_error("IOBUF FAIL");
+    } else {
+        rpc_log_info("IOBUF OK");
+    }
     return g_fail ? 1 : 0;
 }

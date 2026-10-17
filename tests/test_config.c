@@ -1,5 +1,8 @@
 #include <config.h>
 
+#define RPC_LOG_TAG "test"
+#include <log.h>
+
 #include <stdio.h>
 #include <string.h>
 
@@ -8,7 +11,7 @@ static int g_fail;
 #define CHECK(cond)                                                \
     do {                                                           \
         if (!(cond)) {                                             \
-            printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
+            rpc_log_error("FAIL %s:%d: %s", __FILE__, __LINE__, #cond); \
             g_fail = 1;                                            \
         }                                                          \
     } while (0)
@@ -167,9 +170,9 @@ int main(void) {
     test_flat_precedence();
     test_rtcp_config();
     if (g_fail) {
-        printf("config: FAIL\n");
+        rpc_log_error("config: FAIL");
         return 1;
     }
-    printf("config: OK\n");
+    rpc_log_info("config: OK");
     return 0;
 }

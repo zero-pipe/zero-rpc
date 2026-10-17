@@ -7,6 +7,9 @@
  */
 #include <client.h>
 
+#define RPC_LOG_TAG "sync_loadgen"
+#include <log.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -118,12 +121,12 @@ static uint64_t histogram_percentile(const uint64_t *hist, uint64_t count, doubl
 }
 
 static void usage(const char *argv0) {
-    fprintf(stderr,
-            "usage: %s --target host:port [--transport tcp|udp] [--service s] [--method m]\n"
-            "          [--duration-seconds n] [--max-requests n] [--payload-bytes n]\n"
-            "          [--expect-response-bytes n] [--timeout-ms n] [--verify-response]\n"
-            "          [--worker-id id] [--output path|-]\n",
-            argv0);
+    rpc_log_error(
+        "usage: %s --target host:port [--transport tcp|udp] [--service s] [--method m]\n"
+        "          [--duration-seconds n] [--max-requests n] [--payload-bytes n]\n"
+        "          [--expect-response-bytes n] [--timeout-ms n] [--verify-response]\n"
+        "          [--worker-id id] [--output path|-]",
+        argv0);
 }
 
 int main(int argc, char **argv) {
@@ -202,7 +205,7 @@ int main(int argc, char **argv) {
     if (opt.payload_bytes > 0) {
         payload = (uint8_t *)malloc(opt.payload_bytes);
         if (!payload) {
-            fprintf(stderr, "payload allocation failed\n");
+            rpc_log_error("payload allocation failed");
             return 1;
         }
         for (i = 0; i < (int)opt.payload_bytes; i++) {
@@ -227,7 +230,7 @@ int main(int argc, char **argv) {
         rc = proxy_set_endpoint_uri(proxy, endpoint);
     }
     if (rc != OK) {
-        fprintf(stderr, "client setup failed: %d\n", rc);
+        rpc_log_error("client setup failed: %d", rc);
         free(payload);
         proxy_destroy(proxy);
         node_destroy(node);
@@ -246,7 +249,7 @@ int main(int argc, char **argv) {
                                   &warm_response, opt.timeout_ms, NULL);
         response_release(&warm_response);
         if (rc != OK) {
-            fprintf(stderr, "warmup call failed: %d\n", rc);
+            rpc_log_error("warmup call failed: %d", rc);
             free(payload);
             proxy_destroy(proxy);
             node_destroy(node);

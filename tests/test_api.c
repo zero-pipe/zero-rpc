@@ -4,6 +4,9 @@
 #include <server.h>
 #include <platform.h>
 
+#define RPC_LOG_TAG "test"
+#include <log.h>
+
 #include <stdio.h>
 #include <string.h>
 
@@ -17,28 +20,28 @@ static int test_service_table(void) {
     int failed = 0;
     reset_service_table();
     if (service_table_active()) {
-        printf("table should be inactive after reset\n");
+        rpc_log_error("table should be inactive after reset");
         failed = 1;
     }
     if (install_service_table(&g_order_table) != OK) {
-        printf("install failed\n");
+        rpc_log_error("install failed");
         return 1;
     }
     /* 幂等。 */
     if (install_service_table(&g_order_table) != OK) {
-        printf("re-install should be idempotent\n");
+        rpc_log_error("re-install should be idempotent");
         failed = 1;
     }
     if (!service_table_active()) {
-        printf("table should be active\n");
+        rpc_log_error("table should be active");
         failed = 1;
     }
     if (service_table_find_id("OrderService", "get", &id) != OK || id != 1u) {
-        printf("find get failed: id=%u\n", (unsigned)id);
+        rpc_log_error("find get failed: id=%u", (unsigned)id);
         failed = 1;
     }
     if (service_table_find_id("OrderService", "missing", &id) != ERR_NOTFOUND) {
-        printf("missing method should not be found\n");
+        rpc_log_error("missing method should not be found");
         failed = 1;
     }
     reset_service_table();
@@ -53,21 +56,21 @@ static int test_message_view(void) {
     message_view_init(&view);
     if (message_view_set_string(&view, "hello") != OK || view.len != 5 ||
         memcmp(view.data, "hello", 5) != 0) {
-        printf("set_string failed\n");
+        rpc_log_error("set_string failed");
         failed = 1;
     }
     message_view_release(&view);
     if (view.data != NULL || view.len != 0 || view.owned != NULL) {
-        printf("release did not clear view\n");
+        rpc_log_error("release did not clear view");
         failed = 1;
     }
     if (message_view_set_data(&view, "abc", 3) != OK) {
-        printf("set_data failed\n");
+        rpc_log_error("set_data failed");
         failed = 1;
     }
     message_view_set_borrowed(&view, borrowed, sizeof(borrowed) - 1);
     if (view.owned != NULL) {
-        printf("borrowed view should not own memory\n");
+        rpc_log_error("borrowed view should not own memory");
         failed = 1;
     }
     pl.data = view.data;
@@ -75,7 +78,7 @@ static int test_message_view(void) {
     pl.encoding = 2;
     if (message_view_set_payload(&view, &pl) != OK || view.encoding != 2 ||
         memcmp(view.data, borrowed, sizeof(borrowed) - 1) != 0) {
-        printf("set_payload failed\n");
+        rpc_log_error("set_payload failed");
         failed = 1;
     }
     message_view_release(&view);
@@ -133,7 +136,7 @@ static int test_stub_and_sync(void) {
 
     rc = node_create(&scfg, &server);
     if (rc != OK) {
-        printf("server create failed: %d\n", rc);
+        rpc_log_error("server create failed: %d", rc);
         return 1;
     }
     rc = service_create(server, "OrderService", &svc);
@@ -141,13 +144,13 @@ static int test_stub_and_sync(void) {
         rc = service_add_sync_method(svc, "get", echo_sync, &calls);
     }
     if (rc != OK) {
-        printf("service setup failed: %d\n", rc);
+        rpc_log_error("service setup failed: %d", rc);
         node_destroy(server);
         return 1;
     }
     rc = node_create(&ccfg, &client);
     if (rc != OK) {
-        printf("client create failed: %d\n", rc);
+        rpc_log_error("client create failed: %d", rc);
         node_destroy(server);
         return 1;
     }
@@ -155,7 +158,7 @@ static int test_stub_and_sync(void) {
     (void)node_add_discovery_peer(client, "127.0.0.1", sport);
 
     if (node_wait_for_service(client, "OrderService", 5000) != OK) {
-        printf("service not discovered\n");
+        rpc_log_error("service not discovered");
         failed = 1;
         goto cleanup;
     }
@@ -163,18 +166,18 @@ static int test_stub_and_sync(void) {
     /* stub 低层原语 + sync 便捷层（proxy 现在在 stub 之上）。 */
     rc = stub_create(client, NULL, &stub);
     if (rc != OK || !stub) {
-        printf("stub create failed: %d\n", rc);
+        rpc_log_error("stub create failed: %d", rc);
         failed = 1;
         goto cleanup;
     }
     if (stub_node(stub) != client) {
-        printf("stub node mismatch\n");
+        rpc_log_error("stub node mismatch");
         failed = 1;
     }
 
     rc = proxy_create(client, NULL, &proxy);
     if (rc != OK) {
-        printf("proxy create failed: %d\n", rc);
+        rpc_log_error("proxy create failed: %d", rc);
         failed = 1;
         goto cleanup;
     }
@@ -184,12 +187,12 @@ static int test_stub_and_sync(void) {
     pl.encoding = 0;
     rc = proxy_call_sync(proxy, "OrderService", "get", &pl, &response, 3000, NULL);
     if (rc != OK) {
-        printf("call_sync failed: %d\n", rc);
+        rpc_log_error("call_sync failed: %d", rc);
         failed = 1;
     } else if (response.status != 0 || response.payload.len != 4 ||
                memcmp(response.payload.data, "ping", 4) != 0) {
-        printf("call_sync bad response: status=%d len=%zu\n", response.status,
-               response.payload.len);
+        rpc_log_error("call_sync bad response: status=%d len=%zu", response.status,
+                      response.payload.len);
         failed = 1;
     }
     response_release(&response);
@@ -200,12 +203,12 @@ static int test_stub_and_sync(void) {
         uint64_t event_id = 0;
         rc = proxy_call_event(proxy, "OrderService", "get", &pl, &event_id);
         if (rc != OK || event_id == 0) {
-            printf("call_event failed: %d\n", rc);
+            rpc_log_error("call_event failed: %d", rc);
             failed = 1;
         } else {
             ntk_sleep_ms(100);
             if (calls <= before) {
-                printf("call_event was not delivered\n");
+                rpc_log_error("call_event was not delivered");
                 failed = 1;
             }
         }
@@ -233,9 +236,9 @@ int main(void) {
     failed += test_message_view();
     failed += test_stub_and_sync();
     if (failed) {
-        printf("zri_api: FAIL\n");
+        rpc_log_error("zri_api: FAIL");
         return 1;
     }
-    printf("zri_api: OK\n");
+    rpc_log_info("zri_api: OK");
     return 0;
 }

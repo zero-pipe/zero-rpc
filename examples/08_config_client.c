@@ -6,7 +6,9 @@
 #include <client.h>
 #include <config.h>
 
-#include <stdio.h>
+#define RPC_LOG_TAG "example"
+#include <log.h>
+
 #include <string.h>
 
 int main(int argc, char **argv) {
@@ -20,7 +22,7 @@ int main(int argc, char **argv) {
 
     rc = config_load_file(path, &cfg);
     if (rc != OK) {
-        fprintf(stderr, "load config failed: %s (%d)\n", path, rc);
+        rpc_log_error("load config failed: %s (%d)", path, rc);
         return 1;
     }
     rc = node_create_from_config(&cfg, &node);
@@ -28,7 +30,7 @@ int main(int argc, char **argv) {
         rc = proxy_create(node, NULL, &proxy);
     }
     if (rc != OK) {
-        fprintf(stderr, "client setup failed: %d\n", rc);
+        rpc_log_error("client setup failed: %d", rc);
         node_destroy(node);
         return 1;
     }
@@ -39,10 +41,10 @@ int main(int argc, char **argv) {
     memset(&response, 0, sizeof(response));
     rc = proxy_call_sync(proxy, "EchoService", "echo", &request, &response, 3000, NULL);
     if (rc == OK) {
-        printf("response: %.*s\n", (int)response.payload.len,
-               (const char *)response.payload.data);
+        rpc_log_info("response: %.*s", (int)response.payload.len,
+                     (const char *)response.payload.data);
     } else {
-        fprintf(stderr, "call failed: %d (server running?)\n", rc);
+        rpc_log_error("call failed: %d (server running?)", rc);
     }
     response_release(&response);
     proxy_destroy(proxy);

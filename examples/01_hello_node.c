@@ -6,7 +6,9 @@
  */
 #include <runtime.h>
 
-#include <stdio.h>
+#define RPC_LOG_TAG "example"
+#include <log.h>
+
 #include <string.h>
 
 int main(void) {
@@ -23,12 +25,12 @@ int main(void) {
 
     rc = node_create(&cfg, &node);
     if (rc != OK) {
-        fprintf(stderr, "node_create failed: %d\n", rc);
+        rpc_log_error("node_create failed: %d", rc);
         return 1;
     }
-    printf("node=%s transport=%s data_port=%u bindings=%zu\n", node_name(node),
-           node_transport(node) == TRANSPORT_TCP ? "tcp" : "udp",
-           (unsigned)node_data_port(node), node_binding_count(node));
+    rpc_log_info("node=%s transport=%s data_port=%u bindings=%zu", node_name(node),
+                 node_transport(node) == TRANSPORT_TCP ? "tcp" : "udp",
+                 (unsigned)node_data_port(node), node_binding_count(node));
     node_destroy(node);
     return 0;
 }

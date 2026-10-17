@@ -13,6 +13,7 @@ add_library(rpc STATIC
     core/sync.c
     core/pending.c
     core/codec.c
+    core/log.c
     core/mem.c
     core/util.c
     core/iobuf.c
@@ -56,7 +57,7 @@ install(TARGETS rpc
 )
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/include/ DESTINATION include)
 
-target_link_libraries(rpc PUBLIC ntk)
+target_link_libraries(rpc PUBLIC ntk elog)
 
 set_target_properties(rpc PROPERTIES
     C_STANDARD 99

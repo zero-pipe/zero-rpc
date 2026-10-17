@@ -3,6 +3,9 @@
 
 #include <node.h>
 
+#define RPC_LOG_TAG "test"
+#include <log.h>
+
 #include <stdio.h>
 #include <string.h>
 
@@ -14,7 +17,7 @@ static void *g_remote_obj;
 #define CHECK(cond)                                                \
     do {                                                           \
         if (!(cond)) {                                             \
-            printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
+            rpc_log_error("FAIL %s:%d: %s", __FILE__, __LINE__, #cond); \
             g_fail = 1;                                            \
         }                                                          \
     } while (0)
@@ -91,7 +94,7 @@ int main(void) {
     CHECK(ntk_poller_current() == NULL);
 
     if (node_create(&cfg, &node) != OK) {
-        printf("node create failed\n");
+        rpc_log_error("node create failed");
         return 1;
     }
 
@@ -121,6 +124,10 @@ int main(void) {
     }
 
     node_destroy(node);
-    printf(g_fail ? "POOL FAIL\n" : "POOL OK\n");
+    if (g_fail) {
+        rpc_log_error("POOL FAIL");
+    } else {
+        rpc_log_info("POOL OK");
+    }
     return g_fail ? 1 : 0;
 }

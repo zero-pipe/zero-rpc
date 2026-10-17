@@ -4,7 +4,9 @@
  */
 #include <server.h>
 
-#include <stdio.h>
+#define RPC_LOG_TAG "example"
+#include <log.h>
+
 #include <string.h>
 
 static int order_get(const request_t *req, message_view_t *resp, void *user) {
@@ -35,12 +37,11 @@ int main(void) {
         rc = service_add_sync_method(svc, "get", order_get, NULL);
     }
     if (rc != OK) {
-        fprintf(stderr, "server failed: %d\n", rc);
+        rpc_log_error("server failed: %d", rc);
         node_destroy(node);
         return 1;
     }
-    puts("static route server ready on tcp://127.0.0.1:42420 (Ctrl+C to stop)");
-    fflush(stdout);
+    rpc_log_info("static route server ready on tcp://127.0.0.1:42420 (Ctrl+C to stop)");
     (void)node_spin(node);
     node_destroy(node);
     return 0;

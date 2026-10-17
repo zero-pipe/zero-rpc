@@ -7,7 +7,8 @@
 #include <server.h>
 #include <config.h>
 
-#include <stdio.h>
+#define RPC_LOG_TAG "example"
+#include <log.h>
 
 static void echo_handler(call_t *call, const request_t *req, void *user) {
     (void)user;
@@ -24,7 +25,7 @@ int main(int argc, char **argv) {
 
     rc = config_load_file(path, &cfg);
     if (rc != OK) {
-        fprintf(stderr, "load config failed: %s (%d)\n", path, rc);
+        rpc_log_error("load config failed: %s (%d)", path, rc);
         return 1;
     }
     rc = node_create_from_config(&cfg, &node);
@@ -35,13 +36,12 @@ int main(int argc, char **argv) {
         rc = service_add_method(svc, "echo", echo_handler, NULL);
     }
     if (rc != OK) {
-        fprintf(stderr, "server setup failed: %d\n", rc);
+        rpc_log_error("server setup failed: %d", rc);
         node_destroy(node);
         return 1;
     }
 
-    printf("EchoService.echo ready (config=%s, Ctrl+C to stop)\n", path);
-    fflush(stdout);
+    rpc_log_info("EchoService.echo ready (config=%s, Ctrl+C to stop)", path);
     (void)node_spin(node);
     node_destroy(node);
     return 0;

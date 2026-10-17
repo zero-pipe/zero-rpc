@@ -7,7 +7,9 @@
  */
 #include <server.h>
 
-#include <stdio.h>
+#define RPC_LOG_TAG "example"
+#include <log.h>
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -41,14 +43,13 @@ int main(int argc, char **argv) {
         rc = service_add_sync_method(svc, "check", health_check, NULL);
     }
     if (rc != OK) {
-        fprintf(stderr, "server setup failed: %d\n", rc);
+        rpc_log_error("server setup failed: %d", rc);
         node_destroy(node);
         return 1;
     }
 
-    printf("service=HealthService method=check endpoint=tcp://127.0.0.1:%u (Ctrl+C to stop)\n",
-           (unsigned)port);
-    fflush(stdout);
+    rpc_log_info("service=HealthService method=check endpoint=tcp://127.0.0.1:%u (Ctrl+C to stop)",
+                 (unsigned)port);
     (void)node_spin(node);
     node_destroy(node);
     return 0;
