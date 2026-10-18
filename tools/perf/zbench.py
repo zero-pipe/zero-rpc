@@ -239,6 +239,7 @@ def load_worker(path: Path) -> Dict[str, Any]:
 
 def aggregate(workers: List[Dict[str, Any]]) -> Dict[str, Any]:
     attempted = succeeded = failed = response_bytes = 0
+    peak_inflight = 0
     duration = 0.0
     histogram: collections.Counter = collections.Counter()
     errors: collections.Counter = collections.Counter()
@@ -253,6 +254,7 @@ def aggregate(workers: List[Dict[str, Any]]) -> Dict[str, Any]:
         succeeded += int(w.get("succeeded", 0))
         failed += int(w.get("failed", 0))
         response_bytes += int(w.get("response_bytes", 0))
+        peak_inflight = max(peak_inflight, int(w.get("peak_inflight", 0)))
         duration = max(duration, float(w.get("duration_seconds", 0.0)))
         statuses[str(w.get("status"))] += 1
         errors.update({str(k): int(v) for k, v in (w.get("errors") or {}).items()})
@@ -273,6 +275,7 @@ def aggregate(workers: List[Dict[str, Any]]) -> Dict[str, Any]:
         "failed": failed,
         "error_rate": failed / attempted if attempted else 0.0,
         "response_bytes": response_bytes,
+        "peak_inflight": peak_inflight,
         "duration_seconds": duration,
         "qps": succeeded / duration if duration > 0 else 0.0,
         "errors": dict(sorted(errors.items())),
@@ -306,6 +309,7 @@ def scn(name: str, suite: str, transport: str, **kw: Any) -> Dict[str, Any]:
         "duration": 3,
         "rate": 0.0,
         "max_requests": 0,
+        "window": 0,
         "timeout_ms": 5000,
         "connect_timeout": 10,
         "echo": True,
@@ -338,6 +342,9 @@ def perf_scenarios(args: argparse.Namespace) -> List[Dict[str, Any]]:
     for t in transports:
         for n in ([16] if args.quick else [4, 16, 32]):
             out.append(scn("{}-conc{}".format(t, n), "perf", t, payload=64, clients=n, duration=d))
+    if args.transport in ("tcp", "both"):
+        out.append(scn("tcp-window2000", "perf", "tcp", payload=64, clients=1,
+                       duration=d, window=2000))
     if not args.quick:
         for t in transports:
             out.append(scn("{}-1k-10kqps".format(t), "perf", t, payload=1024, clients=16,
@@ -453,6 +460,8 @@ def worker_cmd(loadgen: Path, s: Dict[str, Any], index: int, target_port: int,
         cmd += ["--rate", "{:.6f}".format(s["rate"] / max(1, s["clients"]))]
     if s["max_requests"]:
         cmd += ["--max-requests", str(s["max_requests"])]
+    if s["window"]:
+        cmd += ["--window", str(s["window"])]
     if s["frag_bytes"]:
         cmd += ["--frag-bytes", str(s["frag_bytes"])]
     if s["backpressure"]:

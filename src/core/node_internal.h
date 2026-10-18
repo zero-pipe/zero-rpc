@@ -59,7 +59,9 @@ struct node {
 
     service_t *services;
     zri_discovery_state_t discovery;
-    zri_pending_t pending[PENDING_MAX];
+    zri_pending_t *pending;      /* 全部 pending 槽位（按需分配） */
+    zri_pending_t *pending_hash; /* request_id -> pending，O(1) 查找 */
+    zri_pending_t *pending_free; /* 可复用的空闲槽位 */
     zri_recv_stream_t recv_streams[MAX_RECV_STREAMS];
     zri_codec_entry_t *codecs;
 

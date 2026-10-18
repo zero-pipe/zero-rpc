@@ -98,6 +98,7 @@ typedef struct options {
     uint32_t max_msg_bytes;
     uint32_t backpressure_bytes;
     transport_kind_t transport;
+    uint64_t window; /* 0 = 收一发一；>0 = 滑动窗口在途上限 */
 } options_t;
 
 typedef struct callout {
@@ -175,7 +176,7 @@ static void usage(const char *argv0) {
         "usage: %s [--service s] [--method m] [--duration-seconds n]\n"
         "          [--transport udp|tcp]\n"
         "          [--max-requests n] [--payload-bytes n] [--expect-response-bytes n]\n"
-        "          [--timeout-ms n] [--rate qps] [--verify-response]\n"
+        "          [--timeout-ms n] [--rate qps] [--window n] [--verify-response]\n"
         "          [--connect-timeout-seconds n] [--worker-id id] [--output path|-]\n"
         "          [--discovery-port p] [--data-port p] [--max-msg-bytes n] [--bind ip] [--peer host:port]",
         argv0);
@@ -209,22 +210,34 @@ static uint64_t g_min_ns, g_max_ns, g_sum_ns, g_lat_count;
 static uint64_t g_lat_hist[LAT_HIST_SIZE];
 static error_entry_t g_errors[16];
 static int g_error_count;
-static uint64_t g_cur_send_ns;
+static uint64_t g_window;        /* 0 = 收一发一；>0 = 滑动窗口在途上限 */
+static uint64_t g_inflight;      /* 当前在途请求数 */
+static uint64_t g_inflight_peak; /* 在途峰值 */
+static int g_finished;
 static int g_in_issue;
-static int g_again;
+static int g_pause; /* 内联回调要求外层填充循环暂停 */
 
 static void ed_issue(void *user);
 
 static void ed_finish(void) {
+    if (g_finished) {
+        return;
+    }
+    g_finished = 1;
     ntk_sem_post(g_done, 1);
 }
 
 static void ed_resp(int status, const response_t *resp, void *user) {
-    uint64_t lat = now_ns() - g_cur_send_ns;
+    int inline_cb = g_in_issue;
+    uint64_t send_ns = (uint64_t)(uintptr_t)user;
+    uint64_t lat = now_ns() - send_ns;
     uint64_t us = (lat + 999ull) / 1000ull;
     uint64_t hidx = (uint64_t)lat_hist_index(us);
     int ok;
-    (void)user;
+
+    if (g_inflight > 0) {
+        g_inflight--;
+    }
 
     g_lat_hist[hidx]++;
 
@@ -253,51 +266,71 @@ static void ed_resp(int status, const response_t *resp, void *user) {
 
     if (now_ns() >= g_deadline_ns ||
         (g_opt.max_requests != 0 && g_attempted >= g_opt.max_requests)) {
-        ed_finish();
+        if (g_inflight == 0) {
+            ed_finish();
+        } else if (inline_cb) {
+            g_pause = 1;
+        }
         return;
     }
     if (status == ERR_NOTFOUND) {
         /* 尚未发现：稍后重试，避免忙转 */
-        g_again = 0;
+        if (inline_cb) {
+            g_pause = 1;
+        }
         (void)node_post_delay(g_node, 1, ed_issue, NULL);
         return;
     }
-    ed_issue(NULL);
+    if (!inline_cb) {
+        ed_issue(NULL);
+    }
 }
 
 static void ed_issue(void *user) {
     (void)user;
     if (g_in_issue) {
-        g_again = 1;
         return;
     }
     g_in_issue = 1;
-    do {
+    for (;;) {
+        uint64_t limit = g_window ? g_window : 1;
         uint64_t id = 0;
         int rc;
-        g_again = 0;
+        g_pause = 0;
         if (now_ns() >= g_deadline_ns ||
             (g_opt.max_requests != 0 && g_attempted >= g_opt.max_requests)) {
-            ed_finish();
+            if (g_inflight == 0) {
+                ed_finish();
+            }
             break;
         }
-        g_cur_send_ns = now_ns();
+        if (g_inflight >= limit) {
+            break; /* 在途额度已满，等响应回收后再补发 */
+        }
         g_attempted++;
+        g_inflight++;
+        if (g_inflight > g_inflight_peak) {
+            g_inflight_peak = g_inflight;
+        }
         {
             payload_t pl;
             pl.data = g_payload;
             pl.len = g_opt.payload_bytes;
             pl.encoding = 0;
             rc = proxy_call_async(g_proxy, g_opt.service, g_opt.method, &pl, ed_resp,
-                                  NULL, g_opt.timeout_ms, &id);
+                                  (void *)(uintptr_t)now_ns(), g_opt.timeout_ms, &id);
         }
         if (rc != OK) {
             g_failed++;
             error_add(g_errors, &g_error_count, rc);
-            g_again = 0;
+            g_inflight--;
             (void)node_post_delay(g_node, 1, ed_issue, NULL);
+            break;
         }
-    } while (g_again);
+        if (g_pause) {
+            break; /* 回调内联执行并要求暂停（NOTFOUND / 已到期） */
+        }
+    }
     g_in_issue = 0;
 }
 
@@ -312,6 +345,7 @@ int main(int argc, char **argv) {
     error_entry_t errors[16];
     int error_count = 0;
     uint64_t attempted = 0, succeeded = 0, failed = 0, response_bytes = 0;
+    uint64_t peak_inflight = 0;
     uint64_t min_ns = 0, max_ns = 0, sum_ns = 0, lat_count = 0;
     uint64_t start_ns, deadline_ns, end_ns;
     char *colon;
@@ -361,6 +395,8 @@ int main(int argc, char **argv) {
             opt.connect_timeout_seconds = (uint32_t)v;
         } else if (strcmp(a, "--rate") == 0 && i + 1 < argc) {
             opt.rate = atof(argv[++i]);
+        } else if (strcmp(a, "--window") == 0 && i + 1 < argc) {
+            parse_u64(argv[++i], &opt.window);
         } else if (strcmp(a, "--verify-response") == 0) {
             opt.verify_response = 1;
         } else if (strcmp(a, "--discovery-port") == 0 && i + 1 < argc) {
@@ -567,6 +603,10 @@ int main(int argc, char **argv) {
             g_attempted = g_succeeded = g_failed = g_response_bytes = 0;
             g_min_ns = g_max_ns = g_sum_ns = g_lat_count = 0;
             g_error_count = 0;
+            g_window = opt.window;
+            g_inflight = 0;
+            g_inflight_peak = 0;
+            g_finished = 0;
             g_done = ntk_sem_create(0);
             if (g_done) {
                 (void)node_post(node, ed_issue, NULL);
@@ -585,6 +625,7 @@ int main(int argc, char **argv) {
             lat_count = g_lat_count;
             memcpy(errors, g_errors, sizeof(errors));
             error_count = g_error_count;
+            peak_inflight = g_inflight_peak;
         }
     }
     end_ns = now_ns();
@@ -608,6 +649,7 @@ int main(int argc, char **argv) {
         fprintf(out, "\"attempted\":%llu,\"succeeded\":%llu,\"failed\":%llu,",
                 (unsigned long long)attempted, (unsigned long long)succeeded,
                 (unsigned long long)failed);
+        fprintf(out, "\"peak_inflight\":%llu,", (unsigned long long)peak_inflight);
         fprintf(out, "\"response_bytes\":%llu,", (unsigned long long)response_bytes);
         fprintf(out, "\"expected_response_bytes\":%llu,", (unsigned long long)opt.expect_response_bytes);
         fprintf(out, "\"duration_seconds\":%.6f,", duration);

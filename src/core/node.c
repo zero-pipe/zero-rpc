@@ -229,12 +229,7 @@ void node_destroy(node_t *node) {
     if (node->registry_backend && node->registry_backend->ops->stop) {
         node->registry_backend->ops->stop(node);
     }
-    {
-        int i;
-        for (i = 0; i < PENDING_MAX; i++) {
-            zri_pending_release(&node->pending[i]);
-        }
-    }
+    zri_pending_cleanup(node);
     zri_route_cleanup(&node->routes);
     zri_registry_cleanup(&node->registry);
     {

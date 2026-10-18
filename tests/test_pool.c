@@ -1,5 +1,6 @@
 #include "mem.h"
 #include "node_access.h"
+#include "pending.h"
 
 #include <node.h>
 
@@ -13,6 +14,27 @@ static int g_fail;
 static ntk_sem *g_sem;
 static int g_task_ok;
 static void *g_remote_obj;
+
+static void pending_probe(void *user) {
+    node_t *node = (node_t *)user;
+    zri_pending_t *pending[1024];
+    unsigned i;
+
+    memset(pending, 0, sizeof(pending));
+    for (i = 0; i < sizeof(pending) / sizeof(pending[0]); i++) {
+        pending[i] = zri_pending_add(node, (uint64_t)i + 1, NULL, NULL, 60000);
+        if (!pending[i]) {
+            g_task_ok = 0;
+            ntk_sem_post(g_sem, 1);
+            return;
+        }
+    }
+    for (i = 0; i < sizeof(pending) / sizeof(pending[0]); i++) {
+        zri_pending_release(pending[i]);
+    }
+    g_task_ok = 1;
+    ntk_sem_post(g_sem, 1);
+}
 
 #define CHECK(cond)                                                \
     do {                                                           \
@@ -111,6 +133,9 @@ int main(void) {
     CHECK(g_sem != NULL);
     if (g_sem) {
         CHECK(ntk_poller_async(zri_node_poller(node), pool_probe, node, 0) == NTK_OK);
+        CHECK(ntk_sem_timedwait(g_sem, 2000) == NTK_OK);
+        CHECK(g_task_ok == 1);
+        CHECK(ntk_poller_async(zri_node_poller(node), pending_probe, node, 0) == NTK_OK);
         CHECK(ntk_sem_timedwait(g_sem, 2000) == NTK_OK);
         CHECK(g_task_ok == 1);
         ntk_sem_destroy(g_sem);

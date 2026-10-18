@@ -8,16 +8,36 @@
 
 #include <stdlib.h>
 
+/* 回收一个槽位：清空回调/数据并挂到空闲链表，槽位仍留在节点链表中复用。 */
+static void pending_recycle(node_t *node, zri_pending_t *p) {
+    p->used = 0;
+    p->node = NULL;
+    p->cb = NULL;
+    p->user = NULL;
+    p->streaming = 0;
+    p->chunk_cb = NULL;
+    p->done_cb = NULL;
+    p->stream_user = NULL;
+    p->data = NULL;
+    p->len = 0;
+    p->has_req = 0;
+    p->free_next = node->pending_free;
+    node->pending_free = p;
+}
+
 void zri_pending_invoke(zri_pending_t *p, int status, const response_t *resp) {
     response_fn cb;
     void *user;
     node_t *node;
-    if (!p) {
+    if (!p || !p->used) {
         return;
     }
     cb = p->cb;
     user = p->user;
     node = p->node;
+    if (node) {
+        HASH_DEL(node->pending_hash, p);
+    }
     p->used = 0;
     p->node = NULL;
     if (p->data) {
@@ -45,57 +65,88 @@ void zri_pending_invoke(zri_pending_t *p, int status, const response_t *resp) {
     } else if (cb) {
         cb(status, resp, user);
     }
+    if (node) {
+        pending_recycle(node, p);
+    }
 }
 
 void zri_pending_release(zri_pending_t *p) {
-    if (!p) {
+    node_t *node;
+    if (!p || !p->used) {
         return;
     }
-    p->used = 0;
+    node = p->node;
+    if (node) {
+        HASH_DEL(node->pending_hash, p);
+    }
     if (p->data) {
         zri_mem_free(p->data);
         p->data = NULL;
     }
-    p->has_req = 0;
-    p->len = 0;
-    p->streaming = 0;
-    p->chunk_cb = NULL;
-    p->done_cb = NULL;
-    p->stream_user = NULL;
+    if (node) {
+        pending_recycle(node, p);
+    } else {
+        p->used = 0;
+    }
 }
 
 zri_pending_t *zri_pending_add(node_t *node, uint64_t id, response_fn cb, void *user,
                                  uint64_t timeout_ms) {
-    int i;
-    for (i = 0; i < PENDING_MAX; i++) {
-        if (!node->pending[i].used) {
-            zri_pending_t *p = &node->pending[i];
-            p->used = 1;
-            p->node = node;
-            p->request_id = id;
-            p->cb = cb;
-            p->user = user;
-            p->deadline_ms = zri_now_ms() + (timeout_ms ? timeout_ms : DEFAULT_TIMEOUT_MS);
-            return p;
-        }
+    zri_pending_t *p;
+    if (!node) {
+        return NULL;
     }
-    return NULL;
+    if (node->pending_free) {
+        p = node->pending_free;
+        node->pending_free = p->free_next;
+        p->free_next = NULL;
+    } else {
+        p = (zri_pending_t *)calloc(1, sizeof(*p));
+        if (!p) {
+            return NULL;
+        }
+        p->next = node->pending;
+        node->pending = p;
+    }
+    p->used = 1;
+    p->node = node;
+    p->request_id = id;
+    p->cb = cb;
+    p->user = user;
+    p->deadline_ms = zri_now_ms() + (timeout_ms ? timeout_ms : DEFAULT_TIMEOUT_MS);
+    p->has_req = 0;
+    p->streaming = 0;
+    p->chunk_cb = NULL;
+    p->done_cb = NULL;
+    p->stream_user = NULL;
+    p->data = NULL;
+    p->len = 0;
+    p->expected_offset = 0;
+    p->next_retx_ms = 0;
+    p->retries = 0;
+    p->bp_retries = 0;
+    HASH_ADD(hh, node->pending_hash, request_id, sizeof(p->request_id), p);
+    return p;
 }
 
 zri_pending_t *zri_pending_find(node_t *node, uint64_t id) {
-    int i;
-    for (i = 0; i < PENDING_MAX; i++) {
-        if (node->pending[i].used && node->pending[i].request_id == id) {
-            return &node->pending[i];
-        }
+    zri_pending_t *p = NULL;
+    if (!node) {
+        return NULL;
+    }
+    HASH_FIND(hh, node->pending_hash, &id, sizeof(id), p);
+    if (p && p->used) {
+        return p;
     }
     return NULL;
 }
 
 void zri_pending_tick(node_t *node, uint64_t now_ms) {
-    int i;
-    for (i = 0; i < PENDING_MAX; i++) {
-        zri_pending_t *p = &node->pending[i];
+    zri_pending_t *p;
+    if (!node) {
+        return;
+    }
+    for (p = node->pending; p; p = p->next) {
         if (!p->used) {
             continue;
         }
@@ -113,4 +164,24 @@ void zri_pending_tick(node_t *node, uint64_t now_ms) {
             p->next_retx_ms = now_ms + (uint64_t)RTO_INIT_MS * ((uint64_t)1u << shift);
         }
     }
+}
+
+void zri_pending_cleanup(node_t *node) {
+    zri_pending_t *p;
+    if (!node) {
+        return;
+    }
+    p = node->pending;
+    while (p) {
+        zri_pending_t *next = p->next;
+        if (p->data) {
+            zri_mem_free(p->data);
+            p->data = NULL;
+        }
+        free(p);
+        p = next;
+    }
+    node->pending = NULL;
+    node->pending_hash = NULL;
+    node->pending_free = NULL;
 }

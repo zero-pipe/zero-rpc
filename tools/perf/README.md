@@ -48,6 +48,14 @@ scripts/check.sh --full
 
 **perf（正常）**：`udp/tcp × {64b,8k,32k,1m,32m}`、`conc{4,16,32}`、`1k-10kqps` 定速。
 1 进程 = 1 热连接、1 outstanding RPC（对齐 gRPC 单 channel unary）。
+需要验证大量在途请求时，`loadgen` 支持滑动窗口：`--window 2000` 会保持最多
+2000 个 pending RPC，并在结果中输出 `peak_inflight`。例如：
+
+```sh
+./build/tools/bench_server --transport tcp --bind 127.0.0.1 --data-port 43000 &
+./build/tools/loadgen --transport tcp --target 127.0.0.1:43000 \
+  --service OrderService --method get --duration-seconds 3 --window 2000
+```
 
 **stress（异常）**：
 

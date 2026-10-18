@@ -8,6 +8,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <uthash.h>
+
 #include "caps.h"
 
 typedef struct zri_pending {
@@ -36,6 +38,9 @@ typedef struct zri_pending {
     uint8_t *data;
     size_t len;
     uint8_t encoding;
+    UT_hash_handle hh;              /* request_id 哈希索引 */
+    struct zri_pending *next;      /* 节点持有的全部槽位链表 */
+    struct zri_pending *free_next; /* 空闲槽位复用链表 */
 } zri_pending_t;
 
 zri_pending_t *zri_pending_add(node_t *node, uint64_t id, response_fn cb, void *user,
@@ -44,6 +49,7 @@ zri_pending_t *zri_pending_find(node_t *node, uint64_t id);
 void zri_pending_invoke(zri_pending_t *p, int status, const response_t *resp);
 void zri_pending_release(zri_pending_t *p);
 void zri_pending_tick(node_t *node, uint64_t now_ms);
+void zri_pending_cleanup(node_t *node);
 
 /* RTO 重传：按保存的请求参数重发（实现于 proxy.c）。 */
 void zri_pending_retx(node_t *node, zri_pending_t *p);
