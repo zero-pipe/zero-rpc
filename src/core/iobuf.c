@@ -256,7 +256,7 @@ const uint8_t *zri_iobuf_view(zri_iobuf_t *b, size_t n, ntk_poller *poller, ntk_
         /* 连续：直接指向内部内存，不拷贝 */
         return blk->data + blk->off;
     }
-    /* 跨块：拷到 scratch（保证 payload 视图连续，兼容扁平 payload API） */
+    /* 跨块：拷到 scratch，保证 payload 视图连续。 */
     if (!scratch) {
         return NULL;
     }

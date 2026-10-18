@@ -61,8 +61,6 @@ NTK_API void ntk_buf_set_len(ntk_buf *b, size_t len);
 /* ── 分档裸内存池 ── */
 
 #define NTK_BUF_POOL_DEFAULT_MAX 128
-/** @deprecated 固定槽表已改为 freelist；保留宏以免旧代码编译失败，不再钳制 max_per_bucket */
-#define NTK_BUF_POOL_SLOT_STRUCT_MAX 4096
 
 /**
  * 分档容量（字节）：512, 2K, 8K, 32K, 64K, 128K, 512K, 1M, 2M。

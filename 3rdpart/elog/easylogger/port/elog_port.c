@@ -30,6 +30,8 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 #if defined(_WIN32)
@@ -45,6 +47,17 @@ static pthread_mutex_t s_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static char s_time[32];
 static char s_thread[32];
+static FILE *s_file;
+static int s_stderr_enabled = 1;
+static int s_flush_enabled = 1;
+
+static int env_flag(const char *name, int default_value) {
+    const char *value = getenv(name);
+    if (!value || !value[0]) {
+        return default_value;
+    }
+    return strcmp(value, "0") != 0 && strcmp(value, "false") != 0;
+}
 
 /**
  * EasyLogger port initialize
@@ -58,6 +71,14 @@ ElogErrCode elog_port_init(void) {
         s_lock_ready = 1;
     }
 #endif
+    s_stderr_enabled = env_flag("RPC_LOG_STDERR", 1);
+    s_flush_enabled = env_flag("RPC_LOG_FLUSH", 1);
+    {
+        const char *path = getenv("RPC_LOG_FILE");
+        if (path && path[0]) {
+            s_file = fopen(path, "a");
+        }
+    }
     return ELOG_NO_ERR;
 }
 
@@ -66,6 +87,10 @@ ElogErrCode elog_port_init(void) {
  *
  */
 void elog_port_deinit(void) {
+    if (s_file) {
+        (void)fclose(s_file);
+        s_file = NULL;
+    }
 #if defined(_WIN32)
     if (s_lock_ready) {
         DeleteCriticalSection(&s_lock);
@@ -84,8 +109,16 @@ void elog_port_output(const char *log, size_t size) {
     if (!log || size == 0) {
         return;
     }
-    (void)fwrite(log, 1, size, stderr);
-    (void)fflush(stderr);
+    if (s_stderr_enabled) {
+        (void)fwrite(log, 1, size, stderr);
+        (void)fflush(stderr);
+    }
+    if (s_file) {
+        (void)fwrite(log, 1, size, s_file);
+        if (s_flush_enabled) {
+            (void)fflush(s_file);
+        }
+    }
 }
 
 /**

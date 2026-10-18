@@ -72,9 +72,6 @@ void node_metrics(const node_t *node, metrics_t *out);
 /* 查询某对端（ip:port）的链路统计；无此对端返回 ERR_NOTFOUND。 */
 int node_peer_stats(const node_t *node, const char *ip, uint16_t port,
                          peer_stats_t *out);
-/* 兼容旧名称；新代码请使用 node_peer_stats。 */
-int node_rtcp_peer(const node_t *node, const char *ip, uint16_t port,
-                        rtcp_peer_stats_t *out);
 
 /* ---- 发现与路由 ---- */
 /* 显式加入一个发现对端（单播 HELLO 目标）；用于定向发现/测试。 */

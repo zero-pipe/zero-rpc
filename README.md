@@ -271,7 +271,6 @@ proxy_call_async(proxy, "OrderService", "get", &pl, on_resp, NULL, 1000, NULL);
 
 - `discovery.broadcast` 是 `host:port`，`peers` 是额外的单播 HELLO 目标，元素为 `host:port`。
 - 可选调优字段（顶层）：`transport`、`bind_host`、`data_port`、`frag_bytes`、`max_msg_bytes`、`backpressure_bytes`、`rtcp_interval_ms`（RTCP SR/RR 上报间隔，默认 1000ms）、`rtcp`（`false` 关闭 RTCP）。
-- 兼容旧格式：字段可放在 `node` 对象里，binding 可用 `transport.bindings`，peer 可用 `{ip,port}`，route 可用 `ip/port/transport`；同时存在时扁平顶层字段优先。
 
 完整可运行见 `examples/08_config_{server,client}.json`。
 

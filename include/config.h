@@ -24,10 +24,6 @@
  * frag_bytes、max_msg_bytes、backpressure_bytes、rtcp_interval_ms、rtcp。
  * "rtcp": false 关闭 RTCP 报告；rtcp_interval_ms 为 0 时用默认 1000ms。
  *
- * 兼容旧格式：字段仍可写在 "node" 对象里，binding 仍可写成
- * transport.bindings，peer 仍可写成 {ip,port}，route 仍可写成 ip/port/transport。
- * 两种写法同时存在时，扁平顶层字段优先。
- *
  * config_t 拥有所有字符串；node.* 指针指向自身缓冲区，因此 config 必须
  * 比由它创建的节点活得更久。
  */
@@ -51,10 +47,7 @@ extern "C" {
 /* ---- 解析结果 ---- */
 typedef struct static_route {
     char service[SERVICE_NAME_MAX];
-    char ip[ENDPOINT_MAX];
     char endpoint[ENDPOINT_MAX + SCHEME_MAX + 8];
-    uint16_t port;
-    transport_kind_t transport;
 } static_route_t;
 
 typedef struct peer_endpoint {

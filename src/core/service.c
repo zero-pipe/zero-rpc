@@ -6,6 +6,8 @@
 #include "mem.h"
 #include "util.h"
 
+#include <log.h>
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -86,6 +88,9 @@ void zri_service_handle_request(node_t *node, zri_transport_t *transport,
         zri_service_send_status(transport, msg, ERR_NOTFOUND);
         return;
     }
+    rpc_log_debug("request %s.%s id=%llu len=%zu peer=%s:%u", tmp, dot + 1,
+                  (unsigned long long)msg->request_id, msg->payload.len,
+                  msg->peer_ip ? msg->peer_ip : "?", (unsigned)msg->peer_port);
     {
         call_t *call = (call_t *)zri_mem_alloc(sizeof(*call));
         request_t req;

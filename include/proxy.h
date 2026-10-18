@@ -49,11 +49,6 @@ int proxy_call_async(proxy_t *proxy, const char *service, const char *method,
                           const payload_t *payload, response_fn cb, void *user,
                           uint64_t timeout_ms, uint64_t *out_request_id);
 
-/* 兼容旧名，等价于 proxy_call_async。 */
-int proxy_call(proxy_t *proxy, const char *service, const char *method,
-                    const payload_t *payload, response_fn cb, void *user,
-                    uint64_t timeout_ms, uint64_t *out_request_id);
-
 /*
  * 单向事件：只发送、不等待响应（EVENT）。发送在 poller 线程完成。
  * out_request_id 可空；非空时回填本次事件的关联 ID。

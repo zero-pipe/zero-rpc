@@ -19,12 +19,12 @@ static int g_fail;
 static void test_parse(void) {
     const char *json =
         "{"
-        "\"node\":{\"name\":\"n1\",\"transport\":\"tcp\",\"data_port\":9000,"
-        "\"io_threads\":2,\"mode\":\"static\",\"frag_bytes\":1024,\"max_msg_bytes\":4194304},"
-        "\"discovery\":{\"host\":\"127.0.0.1\",\"port\":41953,\"hello_interval_ms\":500,"
+        "\"name\":\"n1\",\"transport\":\"tcp\",\"data_port\":9000,"
+        "\"io_threads\":2,\"mode\":\"static\",\"frag_bytes\":1024,\"max_msg_bytes\":4194304,"
+        "\"discovery\":{\"broadcast\":\"127.0.0.1:41953\",\"hello_interval_ms\":500,"
         "\"node_ttl_ms\":9000,"
-        "\"peers\":[{\"ip\":\"10.0.0.1\",\"port\":41953}]},"
-        "\"routes\":[{\"service\":\"echo\",\"ip\":\"10.0.0.2\",\"port\":9001}]"
+        "\"peers\":[\"10.0.0.1:41953\"]},"
+        "\"routes\":[{\"service\":\"echo\",\"endpoint\":\"tcp://10.0.0.2:9001\"}]"
         "}";
     config_t cfg;
 
@@ -45,16 +45,13 @@ static void test_parse(void) {
     CHECK(cfg.peers[0].port == 41953);
     CHECK(cfg.route_count == 1);
     CHECK(strcmp(cfg.routes[0].service, "echo") == 0);
-    CHECK(strcmp(cfg.routes[0].ip, "10.0.0.2") == 0);
-    CHECK(cfg.routes[0].port == 9001);
-    /* 未显式给出时，路由传输种类继承 node.transport。 */
-    CHECK(cfg.routes[0].transport == TRANSPORT_TCP);
+    CHECK(strcmp(cfg.routes[0].endpoint, "tcp://10.0.0.2:9001") == 0);
 }
 
 static void test_defaults(void) {
     config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
-    CHECK(config_load("{\"node\":{}}", &cfg) == OK);
+    CHECK(config_load("{}", &cfg) == OK);
     CHECK(cfg.node.transport == TRANSPORT_UDP);
     CHECK(cfg.node.mode == MODE_MESH);
     CHECK(strcmp(cfg.name, "rpc") == 0);
@@ -83,10 +80,10 @@ static void test_endpoint_model(void) {
 
 static void test_binding_config(void) {
     const char *json =
-        "{\"node\":{\"name\":\"dual\",\"mode\":\"static\"},"
-        "\"transport\":{\"bindings\":["
+        "{\"name\":\"dual\",\"mode\":\"static\","
+        "\"bindings\":["
         "{\"name\":\"tcp\",\"endpoint\":\"tcp://127.0.0.1:8080\"},"
-        "{\"name\":\"udp\",\"endpoint\":\"udp://127.0.0.1:8081\"}]},"
+        "{\"name\":\"udp\",\"endpoint\":\"udp://127.0.0.1:8081\"}],"
         "\"routes\":[{\"service\":\"order\","
         "\"endpoint\":\"tcp://127.0.0.1:9000\"}]}";
     config_t cfg;
@@ -106,7 +103,7 @@ static void test_flat_format(void) {
         "\"name\":\"flat\",\"mode\":\"static\",\"io_threads\":4,"
         "\"bindings\":[\"tcp://127.0.0.1:5000\",\"udp://127.0.0.1:5001\"],"
         "\"discovery\":{\"broadcast\":\"127.0.0.1:42000\","
-        "\"peers\":[\"10.0.0.1:42000\",{\"ip\":\"10.0.0.2\",\"port\":42001}]},"
+        "\"peers\":[\"10.0.0.1:42000\",\"10.0.0.2:42001\"]},"
         "\"routes\":[{\"service\":\"Foo\",\"endpoint\":\"tcp://10.0.0.9:6000\"}]"
         "}";
     config_t cfg;
@@ -129,19 +126,6 @@ static void test_flat_format(void) {
     CHECK(cfg.route_count == 1);
     CHECK(strcmp(cfg.routes[0].service, "Foo") == 0);
     CHECK(strcmp(cfg.routes[0].endpoint, "tcp://10.0.0.9:6000") == 0);
-}
-
-/* 扁平顶层字段应覆盖旧的 node 对象。 */
-static void test_flat_precedence(void) {
-    const char *json =
-        "{\"name\":\"flat\",\"mode\":\"static\",\"io_threads\":3,"
-        "\"node\":{\"name\":\"nested\",\"mode\":\"mesh\",\"io_threads\":9}}";
-    config_t cfg;
-    memset(&cfg, 0, sizeof(cfg));
-    CHECK(config_load(json, &cfg) == OK);
-    CHECK(strcmp(cfg.name, "flat") == 0);
-    CHECK(cfg.node.mode == MODE_STATIC);
-    CHECK(cfg.node.io_threads == 3);
 }
 
 static void test_rtcp_config(void) {
@@ -167,7 +151,6 @@ int main(void) {
     test_endpoint_model();
     test_binding_config();
     test_flat_format();
-    test_flat_precedence();
     test_rtcp_config();
     if (g_fail) {
         rpc_log_error("config: FAIL");

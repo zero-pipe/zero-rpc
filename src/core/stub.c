@@ -6,6 +6,8 @@
 #include "mem.h"
 #include "util.h"
 
+#include <log.h>
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -104,6 +106,8 @@ static void stub_call_now(stub_t *stub, uint64_t id, const char *service, const 
     p->retries = 0;
     p->bp_retries = 0;
     p->next_retx_ms = zri_now_ms() + RTO_INIT_MS;
+    rpc_log_debug("call %s.%s id=%llu len=%zu timeout=%llu", service, method,
+                  (unsigned long long)id, len, (unsigned long long)timeout_ms);
 
     pl.data = data;
     pl.len = len;

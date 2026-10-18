@@ -85,7 +85,6 @@ int main(int argc, char **argv) {
     bench_options_t options;
     const char *service_name = "OrderService";
     const char *method_name = "get";
-    const char *config = NULL;
     char peer_hosts[16][64];
     uint16_t peer_ports[16];
     int peer_count = 0;
@@ -102,10 +101,7 @@ int main(int argc, char **argv) {
     node_cfg.io_threads = 0; /* 0 = auto (hardware_concurrency); O1: was 2 */
 
     for (index = 1; index < argc; ++index) {
-        if (strcmp(argv[index], "--config") == 0 && index + 1 < argc) {
-            config = argv[++index];
-            (void)config; /* rpc 不使用 fastcall 配置；保留以兼容脚本调用。 */
-        } else if (strcmp(argv[index], "--transport") == 0 && index + 1 < argc) {
+        if (strcmp(argv[index], "--transport") == 0 && index + 1 < argc) {
             const char *t = argv[++index];
             node_cfg.transport =
                 (strcmp(t, "tcp") == 0 || strcmp(t, "TCP") == 0) ? TRANSPORT_TCP
@@ -151,7 +147,7 @@ int main(int argc, char **argv) {
             }
         } else {
             rpc_log_error(
-                "usage: %s [--config <file>] [--transport udp|tcp] [--response-bytes <n>] "
+                "usage: %s [--transport udp|tcp] [--response-bytes <n>] "
                 "[--delay-ms <n>] [--echo-request] "
                 "[--service <name>] [--method <name>] [--bind <ip>] [--io-threads <n>] "
                 "[--discovery-port <p>] [--data-port <p>] [--max-msg-bytes <n>] "

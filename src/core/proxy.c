@@ -164,13 +164,6 @@ int proxy_call_async(proxy_t *proxy, const char *service, const char *method,
                              timeout_ms, out_request_id);
 }
 
-int proxy_call(proxy_t *proxy, const char *service, const char *method,
-                    const payload_t *payload, response_fn cb, void *user,
-                    uint64_t timeout_ms, uint64_t *out_request_id) {
-    return proxy_call_async(proxy, service, method, payload, cb, user, timeout_ms,
-                                 out_request_id);
-}
-
 int proxy_call_event(proxy_t *proxy, const char *service, const char *method,
                           const payload_t *payload, uint64_t *out_request_id) {
     if (!proxy || !proxy->node || !proxy->stub || !service || !method) {

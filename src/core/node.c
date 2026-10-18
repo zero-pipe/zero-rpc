@@ -245,7 +245,6 @@ void node_destroy(node_t *node) {
                 node->transports[i] = NULL;
             }
         }
-        node->transport = NULL;
         node->transport_count = 0;
     }
     if (node->pool) {
@@ -302,7 +301,9 @@ const char *node_name(const node_t *node) {
 }
 
 transport_kind_t node_transport(const node_t *node) {
-    return (node && node->transport) ? node->transport->kind : TRANSPORT_UDP;
+    return (node && node->transport_count > 0 && node->transports[0])
+               ? node->transports[0]->kind
+               : TRANSPORT_UDP;
 }
 
 uint16_t node_discovery_port(const node_t *node) {
@@ -310,7 +311,9 @@ uint16_t node_discovery_port(const node_t *node) {
 }
 
 uint16_t node_data_port(const node_t *node) {
-    return (node && node->transport) ? node->transport->port : 0;
+    return (node && node->transport_count > 0 && node->transports[0])
+               ? node->transports[0]->port
+               : 0;
 }
 
 size_t node_binding_count(const node_t *node) {
@@ -358,30 +361,6 @@ int node_peer_stats(const node_t *node, const char *ip, uint16_t port,
     }
     memset(out, 0, sizeof(*out));
     return ERR_NOTFOUND;
-}
-
-int node_rtcp_peer(const node_t *node, const char *ip, uint16_t port,
-                        rtcp_peer_stats_t *out) {
-    peer_stats_t stats;
-    int rc;
-
-    if (!out) {
-        return ERR_INVALID;
-    }
-    memset(out, 0, sizeof(*out));
-    rc = node_peer_stats(node, ip, port, &stats);
-    if (rc != OK) {
-        return rc;
-    }
-    out->ssrc_local = stats.local_id;
-    out->ssrc_remote = stats.remote_id;
-    out->rtt_ms = stats.rtt_ms;
-    out->jitter_ms = stats.jitter_ms;
-    out->remote_lost = stats.lost;
-    /* 旧接口无法区分 SR/RR，只能把统一反馈计数映射到 SR。 */
-    out->sr_sent = stats.feedback_sent;
-    out->sr_received = stats.feedback_received;
-    return OK;
 }
 
 /* ---- 发现与路由 ---- */

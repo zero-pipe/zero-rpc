@@ -53,23 +53,6 @@ typedef struct peer_stats {
     uint64_t feedback_received; /* 本端收到的链路反馈包数（UDP: SR+RR） */
 } peer_stats_t;
 
-/* ---- 旧版兼容结构 ---- */
-/*
- * 旧版 UDP 专有查询结构保留，避免改变既有调用方的内存布局。新代码应使用
- * peer_stats_t / node_peer_stats()。
- */
-typedef struct rtcp_peer_stats {
-    uint32_t ssrc_local;
-    uint32_t ssrc_remote;
-    uint32_t rtt_ms;
-    uint32_t jitter_ms;
-    int32_t remote_lost;
-    uint64_t sr_sent;
-    uint64_t rr_sent;
-    uint64_t sr_received;
-    uint64_t rr_received;
-} rtcp_peer_stats_t;
-
 #ifdef __cplusplus
 }
 #endif

@@ -163,8 +163,5 @@ int zri_node_transport_add(node_t *node, const char *scheme, const char *host,
         return ERR_IO;
     }
     node->transports[node->transport_count++] = transport;
-    if (!node->transport) {
-        node->transport = transport;
-    }
     return OK;
 }

@@ -75,7 +75,6 @@ static uint64_t lat_hist_key(int idx) {
 }
 
 typedef struct options {
-    const char *config;
     const char *service;
     const char *method;
     const char *worker_id;
@@ -173,7 +172,7 @@ static int parse_size(const char *s, size_t *out) {
 
 static void usage(const char *argv0) {
     rpc_log_error(
-        "usage: %s [--config f] [--service s] [--method m] [--duration-seconds n]\n"
+        "usage: %s [--service s] [--method m] [--duration-seconds n]\n"
         "          [--transport udp|tcp]\n"
         "          [--max-requests n] [--payload-bytes n] [--expect-response-bytes n]\n"
         "          [--timeout-ms n] [--rate qps] [--verify-response]\n"
@@ -289,8 +288,8 @@ static void ed_issue(void *user) {
             pl.data = g_payload;
             pl.len = g_opt.payload_bytes;
             pl.encoding = 0;
-            rc = proxy_call(g_proxy, g_opt.service, g_opt.method, &pl, ed_resp, NULL,
-                                 g_opt.timeout_ms, &id);
+            rc = proxy_call_async(g_proxy, g_opt.service, g_opt.method, &pl, ed_resp,
+                                  NULL, g_opt.timeout_ms, &id);
         }
         if (rc != OK) {
             g_failed++;
@@ -334,9 +333,7 @@ int main(int argc, char **argv) {
 
     for (i = 1; i < argc; i++) {
         const char *a = argv[i];
-        if (strcmp(a, "--config") == 0 && i + 1 < argc) {
-            opt.config = argv[++i];
-        } else if (strcmp(a, "--transport") == 0 && i + 1 < argc) {
+        if (strcmp(a, "--transport") == 0 && i + 1 < argc) {
             const char *t = argv[++i];
             opt.transport = (strcmp(t, "tcp") == 0 || strcmp(t, "TCP") == 0) ? TRANSPORT_TCP
                                                                              : TRANSPORT_UDP;
@@ -478,10 +475,10 @@ int main(int argc, char **argv) {
             pl.encoding = 0;
             co.status = -999;
             co.send_ns = now_ns();
-            rc = proxy_call(proxy, opt.service, opt.method, &pl, on_response, &co,
-                                 opt.timeout_ms, &id);
+            rc = proxy_call_async(proxy, opt.service, opt.method, &pl, on_response, &co,
+                                  opt.timeout_ms, &id);
             if (rc != OK) {
-                rpc_log_error("proxy_call failed: %d", rc);
+                rpc_log_error("proxy_call_async failed: %d", rc);
                 node_destroy(node);
                 return 1;
             }
@@ -522,8 +519,8 @@ int main(int argc, char **argv) {
                 co.resp_len = 0;
                 co.verify_ok = 1;
                 co.send_ns = now_ns();
-                rc = proxy_call(proxy, opt.service, opt.method, &pl, on_response, &co,
-                                     opt.timeout_ms, &id);
+                rc = proxy_call_async(proxy, opt.service, opt.method, &pl, on_response,
+                                      &co, opt.timeout_ms, &id);
                 attempted++;
                 if (rc != OK) {
                     failed++;

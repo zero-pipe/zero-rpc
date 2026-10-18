@@ -54,8 +54,6 @@ struct node {
     ntk_poller *poller; /* io 0，用于发现/客户端调用 */
     zri_transport_t *transports[MAX_BINDINGS];
     size_t transport_count;
-    /* Compatibility alias for the first binding. */
-    zri_transport_t *transport;
     ntk_timer *hello_timer;
     ntk_timer *node_timer;
 

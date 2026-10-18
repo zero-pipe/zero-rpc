@@ -1,5 +1,31 @@
 #include <log.h>
 
+#include <stdlib.h>
+#include <string.h>
+
+static uint8_t log_level_from_env(void) {
+    const char *value = getenv("RPC_LOG_LEVEL");
+    if (!value || !value[0]) {
+        return ELOG_LVL_INFO;
+    }
+    if (strcmp(value, "assert") == 0) {
+        return ELOG_LVL_ASSERT;
+    }
+    if (strcmp(value, "error") == 0) {
+        return ELOG_LVL_ERROR;
+    }
+    if (strcmp(value, "warn") == 0) {
+        return ELOG_LVL_WARN;
+    }
+    if (strcmp(value, "debug") == 0) {
+        return ELOG_LVL_DEBUG;
+    }
+    if (strcmp(value, "verbose") == 0) {
+        return ELOG_LVL_VERBOSE;
+    }
+    return ELOG_LVL_INFO;
+}
+
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -18,7 +44,7 @@ static BOOL CALLBACK log_init_once(PINIT_ONCE once, PVOID param, PVOID *context)
     for (level = ELOG_LVL_ASSERT; level <= ELOG_LVL_VERBOSE; level++) {
         elog_set_fmt(level, ELOG_FMT_LVL | ELOG_FMT_TAG | ELOG_FMT_TIME);
     }
-    elog_set_filter_lvl(ELOG_LVL_INFO);
+    elog_set_filter_lvl(log_level_from_env());
     elog_start();
     return TRUE;
 }
@@ -40,7 +66,7 @@ static void log_init_once(void) {
     for (level = ELOG_LVL_ASSERT; level <= ELOG_LVL_VERBOSE; level++) {
         elog_set_fmt(level, ELOG_FMT_LVL | ELOG_FMT_TAG | ELOG_FMT_TIME);
     }
-    elog_set_filter_lvl(ELOG_LVL_INFO);
+    elog_set_filter_lvl(log_level_from_env());
     elog_start();
 }
 

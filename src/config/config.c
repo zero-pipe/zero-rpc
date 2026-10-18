@@ -7,21 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-/*
- * 取值辅助：优先读 primary（扁平顶层字段），读不到再回退 fallback（旧的 node 对象）。
- * primary/fallback 为 NULL 时 cJSON 查找返回 NULL，天然安全。
- */
-static const cJSON *cfg_pick(const cJSON *primary, const cJSON *fallback, const char *key) {
-    const cJSON *item = cJSON_GetObjectItemCaseSensitive(primary, key);
-    if (item && !cJSON_IsNull(item)) {
-        return item;
-    }
-    return fallback ? cJSON_GetObjectItemCaseSensitive(fallback, key) : NULL;
-}
-
-static void cfg_str2(char *dst, size_t cap, const cJSON *primary, const cJSON *fallback,
-                     const char *key, const char *def) {
-    const cJSON *item = cfg_pick(primary, fallback, key);
+static void cfg_str(char *dst, size_t cap, const cJSON *obj, const char *key, const char *def) {
+    const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
     if (cJSON_IsString(item) && item->valuestring && item->valuestring[0]) {
         snprintf(dst, cap, "%s", item->valuestring);
     } else if (def) {
@@ -31,26 +18,17 @@ static void cfg_str2(char *dst, size_t cap, const cJSON *primary, const cJSON *f
     }
 }
 
-static void cfg_str(char *dst, size_t cap, const cJSON *obj, const char *key, const char *def) {
-    cfg_str2(dst, cap, obj, NULL, key, def);
-}
-
-static unsigned cfg_u32_2(const cJSON *primary, const cJSON *fallback, const char *key,
-                          unsigned def) {
-    const cJSON *item = cfg_pick(primary, fallback, key);
+static unsigned cfg_u32(const cJSON *obj, const char *key, unsigned def) {
+    const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
     if (cJSON_IsNumber(item) && item->valuedouble >= 0) {
         return (unsigned)item->valuedouble;
     }
     return def;
 }
 
-static unsigned cfg_u32(const cJSON *obj, const char *key, unsigned def) {
-    return cfg_u32_2(obj, NULL, key, def);
-}
-
-static transport_kind_t cfg_transport2(const cJSON *primary, const cJSON *fallback,
-                                            const char *key, transport_kind_t def) {
-    const cJSON *item = cfg_pick(primary, fallback, key);
+static transport_kind_t cfg_transport(const cJSON *obj, const char *key,
+                                      transport_kind_t def) {
+    const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
     if (cJSON_IsString(item) && item->valuestring) {
         if (strcmp(item->valuestring, "tcp") == 0 || strcmp(item->valuestring, "TCP") == 0) {
             return TRANSPORT_TCP;
@@ -62,14 +40,8 @@ static transport_kind_t cfg_transport2(const cJSON *primary, const cJSON *fallba
     return def;
 }
 
-static transport_kind_t cfg_transport(const cJSON *obj, const char *key,
-                                           transport_kind_t def) {
-    return cfg_transport2(obj, NULL, key, def);
-}
-
-static node_mode_t cfg_mode2(const cJSON *primary, const cJSON *fallback, const char *key,
-                                  node_mode_t def) {
-    const cJSON *item = cfg_pick(primary, fallback, key);
+static node_mode_t cfg_mode(const cJSON *obj, const char *key, node_mode_t def) {
+    const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
     if (cJSON_IsString(item) && item->valuestring) {
         if (strcmp(item->valuestring, "static") == 0 || strcmp(item->valuestring, "STATIC") == 0) {
             return MODE_STATIC;
@@ -135,9 +107,7 @@ static void cfg_binding(config_t *out, const cJSON *item) {
 
 int config_load(const char *json, config_t *out) {
     cJSON *root;
-    const cJSON *node;
     const cJSON *bindings;
-    const cJSON *transport;
     const cJSON *disc;
     const cJSON *routes;
     const cJSON *peers;
@@ -152,20 +122,18 @@ int config_load(const char *json, config_t *out) {
         return ERR_INVALID;
     }
 
-    /* 扁平顶层字段优先，兼容旧的 "node" 对象。 */
-    node = cJSON_GetObjectItemCaseSensitive(root, "node");
-    cfg_str2(out->name, sizeof(out->name), root, node, "name", "rpc");
-    cfg_str2(out->bind_host, sizeof(out->bind_host), root, node, "bind_host", "0.0.0.0");
-    out->node.transport = cfg_transport2(root, node, "transport", TRANSPORT_UDP);
-    out->node.mode = cfg_mode2(root, node, "mode", MODE_MESH);
-    out->node.data_port = (uint16_t)cfg_u32_2(root, node, "data_port", 0);
-    out->node.io_threads = cfg_u32_2(root, node, "io_threads", 0);
-    out->node.frag_bytes = (uint16_t)cfg_u32_2(root, node, "frag_bytes", 0);
-    out->node.max_msg_bytes = cfg_u32_2(root, node, "max_msg_bytes", 0);
-    out->node.backpressure_bytes = cfg_u32_2(root, node, "backpressure_bytes", 0);
-    out->node.rtcp_interval_ms = cfg_u32_2(root, node, "rtcp_interval_ms", 0);
+    cfg_str(out->name, sizeof(out->name), root, "name", "rpc");
+    cfg_str(out->bind_host, sizeof(out->bind_host), root, "bind_host", "0.0.0.0");
+    out->node.transport = cfg_transport(root, "transport", TRANSPORT_UDP);
+    out->node.mode = cfg_mode(root, "mode", MODE_MESH);
+    out->node.data_port = (uint16_t)cfg_u32(root, "data_port", 0);
+    out->node.io_threads = cfg_u32(root, "io_threads", 0);
+    out->node.frag_bytes = (uint16_t)cfg_u32(root, "frag_bytes", 0);
+    out->node.max_msg_bytes = cfg_u32(root, "max_msg_bytes", 0);
+    out->node.backpressure_bytes = cfg_u32(root, "backpressure_bytes", 0);
+    out->node.rtcp_interval_ms = cfg_u32(root, "rtcp_interval_ms", 0);
     {
-        const cJSON *rtcp = cfg_pick(root, node, "rtcp");
+        const cJSON *rtcp = cJSON_GetObjectItemCaseSensitive(root, "rtcp");
         if (cJSON_IsBool(rtcp)) {
             out->node.rtcp_disabled = cJSON_IsTrue(rtcp) ? 0 : 1;
         }
@@ -173,29 +141,15 @@ int config_load(const char *json, config_t *out) {
     out->node.name = out->name;
     out->node.bind_host = out->bind_host;
 
-    /* 新格式使用顶层 bindings；兼容旧格式 transport.bindings / transport.binding。 */
+    /* bindings 使用顶层数组，元素为 URI 字符串或 {name, endpoint} 对象。 */
     bindings = cJSON_GetObjectItemCaseSensitive(root, "bindings");
     if (cJSON_IsArray(bindings)) {
         cJSON_ArrayForEach(item, bindings) {
             cfg_binding(out, item);
         }
-    } else {
-        transport = cJSON_GetObjectItemCaseSensitive(root, "transport");
-        if (cJSON_IsObject(transport)) {
-            const cJSON *legacy_bindings =
-                cJSON_GetObjectItemCaseSensitive(transport, "bindings");
-            const cJSON *legacy_binding = cJSON_GetObjectItemCaseSensitive(transport, "binding");
-            if (cJSON_IsArray(legacy_bindings)) {
-                cJSON_ArrayForEach(item, legacy_bindings) {
-                    cfg_binding(out, item);
-                }
-            } else if (cJSON_IsObject(legacy_binding)) {
-                cfg_binding(out, legacy_binding);
-            }
-        }
     }
 
-    /* discovery：新格式推荐 broadcast: "host:port"，兼容 host/port。 */
+    /* discovery.broadcast 使用 "host:port"。 */
     disc = cJSON_GetObjectItemCaseSensitive(root, "discovery");
     {
         const cJSON *broadcast = cJSON_GetObjectItemCaseSensitive(disc, "broadcast");
@@ -207,9 +161,9 @@ int config_load(const char *json, config_t *out) {
             snprintf(out->discovery_host, sizeof(out->discovery_host), "%s", broadcast_host);
             out->node.discovery_port = broadcast_port;
         } else {
-            cfg_str(out->discovery_host, sizeof(out->discovery_host), disc, "host",
-                    "255.255.255.255");
-            out->node.discovery_port = (uint16_t)cfg_u32(disc, "port", 0);
+            snprintf(out->discovery_host, sizeof(out->discovery_host), "%s",
+                     "255.255.255.255");
+            out->node.discovery_port = 0;
         }
     }
     out->node.discovery_host = out->discovery_host;
@@ -229,14 +183,9 @@ int config_load(const char *json, config_t *out) {
                 break;
             }
             peer = &out->peers[out->peer_count];
-            if (cJSON_IsString(item) && item->valuestring) {
-                if (cfg_host_port(item->valuestring, peer->ip, sizeof(peer->ip), &peer->port) !=
-                    OK) {
-                    continue;
-                }
-            } else {
-                cfg_str(peer->ip, sizeof(peer->ip), item, "ip", NULL);
-                peer->port = (uint16_t)cfg_u32(item, "port", 0);
+            if (!cJSON_IsString(item) || !item->valuestring ||
+                cfg_host_port(item->valuestring, peer->ip, sizeof(peer->ip), &peer->port) != OK) {
+                continue;
             }
             if (peer->ip[0] && peer->port) {
                 out->peer_count++;
@@ -255,10 +204,7 @@ int config_load(const char *json, config_t *out) {
             r = &out->routes[out->route_count];
             cfg_str(r->service, sizeof(r->service), item, "service", NULL);
             cfg_str(r->endpoint, sizeof(r->endpoint), item, "endpoint", NULL);
-            cfg_str(r->ip, sizeof(r->ip), item, "ip", NULL);
-            r->port = (uint16_t)cfg_u32(item, "port", 0);
-            r->transport = cfg_transport(item, "transport", out->node.transport);
-            if (r->service[0] && ((r->endpoint[0]) || (r->ip[0] && r->port))) {
+            if (r->service[0] && r->endpoint[0]) {
                 out->route_count++;
             }
         }
@@ -323,13 +269,8 @@ int node_create_from_config(const config_t *cfg, node_t **out) {
         (void)node_add_discovery_peer(*out, cfg->peers[i].ip, cfg->peers[i].port);
     }
     for (i = 0; i < cfg->route_count; i++) {
-        if (cfg->routes[i].endpoint[0]) {
-            (void)node_add_static_endpoint(*out, cfg->routes[i].service,
-                                                cfg->routes[i].endpoint);
-        } else {
-            (void)node_add_static_route(*out, cfg->routes[i].service, cfg->routes[i].ip,
-                                             cfg->routes[i].port, cfg->routes[i].transport);
-        }
+        (void)node_add_static_endpoint(*out, cfg->routes[i].service,
+                                            cfg->routes[i].endpoint);
     }
     return OK;
 }
