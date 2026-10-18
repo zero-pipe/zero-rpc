@@ -215,7 +215,14 @@ proxy_call_async(proxy, "echo", "ping", &pl, on_resp, NULL, 1000, NULL);
 ./example_06_static_route_client
 ./example_08_config_server &       # 读取 08_config_server.json
 ./example_08_config_client         # 读取 08_config_client.json
+./example_09_service_discovery_server &
+./example_09_service_discovery_client # 不配置服务端数据端口，靠 mesh 发现
 ```
+
+`09_service_discovery` 使用两个不同的发现端口（服务端 `41953`、客户端
+`41954`）和互相的单播 peer，因此同机运行时不依赖 UDP 广播端口复用。跨主机运行时，
+服务端参数依次为 `data_port discovery_port client_ip client_discovery_port`，客户端参数
+依次为 `server_ip client_discovery_port server_discovery_port`。
 
 ## payload 与 codec（序列化扩展点）
 
