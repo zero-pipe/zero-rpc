@@ -1067,7 +1067,7 @@ static void data_recv_cb(ntk_socket *sock, void *user) {
                 }
                 continue;
             }
-            if ((buf[1] & 0x7f) == RTCP_RTPFB) {
+            if (buf[1] == RTCP_RTPFB) {
                 uint16_t seqs[MAX_NACK_SEQS];
                 int c = zri_frame_parse_nack(buf, n, NULL, NULL, seqs, MAX_NACK_SEQS);
                 if (c > 0) {
