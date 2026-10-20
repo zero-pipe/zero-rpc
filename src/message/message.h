@@ -30,6 +30,7 @@ typedef struct zri_message {
     uint8_t kind;                     /* KIND_REQUEST / RESPONSE / EVENT */
     int status;                       /* 应用状态码；仅 RESPONSE 有意义 */
     uint32_t request_id;              /* 请求/响应关联 ID */
+    uint32_t timeout_ms;              /* 请求剩余超时毫秒；0 = 无 deadline */
     const char *route;                /* "service.method"；可为 NULL */
     payload_t payload;           /* 对框架透明的业务字节 */
     stream_meta_t stream;        /* 仅 has_stream 非 0 时有效 */

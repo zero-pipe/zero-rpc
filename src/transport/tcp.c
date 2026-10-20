@@ -646,6 +646,7 @@ static int tcp_send_common(zri_tcp_transport_t *t, zri_tcp_link_t *link,
     header_envelope.status = msg->status;
     header_envelope.encoding = msg->payload.encoding;
     header_envelope.request_id = msg->request_id;
+    header_envelope.timeout_ms = msg->timeout_ms;
     header_envelope.route = msg->route;
     if (msg->has_stream) {
         header_envelope.stream_flags = (uint8_t)(STREAM_FLAG_STREAM | msg->stream.flags);

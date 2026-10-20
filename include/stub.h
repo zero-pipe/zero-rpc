@@ -43,7 +43,8 @@ typedef enum stub_kind {
  */
 typedef int (*stub_send_fn)(stub_t *stub, const char *service, const char *method,
                                  const payload_t *payload, stub_kind_t kind,
-                                 uint64_t request_id, stub_target_t *target, void *user_data);
+                                 uint64_t request_id, uint64_t timeout_ms,
+                                 stub_target_t *target, void *user_data);
 
 typedef struct stub_options {
     uint8_t payload_encoding; /* 写入请求的默认编码标识，0 = 裸字节 */
@@ -66,6 +67,7 @@ int stub_call(stub_t *stub, const char *service, const char *method,
 /*
  * 异步请求。发现并发送后立即返回；响应或超时通过 cb 回调（在 poller 线程）。
  * timeout_ms 为 0 时使用 DEFAULT_TIMEOUT_MS。
+ * payload 在返回前已复制（跨线程同样），调用方可立即释放自己的缓冲区。
  */
 int stub_call_async(stub_t *stub, const char *service, const char *method,
                          const payload_t *payload, response_fn cb, void *user,

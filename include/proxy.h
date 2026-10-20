@@ -44,6 +44,9 @@ int proxy_set_endpoint_uri(proxy_t *proxy, const char *endpoint);
  * 异步请求：发现并发送后立即返回；响应或超时通过 cb 回调（poller 线程）。
  * timeout_ms：0 表示使用默认（DEFAULT_TIMEOUT_MS）。
  * out_request_id：非空时回填关联 ID，可用于 proxy_cancel。
+ *
+ * payload 所有权：框架在返回前复制 payload（包括跨线程调用）；调用方可在
+ * 本函数返回后立即释放 payload->data，无需等回调。框架不会接管或释放它。
  */
 int proxy_call_async(proxy_t *proxy, const char *service, const char *method,
                           const payload_t *payload, response_fn cb, void *user,
@@ -52,6 +55,7 @@ int proxy_call_async(proxy_t *proxy, const char *service, const char *method,
 /*
  * 单向事件：只发送、不等待响应（EVENT）。发送在 poller 线程完成。
  * out_request_id 可空；非空时回填本次事件的关联 ID。
+ * 与 proxy_call_async 相同，payload 在返回前已复制，调用方可立即释放。
  */
 int proxy_call_event(proxy_t *proxy, const char *service, const char *method,
                           const payload_t *payload, uint64_t *out_request_id);

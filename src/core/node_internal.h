@@ -33,6 +33,17 @@ typedef struct zri_codec_entry {
     codec_t codec;
 } zri_codec_entry_t;
 
+/*
+ * 极简定长对象复用池。trylock 抢不到锁就直接 malloc/free，保证池只是优化，
+ * 不会在热路径上引入阻塞或锁竞争尾延迟。
+ */
+typedef struct zri_obj_pool {
+    void *free_list;
+    ntk_mutex *lock;
+    unsigned count;
+    unsigned limit;
+} zri_obj_pool_t;
+
 struct node {
     node_config_t cfg;
     char name[NAME_MAX];
@@ -52,6 +63,15 @@ struct node {
 
     ntk_poller_pool *pool;
     ntk_poller *poller; /* io 0，用于发现/客户端调用 */
+    ntk_thread_pool *handler_pool; /* 可选：业务 handler 线程池（0 = 关闭） */
+    int worker_fallback_warned; /* handler_threads=0 时只告警一次 */
+    ntk_mutex *handler_limit_mutex; /* 保护 handler_inflight / external_inflight */
+    unsigned handler_max_concurrency; /* 0 = 不限制 */
+    unsigned handler_inflight;        /* worker 排队 + 执行中的任务数 */
+    unsigned external_inflight;       /* 自定义 executor 未完成任务数（诊断用） */
+    zri_obj_pool_t worker_call_pool;  /* worker 路径 call_t 复用池 */
+    zri_obj_pool_t handler_task_pool; /* worker/executor 任务头复用池 */
+    zri_obj_pool_t reply_task_pool;   /* 跨线程回复任务头复用池 */
     zri_transport_t *transports[MAX_BINDINGS];
     size_t transport_count;
     ntk_timer *hello_timer;
@@ -63,6 +83,8 @@ struct node {
     zri_pending_t *pending_hash; /* request_id -> pending，O(1) 查找 */
     zri_pending_t *pending_free; /* 可复用的空闲槽位 */
     zri_recv_stream_t recv_streams[MAX_RECV_STREAMS];
+    zri_cancel_slot_t cancels[CANCEL_SLOTS]; /* 在途调用取消登记（best-effort） */
+    volatile unsigned cancel_count;          /* 已登记取消数；0 时查询走无锁快路径 */
     zri_codec_entry_t *codecs;
 
     node_mode_t mode;
@@ -85,9 +107,15 @@ int zri_node_send(node_t *node, transport_kind_t transport_kind, const char *sch
 /* 组装 "service.method" 路由并发送一次调用（stub/proxy/重传共用）。 */
 int zri_node_send_call(node_t *node, const stub_target_t *target, const char *service,
                        const char *method, const payload_t *payload, uint8_t kind,
-                       uint64_t request_id);
+                       uint64_t request_id, uint64_t timeout_ms);
 /* 默认解析：静态路由表 / 服务发现（不含 proxy 的端点覆盖）。 */
 int zri_node_resolve(node_t *node, const char *service, int prefer_stream,
                       stub_target_t *out);
+
+/* 定长对象复用池：trylock 失败即回退 malloc/free，不阻塞。 */
+int zri_obj_pool_init(zri_obj_pool_t *pool, unsigned limit);
+void zri_obj_pool_destroy(zri_obj_pool_t *pool);
+void *zri_obj_pool_alloc(zri_obj_pool_t *pool, size_t size);
+void zri_obj_pool_free(zri_obj_pool_t *pool, void *obj);
 
 #endif /* NODE_INTERNAL_H */

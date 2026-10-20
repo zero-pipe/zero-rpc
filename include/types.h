@@ -7,7 +7,8 @@
  * 分层约定：
  *   - 传输层（UDP/TCP）只搬运字节，不解释业务语义；
  *   - 应用层的 payload 对框架完全透明（见 payload_t）；
- *   - 所有回调都在 ntk poller 线程内触发，回调中禁止阻塞。
+ *   - 客户端响应回调与 INLINE handler 在 ntk poller 线程触发，禁止阻塞；
+ *     WORKER / EXECUTOR handler 在对应执行线程运行（见 service.h）。
  */
 
 #include <stddef.h>
@@ -81,6 +82,11 @@ typedef enum node_mode {
  * 把业务对象与 payload 互转，从而把序列化扩展点留给应用层。
  *
  * 生命周期：回调参数里的 payload 仅在本次回调内有效，需要跨回调保存时请自行拷贝。
+ *
+ * 发送侧所有权：proxy_call_async / stub_call_async / proxy_call_event 会在
+ * 返回前复制 payload（跨线程调用时同样如此），调用方始终保留自己缓冲区的
+ * 所有权，可在调用返回后立即释放，无需等回调。框架不会 free 调用方内存。
+ * 服务端 reply() 也只在调用期间借用响应 payload，返回后即可释放。
  */
 typedef struct payload {
     const void *data;
@@ -101,6 +107,12 @@ typedef struct request {
     payload_t payload; /* 对框架透明的业务字节 */
     const char *peer_ip;
     uint16_t peer_port;
+    /*
+     * 请求 deadline（绝对单调毫秒，0 = 无 deadline），由客户端的 timeout_ms
+     * 在接收时换算而来（对齐 gRPC deadline 传播）。服务端 handler 可据此提前
+     * 放弃注定会被客户端丢弃的重活；框架也会在 handler 启动前跳过已过期请求。
+     */
+    uint64_t deadline_ms;
 } request_t;
 
 typedef struct response {

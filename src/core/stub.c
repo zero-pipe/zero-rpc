@@ -42,14 +42,15 @@ static uint8_t stub_msg_kind(stub_kind_t kind) {
 /* 默认解析：静态路由表 + 服务发现。 */
 static int stub_default_send(stub_t *stub, const char *service, const char *method,
                              const payload_t *payload, stub_kind_t kind,
-                             uint64_t request_id, stub_target_t *target, void *user_data) {
+                             uint64_t request_id, uint64_t timeout_ms, stub_target_t *target,
+                             void *user_data) {
     node_t *node = stub->node;
     (void)user_data;
     if (zri_node_resolve(node, service, 0, target) != OK) {
         return ERR_NOTFOUND;
     }
     return zri_node_send_call(node, target, service, method, payload, stub_msg_kind(kind),
-                              request_id);
+                              request_id, timeout_ms);
 }
 
 static uint64_t stub_resend_task_fn(void *user) {
@@ -113,7 +114,8 @@ static void stub_call_now(stub_t *stub, uint64_t id, const char *service, const 
     pl.len = len;
     pl.encoding = encoding;
     memset(&target, 0, sizeof(target));
-    rc = stub->send(stub, service, method, &pl, STUB_REQUEST, id, &target, stub->user_data);
+    rc = stub->send(stub, service, method, &pl, STUB_REQUEST, id, timeout_ms, &target,
+                    stub->user_data);
     /* 目标在解析成功时即已回填，先落进 pending 供重传使用。 */
     zri_copy_str(p->ip, sizeof(p->ip), target.ip, "0.0.0.0");
     p->port = target.port;
@@ -147,7 +149,7 @@ static void stub_event_now(stub_t *stub, uint64_t id, const char *service, const
     pl.len = len;
     pl.encoding = encoding;
     memset(&target, 0, sizeof(target));
-    (void)stub->send(stub, service, method, &pl, STUB_EVENT, id, &target, stub->user_data);
+    (void)stub->send(stub, service, method, &pl, STUB_EVENT, id, 0, &target, stub->user_data);
 }
 
 static void stub_call_task_fn(void *user) {

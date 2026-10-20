@@ -249,6 +249,27 @@ static void env_view_copy(const zri_env_view_t *v, size_t off, size_t len, uint8
     }
 }
 
+/*
+ * 批量发送可能短写（非阻塞 socket / 发送缓冲瞬时不足），sendmmsg 只发出一部分。
+ * 剩余分片必须补发，否则接收端要等到下一个 tick 才 NACK，9 个分片以上会出现
+ * 明显的 ~2ms 台阶。这里有限次重试，仍失败则交给 NACK/RTO 兜底。
+ */
+static void udp_send_msgs(zri_session_t *s, ntk_udp_dgram_t *msgs, unsigned nm) {
+    unsigned off = 0;
+    unsigned spins = 0;
+    while (s && off < nm) {
+        int n = ntk_socket_sendto_batch(s->sock, msgs + off, nm - off);
+        if (n <= 0) {
+            if (++spins >= 4) {
+                break;
+            }
+            continue;
+        }
+        off += (unsigned)n;
+        spins = 0;
+    }
+}
+
 static void emit_frag(zri_udp_transport_t *udp, zri_session_t *s, uint32_t msg_id,
                       uint32_t total_len, uint32_t off, uint32_t chunk, const zri_env_view_t *view,
                       int last, uint64_t now, ntk_udp_dgram_t *msgs, unsigned *nm) {
@@ -488,6 +509,7 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_me
     envelope.status = msg->status;
     envelope.encoding = msg->payload.encoding;
     envelope.request_id = msg->request_id;
+    envelope.timeout_ms = msg->timeout_ms;
     envelope.route = msg->route;
     envelope.payload = NULL;
     envelope.payload_len = 0;
@@ -518,7 +540,7 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_me
 
         if (i < s->cc_burst) {
             if (nm == TX_BATCH_MAX) {
-                (void)ntk_socket_sendto_batch(s->sock, msgs, nm);
+                udp_send_msgs(s, msgs, nm);
                 nm = 0;
             }
             emit_frag(udp, s, msg->request_id, (uint32_t)env_len, (uint32_t)off, (uint32_t)chunk,
@@ -537,7 +559,7 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_me
         off += chunk;
     }
     if (nm > 0) {
-        (void)ntk_socket_sendto_batch(s->sock, msgs, nm);
+        udp_send_msgs(s, msgs, nm);
     }
     if (nfrag >= 2 && s->txq == NULL && udp_fec_enabled()) {
         send_fec(udp, s, &view, env_len, msg->request_id);
@@ -545,10 +567,10 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_me
     return OK;
 }
 
-static void session_txq_drain(zri_udp_transport_t *udp, zri_session_t *s, uint64_t now) {
+static void session_txq_drain_budget(zri_udp_transport_t *udp, zri_session_t *s, uint64_t now,
+                                     uint32_t budget) {
     ntk_udp_dgram_t msgs[TX_BATCH_MAX];
     unsigned nm = 0;
-    uint32_t budget = s->cc_burst;
     zri_env_view_t view;
 
     if (!s->txq) {
@@ -568,14 +590,14 @@ static void session_txq_drain(zri_udp_transport_t *udp, zri_session_t *s, uint64
         }
         last = (off + chunk) >= s->txq_total;
         if (nm == TX_BATCH_MAX) {
-            (void)ntk_socket_sendto_batch(s->sock, msgs, nm);
+            udp_send_msgs(s, msgs, nm);
             nm = 0;
         }
         emit_frag(udp, s, s->txq_msgid, s->txq_total, off, chunk, &view, last, now, msgs, &nm);
         s->txq_sent += chunk;
     }
     if (nm > 0) {
-        (void)ntk_socket_sendto_batch(s->sock, msgs, nm);
+        udp_send_msgs(s, msgs, nm);
     }
     if (s->txq_sent >= s->txq_total) {
         free(s->txq);
@@ -583,6 +605,10 @@ static void session_txq_drain(zri_udp_transport_t *udp, zri_session_t *s, uint64
         s->txq_sent = 0;
         s->txq_total = 0;
     }
+}
+
+static void session_txq_drain(zri_udp_transport_t *udp, zri_session_t *s, uint64_t now) {
+    session_txq_drain_budget(udp, s, now, s->cc_burst);
 }
 
 /* ---- 接收 ---- */
@@ -702,28 +728,49 @@ static int session_on_data(zri_udp_transport_t *udp, zri_session_t *s, const zri
 static void session_on_nack(zri_udp_transport_t *udp, zri_session_t *s, const uint16_t *seqs,
                             size_t n) {
     size_t i;
+    int lost_sent = 0;
+    int unsent = 0;
     if (!s || !seqs) {
         return;
-    }
-    {
-        uint64_t now = zri_now_ms();
-        if (now - s->cc_last_loss_ms > 20) {
-            if (s->cc_burst > 1) {
-                s->cc_burst = s->cc_burst / 2;
-            }
-            s->cc_last_loss_ms = now;
-        }
     }
     (void)udp;
     for (i = 0; i < n; i++) {
         uint32_t len = 0;
-        const uint8_t *packet = zri_tx_ring_get(&s->tx_ring, seqs[i], &len);
+        const uint8_t *packet;
+        /*
+         * seq >= send_seq 表示该分片还在 txq 里尚未发出；接收端看不到它才报
+         * NACK。这不是丢包，不能据此减窗，否则会形成“越限速越 NACK、越 NACK
+         * 越限速”的自激振荡（16 KiB 消息会从亚毫秒退化到几十毫秒）。
+         */
+        if ((int16_t)(seqs[i] - s->send_seq) >= 0) {
+            unsent = 1;
+            continue;
+        }
+        packet = zri_tx_ring_get(&s->tx_ring, seqs[i], &len);
         if (packet) {
             (void)ntk_socket_sendto(s->sock, packet, len, s->peer_ip_s, s->peer_port);
             s->retx++;
+            lost_sent = 1;
             if (s->metrics) {
                 s->metrics->udp_retransmissions++;
             }
+        }
+    }
+    /*
+     * 对端在等尚未发出的分片：立即按批量上限排空 txq，而不是等下一个 tick。
+     * 注意不能用已崩到 1 的 cc_burst 作为预算，否则每次 NACK 只能多发一片。
+     */
+    if (unsent) {
+        session_txq_drain_budget(udp, s, zri_now_ms(), TX_BATCH_MAX);
+    }
+    /* 只有确实重传了已发送分片才视为拥塞丢包并减窗。 */
+    if (lost_sent) {
+        uint64_t now = zri_now_ms();
+        if (now - s->cc_last_loss_ms > 20) {
+            if (s->cc_burst > CC_BURST_MIN) {
+                s->cc_burst = s->cc_burst / 2;
+            }
+            s->cc_last_loss_ms = now;
         }
     }
 }

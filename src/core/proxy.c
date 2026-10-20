@@ -56,7 +56,8 @@ int zri_proxy_resolve(proxy_t *proxy, const char *service, char *ip_out, size_t 
  */
 static int proxy_stub_send(stub_t *stub, const char *service, const char *method,
                            const payload_t *payload, stub_kind_t kind,
-                           uint64_t request_id, stub_target_t *target, void *user_data) {
+                           uint64_t request_id, uint64_t timeout_ms, stub_target_t *target,
+                           void *user_data) {
     proxy_t *proxy = (proxy_t *)user_data;
     node_t *node = stub_node(stub);
     transport_kind_t transport = TRANSPORT_UDP;
@@ -73,13 +74,28 @@ static int proxy_stub_send(stub_t *stub, const char *service, const char *method
     target->transport = transport;
     return zri_node_send_call(node, target, service, method, payload,
                               kind == STUB_EVENT ? KIND_EVENT : KIND_REQUEST,
-                              request_id);
+                              request_id, timeout_ms);
 }
 
 static void cancel_task_fn(void *user) {
     zri_cancel_task_t *t = (zri_cancel_task_t *)user;
-    zri_pending_t *p = zri_pending_find(t->proxy->node, t->id);
+    node_t *node = t->proxy->node;
+    zri_pending_t *p = zri_pending_find(node, t->id);
     if (p) {
+        /*
+         * 先通知服务端取消（best-effort），再本地回调。服务端据此跳过仍在排队
+         * 的 worker 任务；已运行的 handler 可通过 call_canceled() 自行提前退出。
+         */
+        if (p->has_req && p->port) {
+            stub_target_t target;
+            memset(&target, 0, sizeof(target));
+            zri_copy_str(target.ip, sizeof(target.ip), p->ip, "0.0.0.0");
+            zri_copy_str(target.scheme, sizeof(target.scheme), p->scheme, "udp");
+            target.port = p->port;
+            target.transport = p->transport;
+            (void)zri_node_send_call(node, &target, p->service, p->method, NULL,
+                                     KIND_CANCEL, p->request_id, 0);
+        }
         zri_pending_invoke(p, ERR_NOTFOUND, NULL);
     }
     free(t);
@@ -209,6 +225,8 @@ int proxy_call_stream(proxy_t *proxy, const char *service, const char *method,
 void zri_pending_retx(node_t *node, zri_pending_t *p) {
     stub_target_t target;
     payload_t pl;
+    uint64_t now;
+    uint64_t remaining;
     if (!node || !p || !p->has_req) {
         return;
     }
@@ -220,7 +238,9 @@ void zri_pending_retx(node_t *node, zri_pending_t *p) {
     pl.data = p->data;
     pl.len = p->len;
     pl.encoding = p->encoding;
+    now = zri_now_ms();
+    remaining = p->deadline_ms > now ? p->deadline_ms - now : 1;
     (void)zri_node_send_call(node, &target, p->service, p->method, &pl, KIND_REQUEST,
-                             p->request_id);
+                             p->request_id, remaining);
     node->metrics.retries++;
 }

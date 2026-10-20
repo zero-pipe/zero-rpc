@@ -40,6 +40,10 @@ int zri_node_resolve(node_t *node, const char *service, int prefer_stream,
 
 static void node_dispatch(node_t *node, zri_transport_t *transport,
                           const zri_message_t *msg) {
+    if (msg->kind == KIND_CANCEL) {
+        zri_service_handle_cancel(node, transport, msg);
+        return;
+    }
     if (msg->kind == KIND_REQUEST || msg->kind == KIND_EVENT) {
         if (msg->has_stream) {
             zri_service_handle_stream_chunk(node, transport, msg);
@@ -120,7 +124,7 @@ int zri_node_send(node_t *node, transport_kind_t transport_kind, const char *sch
 
 int zri_node_send_call(node_t *node, const stub_target_t *target, const char *service,
                        const char *method, const payload_t *payload, uint8_t kind,
-                       uint64_t request_id) {
+                       uint64_t request_id, uint64_t timeout_ms) {
     zri_message_t message;
     char route[ROUTE_MAX];
 
@@ -133,6 +137,8 @@ int zri_node_send_call(node_t *node, const stub_target_t *target, const char *se
     memset(&message, 0, sizeof(message));
     message.kind = kind;
     message.request_id = (uint32_t)request_id;
+    /* 请求剩余超时透传给服务端（0 = 无 deadline）；CANCEL 不使用该字段。 */
+    message.timeout_ms = timeout_ms > 0xffffffffull ? 0xffffffffu : (uint32_t)timeout_ms;
     message.route = route;
     message.payload = payload ? *payload : (payload_t){0};
     message.peer_ip = target->ip;

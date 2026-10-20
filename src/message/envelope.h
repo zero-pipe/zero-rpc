@@ -13,12 +13,13 @@ extern "C" {
 #endif
 
 /* Provider-neutral RPC envelope. All integer fields are big-endian. */
-#define ENVELOPE_HDR_LEN 36
+#define ENVELOPE_HDR_LEN 40
 
 /* RPC kind (envelope-level semantics). */
 #define KIND_REQUEST 0
 #define KIND_RESPONSE 1
 #define KIND_EVENT 2
+#define KIND_CANCEL 3 /* 客户端取消：按 request_id + 对端定位在途调用 */
 
 #define STREAM_FLAG_STREAM 0x80
 #define STREAM_FLAG_FIRST  STREAM_FIRST
@@ -30,7 +31,7 @@ extern "C" {
  * "view" type): encode reads the fields, decode fills them. route_len is an
  * output on decode and ignored on encode (derived from strlen(route)).
  *
- * Wire header (big-endian), 36 bytes:
+ * Wire header (big-endian), 40 bytes:
  *   [0]      kind
  *   [1]      encoding
  *   [2]      stream_flags
@@ -42,6 +43,7 @@ extern "C" {
  *   [24..31] stream_total_size
  *   [32..33] route_len
  *   [34..35] reserved
+ *   [36..39] timeout_ms   (请求剩余超时；0 = 无 deadline；CANCEL 时忽略)
  */
 typedef struct zri_envelope {
     uint8_t kind;
@@ -52,6 +54,7 @@ typedef struct zri_envelope {
     uint32_t stream_id;
     uint64_t stream_offset;
     uint64_t stream_total_size;
+    uint32_t timeout_ms; /* 请求剩余超时毫秒；0 = 无 deadline */
     const char *route;
     uint16_t route_len; /* decode: filled; encode: ignored */
     const void *payload;

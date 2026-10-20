@@ -104,6 +104,7 @@ typedef struct options {
 typedef struct callout {
     ntk_sem *sem;
     int status;
+    int app_status;
     size_t resp_len;
     int verify_ok;
     uint64_t send_ns;
@@ -122,6 +123,7 @@ static size_t g_expect_len;
 static void on_response(int status, const response_t *resp, void *user) {
     callout_t *co = (callout_t *)user;
     co->status = status;
+    co->app_status = resp ? resp->status : status;
     co->resp_len = (status == OK && resp) ? resp->payload.len : 0;
     co->latency_ns = now_ns() - co->send_ns;
     co->verify_ok = 1;
@@ -178,6 +180,7 @@ static void usage(const char *argv0) {
         "          [--max-requests n] [--payload-bytes n] [--expect-response-bytes n]\n"
         "          [--timeout-ms n] [--rate qps] [--window n] [--verify-response]\n"
         "          [--connect-timeout-seconds n] [--worker-id id] [--output path|-]\n"
+        "          [--mode static|mesh]\n"
         "          [--discovery-port p] [--data-port p] [--max-msg-bytes n] [--bind ip] [--peer host:port]",
         argv0);
 }
@@ -241,7 +244,7 @@ static void ed_resp(int status, const response_t *resp, void *user) {
 
     g_lat_hist[hidx]++;
 
-    ok = (status == OK) &&
+    ok = (status == OK) && resp && resp->status == OK &&
          (g_opt.expect_response_bytes == 0 ||
           (resp && resp->payload.len == g_opt.expect_response_bytes));
     if (ok && g_opt.verify_response && resp) {
@@ -261,7 +264,8 @@ static void ed_resp(int status, const response_t *resp, void *user) {
         g_lat_count++;
     } else {
         g_failed++;
-        error_add(g_errors, &g_error_count, status);
+        error_add(g_errors, &g_error_count,
+                  status != OK ? status : (resp ? resp->status : ERR_STATE));
     }
 
     if (now_ns() >= g_deadline_ns ||
@@ -353,6 +357,7 @@ int main(int argc, char **argv) {
     char target_host[64];
     int i;
     int rc;
+    node_mode_t mode = MODE_MESH;
     FILE *out = stdout;
 
     memset(&opt, 0, sizeof(opt));
@@ -373,6 +378,8 @@ int main(int argc, char **argv) {
                                                                              : TRANSPORT_UDP;
         } else if (strcmp(a, "--service") == 0 && i + 1 < argc) {
             opt.service = argv[++i];
+        } else if (strcmp(a, "--mode") == 0 && i + 1 < argc) {
+            mode = (strcmp(argv[++i], "static") == 0) ? MODE_STATIC : MODE_MESH;
         } else if (strcmp(a, "--method") == 0 && i + 1 < argc) {
             opt.method = argv[++i];
         } else if (strcmp(a, "--worker-id") == 0 && i + 1 < argc) {
@@ -450,6 +457,7 @@ int main(int argc, char **argv) {
     cfg.data_port = opt.data_port;
     cfg.discovery_host = "255.255.255.255";
     cfg.discovery_port = opt.discovery_port;
+    cfg.mode = mode;
     cfg.io_threads = 1;
     cfg.hello_interval_ms = 100;
     cfg.node_ttl_ms = 3000;
@@ -575,7 +583,7 @@ int main(int argc, char **argv) {
                     uint64_t hidx = (uint64_t)lat_hist_index(us);
                     g_lat_hist[hidx]++;
                 }
-                if (co.status == OK && co.verify_ok &&
+                if (co.status == OK && co.app_status == OK && co.verify_ok &&
                     (opt.expect_response_bytes == 0 || co.resp_len == opt.expect_response_bytes)) {
                     succeeded++;
                     response_bytes += co.resp_len;
@@ -589,7 +597,8 @@ int main(int argc, char **argv) {
                     lat_count++;
                 } else {
                     failed++;
-                    error_add(errors, &error_count, co.status);
+                    error_add(errors, &error_count,
+                              co.status != OK ? co.status : co.app_status);
                 }
                 index++;
             }

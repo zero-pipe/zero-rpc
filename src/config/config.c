@@ -128,6 +128,8 @@ int config_load(const char *json, config_t *out) {
     out->node.mode = cfg_mode(root, "mode", MODE_MESH);
     out->node.data_port = (uint16_t)cfg_u32(root, "data_port", 0);
     out->node.io_threads = cfg_u32(root, "io_threads", 0);
+    out->node.handler_threads = cfg_u32(root, "handler_threads", 0);
+    out->node.handler_max_concurrency = cfg_u32(root, "handler_max_concurrency", 0);
     out->node.frag_bytes = (uint16_t)cfg_u32(root, "frag_bytes", 0);
     out->node.max_msg_bytes = cfg_u32(root, "max_msg_bytes", 0);
     out->node.backpressure_bytes = cfg_u32(root, "backpressure_bytes", 0);

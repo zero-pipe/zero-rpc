@@ -20,7 +20,8 @@ static void test_parse(void) {
     const char *json =
         "{"
         "\"name\":\"n1\",\"transport\":\"tcp\",\"data_port\":9000,"
-        "\"io_threads\":2,\"mode\":\"static\",\"frag_bytes\":1024,\"max_msg_bytes\":4194304,"
+        "\"io_threads\":2,\"handler_threads\":3,\"handler_max_concurrency\":64,"
+        "\"mode\":\"static\",\"frag_bytes\":1024,\"max_msg_bytes\":4194304,"
         "\"discovery\":{\"broadcast\":\"127.0.0.1:41953\",\"hello_interval_ms\":500,"
         "\"node_ttl_ms\":9000,"
         "\"peers\":[\"10.0.0.1:41953\"]},"
@@ -35,6 +36,8 @@ static void test_parse(void) {
     CHECK(cfg.node.mode == MODE_STATIC);
     CHECK(cfg.node.data_port == 9000);
     CHECK(cfg.node.io_threads == 2);
+    CHECK(cfg.node.handler_threads == 3);
+    CHECK(cfg.node.handler_max_concurrency == 64);
     CHECK(cfg.node.frag_bytes == 1024);
     CHECK(cfg.node.max_msg_bytes == 4194304);
     CHECK(strcmp(cfg.discovery_host, "127.0.0.1") == 0);

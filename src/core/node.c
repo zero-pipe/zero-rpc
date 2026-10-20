@@ -5,6 +5,8 @@
 #include "transport_factory.h"
 #include "util.h"
 
+#include <log.h>
+
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,6 +27,73 @@ static uint32_t zri_rand(void) {
     return st;
 }
 
+/* ---- 定长对象复用池 ---- */
+
+int zri_obj_pool_init(zri_obj_pool_t *pool, unsigned limit) {
+    if (!pool) {
+        return ERR_INVALID;
+    }
+    memset(pool, 0, sizeof(*pool));
+    pool->limit = limit ? limit : 256;
+    pool->lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    return pool->lock ? OK : ERR_NOMEM;
+}
+
+void zri_obj_pool_destroy(zri_obj_pool_t *pool) {
+    void *obj;
+    if (!pool) {
+        return;
+    }
+    obj = pool->free_list;
+    while (obj) {
+        void *next = *(void **)obj;
+        free(obj);
+        obj = next;
+    }
+    pool->free_list = NULL;
+    pool->count = 0;
+    if (pool->lock) {
+        ntk_mutex_destroy(pool->lock);
+        pool->lock = NULL;
+    }
+}
+
+void *zri_obj_pool_alloc(zri_obj_pool_t *pool, size_t size) {
+    void *obj = NULL;
+    if (!pool || !pool->lock) {
+        return malloc(size);
+    }
+    if (ntk_mutex_trylock(pool->lock) == NTK_OK) {
+        if (pool->free_list) {
+            obj = pool->free_list;
+            pool->free_list = *(void **)obj;
+            if (pool->count > 0) {
+                pool->count--;
+            }
+        }
+        ntk_mutex_unlock(pool->lock);
+    }
+    return obj ? obj : malloc(size);
+}
+
+void zri_obj_pool_free(zri_obj_pool_t *pool, void *obj) {
+    if (!obj) {
+        return;
+    }
+    if (pool && pool->lock && ntk_mutex_trylock(pool->lock) == NTK_OK) {
+        if (pool->count < pool->limit) {
+            *(void **)obj = pool->free_list;
+            pool->free_list = obj;
+            pool->count++;
+            obj = NULL;
+        }
+        ntk_mutex_unlock(pool->lock);
+    }
+    if (obj) {
+        free(obj);
+    }
+}
+
 /* ---- 定时器 ---- */
 
 static void hello_timer_cb(void *user) {
@@ -41,6 +110,7 @@ static void node_timer_cb(void *user) {
         node->registry_backend->ops->tick(node, now);
     }
     zri_service_expire_streams(node, now);
+    zri_node_expire_cancels(node, now);
     zri_pending_tick(node, now);
 }
 
@@ -97,6 +167,7 @@ int node_create(const node_config_t *cfg, node_t **out) {
                                                   : BACKPRESSURE_DEFAULT;
     node->rtcp_interval_ms = cfg->rtcp_interval_ms ? cfg->rtcp_interval_ms : RTCP_INTERVAL_MS;
     node->rtcp_disabled = cfg->rtcp_disabled;
+    node->handler_max_concurrency = cfg->handler_max_concurrency;
     {
         const char *dp = getenv("DROP_PERCENT");
         int v = dp ? atoi(dp) : 0;
@@ -118,6 +189,21 @@ int node_create(const node_config_t *cfg, node_t **out) {
     node->registry_backend = (cfg->mode == MODE_MESH) ? zri_registry_backend_mesh() : NULL;
     node->id_lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
     if (!node->id_lock) {
+        node_destroy(node);
+        return ERR_NOMEM;
+    }
+    /* 保护 worker 限流计数与自定义 executor 诊断计数。 */
+    node->handler_limit_mutex = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    if (!node->handler_limit_mutex) {
+        node_destroy(node);
+        return ERR_NOMEM;
+    }
+    if (zri_obj_pool_init(&node->worker_call_pool, 256) != OK) {
+        node_destroy(node);
+        return ERR_NOMEM;
+    }
+    if (zri_obj_pool_init(&node->handler_task_pool, 256) != OK ||
+        zri_obj_pool_init(&node->reply_task_pool, 256) != OK) {
         node_destroy(node);
         return ERR_NOMEM;
     }
@@ -147,6 +233,23 @@ int node_create(const node_config_t *cfg, node_t **out) {
         bopts.max_per_bucket = BUF_POOL_MAX_PER_BUCKET;
         bopts.thread_safe = 0; /* poller 本地，热路径无锁 */
         if (ntk_poller_pool_attach_buf_pools(node->pool, &bopts) != NTK_OK) {
+            node_destroy(node);
+            return ERR_NOMEM;
+        }
+    }
+
+    /*
+     * 可选 handler 线程池：把注册为 *_worker 的业务 handler 移出 poller，
+     * 避免单个阻塞 handler 卡死整条 poller。回复经 ntk_poller_async 回投。
+     */
+    if (cfg->handler_threads > 0) {
+        ntk_thread_pool_opts_t hopts;
+        memset(&hopts, 0, sizeof(hopts));
+        hopts.thread_count = cfg->handler_threads;
+        hopts.priority = NTK_THREAD_PRIO_NORMAL;
+        hopts.auto_start = 1;
+        node->handler_pool = ntk_thread_pool_create(&hopts);
+        if (!node->handler_pool) {
             node_destroy(node);
             return ERR_NOMEM;
         }
@@ -206,9 +309,49 @@ void node_destroy(node_t *node) {
             node->registry_backend->ops->announce(node, 1); /* BYE */
         }
     }
+    /*
+     * 先销毁 handler 线程池：drain 队列并 join worker。worker 期间的 reply 会
+     * 回投仍运行的 poller，从而在传输/路由销毁前完成发送。
+     */
+    if (node->handler_pool) {
+        ntk_thread_pool_destroy(node->handler_pool);
+        node->handler_pool = NULL;
+    }
+    /* 池已 drain，worker task/call 已归还；此时销毁复用池。 */
+    zri_obj_pool_destroy(&node->handler_task_pool);
+    zri_obj_pool_destroy(&node->worker_call_pool);
     /* Quiesce poller callbacks before destroying sockets or transport state. */
     if (node->pool) {
         ntk_poller_pool_stop(node->pool);
+        /*
+         * 停线程后、拆传输前，排空回投的回复任务：此时仍在本线程执行发送，
+         * 传输对象尚存活，避免任务在传输销毁后才被 drain 造成悬垂访问。
+         */
+        {
+            unsigned pi;
+            unsigned pn = ntk_poller_pool_size(node->pool);
+            for (pi = 0; pi < pn; pi++) {
+                ntk_poller_process_pending(ntk_poller_pool_at(node->pool, pi));
+            }
+        }
+    }
+    /* 回投的回复任务已排空，任务头可安全回收。 */
+    zri_obj_pool_destroy(&node->reply_task_pool);
+    /*
+     * poller 已停：取消登记/限流计数不再被定时器或 worker 访问，可以安全销毁。
+     * 内置池已 drain 并 join，inflight 归零；自定义 executor 由调用者负责排空，
+     * 这里只做诊断，若仍有任务在飞说明契约被违反。
+     */
+    if (node->handler_limit_mutex) {
+        ntk_mutex_lock(node->handler_limit_mutex);
+        if (node->external_inflight > 0) {
+            rpc_log_error("node_destroy: %u custom-executor task(s) still in flight; "
+                          "caller must drain the executor before destroy",
+                          node->external_inflight);
+        }
+        ntk_mutex_unlock(node->handler_limit_mutex);
+        ntk_mutex_destroy(node->handler_limit_mutex);
+        node->handler_limit_mutex = NULL;
     }
     if (node->hello_timer) {
         ntk_timer_stop(node->hello_timer);

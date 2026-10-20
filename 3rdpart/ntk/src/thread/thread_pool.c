@@ -70,6 +70,7 @@ static void pool_worker(void *arg)
             break;
 
         task->fn(task->user);
+        free(task);
     }
 }
 

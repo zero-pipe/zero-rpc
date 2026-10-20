@@ -21,8 +21,12 @@
  * }
  *
  * 可选的调优字段：transport（默认 binding 的传输）、bind_host、data_port、
- * frag_bytes、max_msg_bytes、backpressure_bytes、rtcp_interval_ms、rtcp。
+ * frag_bytes、max_msg_bytes、backpressure_bytes、rtcp_interval_ms、rtcp、
+ * handler_threads、handler_max_concurrency。
  * "rtcp": false 关闭 RTCP 报告；rtcp_interval_ms 为 0 时用默认 1000ms。
+ * handler_threads > 0 时创建 handler 线程池，配合 service_method_options_t
+ * 的 SERVICE_EXEC_WORKER 把阻塞 handler 移出 poller；handler_max_concurrency
+ * > 0 时限制未完成的 worker 任务数，超限请求回 ERR_AGAIN。
  *
  * config_t 拥有所有字符串；node.* 指针指向自身缓冲区，因此 config 必须
  * 比由它创建的节点活得更久。

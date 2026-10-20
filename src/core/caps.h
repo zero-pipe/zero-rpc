@@ -43,6 +43,8 @@
 #define MAX_RETX 5
 #define TX_BATCH_MAX 32
 #define RX_BATCH_MAX 16
+/* 拥塞窗口下限：保证 16 KiB（14 个分片）始终能一次批量发出。 */
+#define CC_BURST_MIN 16
 #define MAX_FRAGMENTS (MAX_MSG / FRAG_MIN)
 #define RTX_SLOT_MAX (RTP_HDR_LEN + FRAG_HDR_LEN + FRAG_MAX)
 

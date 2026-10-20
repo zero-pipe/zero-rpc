@@ -28,7 +28,11 @@ typedef struct codec {
     const char *name;
     uint8_t encoding; /* 与 payload_t.encoding 对应 */
 
-    /* 业务对象 -> 字节流。 *out_data 由实现分配，调用方用 release 释放。 */
+    /*
+     * 业务对象 -> 字节流。*out_data 由实现分配，调用方用 release 释放。
+     * 传给 proxy_call_async / stub_call_async / proxy_call_event 时，框架会在
+     * 调用返回前复制字节，因此 release 可在调用返回后立即执行。
+     */
     int (*encode)(void *ctx, const void *obj, void **out_data, size_t *out_len);
     /* 字节流 -> 业务对象。 *out_obj 由实现分配，调用方用 release 释放。 */
     int (*decode)(void *ctx, const void *data, size_t len, void **out_obj);

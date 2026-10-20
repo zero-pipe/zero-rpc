@@ -34,6 +34,20 @@ typedef struct node_config {
     const char *discovery_host;        /* 发现目标地址，默认 "255.255.255.255" */
     uint16_t discovery_port;           /* 发现端口，0 = DISCOVERY_PORT */
     unsigned io_threads;               /* poller 线程数，0 = 硬件并发 */
+    /*
+     * 业务 handler 线程池大小：0 = 关闭（handler 在 poller 线程内联执行）。
+     * >0 时创建 ntk_thread_pool，配合 service_method_options_t 的
+     * SERVICE_EXEC_WORKER（或 *_worker 便捷接口）把可能阻塞的 handler 移出
+     * poller，避免单个慢 handler 卡死整条 poller。回复会自动回投原 poller
+     * 发送；未配置时 WORKER 方法退化为内联执行并告警。
+     */
+    unsigned handler_threads;
+    /*
+     * worker 未完成任务上限（排队 + 执行中）：0 = 不限制（默认）。
+     * >0 时超出上限的新请求不再排队，直接回 ERR_AGAIN（对齐 brpc 的
+     * max_concurrency/ELIMIT），避免无界排队导致内存与尾延迟失控。
+     */
+    unsigned handler_max_concurrency;
     uint32_t hello_interval_ms;        /* 心跳间隔，0 = 3000 */
     uint32_t node_ttl_ms;              /* 对端过期时间，0 = 9000 */
     node_mode_t mode;             /* 0 = MESH（默认），1 = STATIC */

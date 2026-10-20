@@ -5,11 +5,13 @@
  * reply_stream 与错误状态回包 zri_service_send_status。
  */
 #include "service_internal.h"
+#include "node_internal.h"
 
 #include "envelope.h"
 #include "mem.h"
 #include "util.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 /*
@@ -43,6 +45,148 @@ static void call_request_context(const call_t *call, zri_message_t *out) {
     out->peer_token = call->token;
 }
 
+/*
+ * call 可能来自 poller 的 zri_mem 池，也可能来自 worker 复用池；统一交给
+ * zri_worker_call_free 按来源回收，避免对池对象误用 zri_mem_free。
+ */
+static void call_release(call_t *call) {
+    if (call) {
+        zri_worker_call_free(call->node, call);
+    }
+}
+
+/*
+ * 跨线程回复任务。handler 在 worker 线程执行时，reply() 不能直接碰传输
+ * （UDP/TCP 的 session/link 都是 per-poller 无锁状态），必须把发送回投到
+ * 请求到达的 poller。任务自带寻址上下文，不依赖 call 的生命周期。
+ */
+typedef struct zri_reply_task {
+    node_t *node;
+    zri_transport_t *transport;
+    zri_peer_token_t token;
+    char peer_ip[ENDPOINT_MAX];
+    uint16_t peer_port;
+    uint32_t msg_id;
+    int status;
+    uint8_t *data;
+    uint8_t inline_data[128]; /* 小响应免一次 malloc */
+    size_t len;
+    uint8_t encoding;
+    int has_stream;
+    unsigned stream_flags;
+    uint32_t stream_id;
+    uint64_t stream_offset;
+} zri_reply_task_t;
+
+static void reply_task_destroy(zri_reply_task_t *t) {
+    if (!t) {
+        return;
+    }
+    if (t->data && t->data != t->inline_data) {
+        free(t->data);
+    }
+    if (t->node && t->node->reply_task_pool.lock) {
+        zri_obj_pool_free(&t->node->reply_task_pool, t);
+    } else {
+        free(t);
+    }
+}
+
+static void reply_task_fn(void *user) {
+    zri_reply_task_t *t = (zri_reply_task_t *)user;
+    zri_message_t request;
+    payload_t payload;
+    stream_meta_t stream;
+    const stream_meta_t *stream_ptr = NULL;
+
+    memset(&request, 0, sizeof(request));
+    request.request_id = t->msg_id;
+    request.peer_ip = t->peer_ip;
+    request.peer_port = t->peer_port;
+    request.peer_token = t->token;
+
+    memset(&payload, 0, sizeof(payload));
+    payload.data = t->data;
+    payload.len = t->len;
+    payload.encoding = t->encoding;
+
+    if (t->has_stream) {
+        memset(&stream, 0, sizeof(stream));
+        stream.flags = t->stream_flags;
+        stream.stream_id = t->stream_id;
+        stream.offset = t->stream_offset;
+        stream_ptr = &stream;
+    }
+    (void)send_reply(t->transport, &request, t->status, &payload, stream_ptr);
+    reply_task_destroy(t);
+}
+
+/*
+ * 把回复拷成任务回投 call->poller。release_call 非 0 时，任务接管 call
+ * （unary 回复 / STREAM_LAST）；分块响应的中间 chunk 保留 call。
+ */
+static int reply_marshal(call_t *call, int status, const payload_t *payload,
+                         const stream_meta_t *stream, int release_call) {
+    zri_reply_task_t *t;
+    int free_call = release_call && !call->stream_owned;
+
+    if (!call->poller) {
+        if (free_call) {
+            call_release(call);
+        }
+        return ERR_STATE;
+    }
+    t = call->node && call->node->reply_task_pool.lock
+            ? (zri_reply_task_t *)zri_obj_pool_alloc(&call->node->reply_task_pool, sizeof(*t))
+            : (zri_reply_task_t *)calloc(1, sizeof(*t));
+    if (!t) {
+        if (free_call) {
+            call_release(call);
+        }
+        return ERR_NOMEM;
+    }
+    memset(t, 0, sizeof(*t));
+    t->node = call->node;
+    t->transport = call->transport;
+    t->token = call->token;
+    zri_copy_str(t->peer_ip, sizeof(t->peer_ip), call->peer_ip, "0.0.0.0");
+    t->peer_port = call->peer_port;
+    t->msg_id = call->msg_id;
+    t->status = status;
+    if (payload && payload->len > 0 && payload->data) {
+        t->data = payload->len <= sizeof(t->inline_data)
+                      ? t->inline_data
+                      : (uint8_t *)malloc(payload->len);
+        if (!t->data) {
+            reply_task_destroy(t);
+            if (free_call) {
+                call_release(call);
+            }
+            return ERR_NOMEM;
+        }
+        memcpy(t->data, payload->data, payload->len);
+        t->len = payload->len;
+        t->encoding = payload->encoding;
+    }
+    if (stream) {
+        t->has_stream = 1;
+        t->stream_flags = stream->flags;
+        t->stream_id = stream->stream_id;
+        t->stream_offset = stream->offset;
+    }
+    if (ntk_poller_async(call->poller, reply_task_fn, t, 1) != NTK_OK) {
+        reply_task_destroy(t);
+        if (free_call) {
+            call_release(call);
+        }
+        return ERR_IO;
+    }
+    if (free_call) {
+        call_release(call);
+    }
+    return OK;
+}
+
 void zri_service_send_status(zri_transport_t *transport, const zri_message_t *request, int status) {
     payload_t empty;
     if (!request || request->kind == KIND_EVENT) {
@@ -64,13 +208,17 @@ void reply(call_t *call, int status, const payload_t *payload) {
         return;
     }
     if (!call->node || !call->transport) {
-        zri_mem_free(call);
+        call_release(call);
+        return;
+    }
+    if (call->poller && !ntk_poller_is_current_thread(call->poller)) {
+        (void)reply_marshal(call, status, payload, NULL, 1);
         return;
     }
     call_request_context(call, &request);
     (void)send_reply(call->transport, &request, status, payload, NULL);
     if (!call->stream_owned) {
-        zri_mem_free(call);
+        call_release(call);
     }
 }
 
@@ -101,12 +249,21 @@ int reply_stream(call_t *call, int status, const chunk_t *chunk) {
     stream.stream_id = call->msg_id;
     stream.offset = chunk ? chunk->offset : 0;
     stream.total_size = 0;
+
+    if (call->poller && !ntk_poller_is_current_thread(call->poller)) {
+        int last = chunk && (chunk->flags & STREAM_LAST);
+        if (last) {
+            call->replied = 1;
+        }
+        return reply_marshal(call, status, &payload, &stream, last);
+    }
+
     call_request_context(call, &request);
     rc = send_reply(call->transport, &request, status, &payload, &stream);
     if (chunk && (chunk->flags & STREAM_LAST)) {
         call->replied = 1;
         if (!call->stream_owned) {
-            zri_mem_free(call);
+            call_release(call);
         }
     }
     return rc;

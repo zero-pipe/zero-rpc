@@ -12,7 +12,10 @@
 
 - **三种调用形态**：`proxy_call_async(...)` 异步回调、`proxy_call_sync(...)` 阻塞等待、
   `proxy_call_event(...)` 单向事件。核心仍是异步的，sync 只是可选的阻塞封装。
-- **不新增线程**：全部运行在 NTK 的 `ntk_poller_pool` 线程上；回调都在 poller 线程触发（禁止阻塞）。
+- **默认不新增线程**：默认全部运行在 NTK 的 `ntk_poller_pool` 线程上；回调都在 poller 线程触发（禁止阻塞）。
+  需要阻塞的 handler 在注册时选择 `SERVICE_EXEC_WORKER`（或 `service_add_method_worker`），
+  框架把它调度到 `handler_threads` 线程池；也可以选择 `SERVICE_EXEC_EXECUTOR`
+  接入调用者自己的线程池。回复都会自动回投原 poller 发送。
 - **可组合传输**：node 管理一个或多个 binding；每个 binding 用 `scheme://host:port` 标识。
   上层只看到统一的 envelope + 消息上下文。UDP 在内部用 RTP/RTCP 承载分片、NACK/RTX 与
   链路反馈来实现可靠性；TCP 本身可靠，只加长度前缀分帧，不引入 RTP/RTCP。
@@ -238,7 +241,12 @@ void *bytes; size_t len;
 my_codec.encode(NULL, &order, &bytes, &len);
 payload_t pl = { bytes, len, my_codec.encoding };
 proxy_call_async(proxy, "OrderService", "get", &pl, on_resp, NULL, 1000, NULL);
+/* 框架已在返回前复制 payload，可立即释放 encode 产生的字节。 */
+my_codec.release(NULL, bytes);
 ```
+
+注意：`proxy_call_async` / `stub_call_async` / `proxy_call_event` 都会复制 payload，
+因此 `release` 放在调用返回后即可；若等回调再释放会泄漏。
 
 `encoding` 随消息透传，接收端用 `node_find_codec(node, resp->payload.encoding)` 找到对应 codec 解码。
 
@@ -277,7 +285,7 @@ proxy_call_async(proxy, "OrderService", "get", &pl, on_resp, NULL, 1000, NULL);
 ```
 
 - `discovery.broadcast` 是 `host:port`，`peers` 是额外的单播 HELLO 目标，元素为 `host:port`。
-- 可选调优字段（顶层）：`transport`、`bind_host`、`data_port`、`frag_bytes`、`max_msg_bytes`、`backpressure_bytes`、`rtcp_interval_ms`（RTCP SR/RR 上报间隔，默认 1000ms）、`rtcp`（`false` 关闭 RTCP）。
+- 可选调优字段（顶层）：`transport`、`bind_host`、`data_port`、`frag_bytes`、`max_msg_bytes`、`backpressure_bytes`、`rtcp_interval_ms`（RTCP SR/RR 上报间隔，默认 1000ms）、`rtcp`（`false` 关闭 RTCP）、`handler_threads`（阻塞 handler 线程池大小，0 = 关闭）、`handler_max_concurrency`（worker 未完成任务上限，0 = 不限）。
 
 完整可运行见 `examples/08_config_{server,client}.json`。
 
@@ -296,6 +304,49 @@ node_create_from_config(&cfg, &node); /* 创建节点并应用 peers / routes */
 - `msg_id` 为 32 位；`request_id` 对外为 `uint64_t`，内部取低 32 位。
 - 单条消息上限 1 MiB；UDP 每分片默认 1200 字节（收发两端须一致）。
 - 请求/响应视图（含 payload）仅在本次回调内有效，需要跨回调保存时请自行拷贝。
+- 发送侧 payload 所有权：`proxy_call_async` / `stub_call_async` / `proxy_call_event`
+  会在返回前复制 payload（跨线程调用同样），调用方保留自己的缓冲区并在返回后立即释放，
+  无需等回调；框架不会 free 调用方内存。服务端 `reply()` 也只在调用期间借用响应 payload。
+- 执行模式由调用者在注册时选择：`service_add_method_ex` /
+  `service_add_sync_method_ex` 传 `SERVICE_EXEC_INLINE` 走 poller 内联，
+  传 `SERVICE_EXEC_WORKER` 走 `handler_threads` 线程池，传
+  `SERVICE_EXEC_EXECUTOR` 走调用者提供的 `service_executor_t`；`options == NULL`
+  默认 INLINE，`*_worker` 系列是 WORKER 的便捷封装。
+- 未配置 `handler_threads` 时 WORKER 方法退化为 INLINE 并告警；任务入池失败
+  直接回错误状态，不会回退到 poller 内联执行。流式方法目前只支持 INLINE。
+- `handler_max_concurrency > 0` 时限制 worker 未完成任务数（排队 + 执行中），
+  超出上限的新请求直接回 `ERR_AGAIN`（对齐 brpc 的 `max_concurrency`/`ELIMIT`），
+  避免无界排队拖垮内存和尾延迟；0 表示不限制（默认）。
+
+```c
+service_method_options_t opts = SERVICE_METHOD_OPTIONS_INIT;
+opts.exec = SERVICE_EXEC_WORKER;
+service_add_method_ex(svc, "slow_query", slow_handler, user, &opts);
+service_add_method(svc, "ping", ping_handler, user); /* 默认 INLINE */
+```
+
+`service_method_options_t.executor` 用于接入调用者自己的执行器
+（对齐 gRPC `executor()` 的借用语义）。设置 `exec = SERVICE_EXEC_EXECUTOR`
+并传入非 NULL executor 即可，框架只调用 `submit`，不负责创建/销毁/排空。
+调用者必须保证 executor 活过 node，并在 `node_destroy` 前停止提交、等待所有
+已提交任务完成；未配置内置 `handler_threads` 也可以使用自定义 executor。
+
+```c
+service_executor_t exec = { &my_exec_ctx, my_exec_submit };
+service_method_options_t opts = SERVICE_METHOD_OPTIONS_INIT;
+opts.exec = SERVICE_EXEC_EXECUTOR;
+opts.executor = &exec;
+service_add_method_ex(svc, "slow_query", slow_handler, user, &opts);
+```
+
+- deadline 传播（对齐 gRPC）：客户端的 `timeout_ms` 会随请求透传到服务端，换算成
+  绝对 deadline 暴露为 `req->deadline_ms` / `call_deadline_ms(call)`（0 = 无）。
+  排队中的 worker/executor 任务若在启动前已过期，框架直接跳过 handler 并回
+  `ERR_TIMEOUT`；handler 也可据此提前放弃注定被客户端丢弃的重活。
+- 取消传播（对齐 gRPC cancellation，best-effort）：`proxy_cancel` 先向服务端发送
+  `KIND_CANCEL`，再本地回调 `ERR_NOTFOUND`。服务端按 `request_id + 对端` 登记，
+  仍在排队的 worker 任务启动前被跳过；已运行的 handler 无法被抢占，可用
+  `call_canceled(call)` 周期检查后尽快退出。取消登记有 TTL，不会无界增长。
 
 ## 压测
 
