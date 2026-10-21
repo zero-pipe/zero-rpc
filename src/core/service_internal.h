@@ -40,8 +40,6 @@ struct call {
     uint16_t peer_port;
     uint32_t msg_id;
     uint64_t deadline_ms; /* 请求 deadline（绝对单调 ms，0 = 无） */
-    metadata_t metadata;  /* 请求 metadata 解码副本 */
-    int has_metadata;
     int replied;
     int one_way; /* EVENT：handler 可复用，但不产生响应 */
     int stream_owned;
@@ -82,8 +80,7 @@ typedef struct zri_recv_stream {
     int intercepted;
     service_interceptor_fn interceptor;
     void *interceptor_user;
-    metadata_t metadata;
-    int has_metadata;
+    metadata_t *metadata; /* 请求 metadata 解码副本，按需分配；无则为 NULL */
     uint64_t deadline_ms;
     struct zri_stream_task *pending_head;
     struct zri_stream_task *pending_tail;

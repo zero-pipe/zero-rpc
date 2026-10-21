@@ -73,11 +73,11 @@ typedef struct stream stream_t;
 typedef struct chunk {
     const void *data;
     size_t len;
-    uint8_t encoding;
     uint64_t offset;
-    unsigned flags;
     const metadata_t *metadata; /* 可为 NULL；仅在本次回调内有效 */
     const char *message;        /* 状态消息，可为 NULL */
+    unsigned flags;
+    uint8_t encoding;
 } chunk_t;
 
 /* 传输层透传的 stream 元数据；unary 消息为 NULL。 */

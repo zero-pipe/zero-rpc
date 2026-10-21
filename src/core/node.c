@@ -427,6 +427,8 @@ void node_destroy(node_t *node) {
                 node->recv_streams[i].call = NULL;
                 node->recv_streams[i].used = 0;
             }
+            free(node->recv_streams[i].metadata);
+            node->recv_streams[i].metadata = NULL;
         }
     }
     free(node);

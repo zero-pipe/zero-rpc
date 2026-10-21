@@ -151,7 +151,8 @@ int metadata_decode(metadata_t *metadata, const void *buf, size_t len) {
         key_len = get_u16(p + off);
         value_len = get_u16(p + off + 2);
         off += 4;
-        if (key_len == 0 || key_len >= METADATA_KEY_MAX || len - off < (size_t)key_len + value_len) {
+        if (key_len == 0 || key_len >= METADATA_KEY_MAX ||
+            len - off < (size_t)key_len + value_len) {
             return ERR_INVALID;
         }
         memcpy(key, p + off, key_len);

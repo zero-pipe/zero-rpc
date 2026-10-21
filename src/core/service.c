@@ -78,8 +78,7 @@ typedef struct zri_handler_task {
     size_t payload_len;
     uint8_t encoding;
     uint64_t deadline_ms; /* 请求 deadline（绝对单调 ms，0 = 无） */
-    metadata_t metadata;
-    int has_metadata;
+    metadata_t *metadata; /* 请求 metadata 解码副本，按需分配；无则为 NULL */
     int external; /* 1 = 自定义 executor 任务 */
 } zri_handler_task_t;
 
@@ -102,6 +101,7 @@ static void handler_task_destroy(zri_handler_task_t *t) {
     if (t->payload && t->payload != t->inline_payload) {
         free(t->payload);
     }
+    free(t->metadata);
     if (t->node && t->node->handler_task_pool.lock) {
         zri_obj_pool_free(&t->node->handler_task_pool, t);
     } else {
@@ -162,10 +162,6 @@ static void handler_task_run(void *user) {
     call->msg_id = t->msg_id;
     call->one_way = one_way;
     call->deadline_ms = t->deadline_ms;
-    if (t->has_metadata) {
-        call->metadata = t->metadata;
-        call->has_metadata = 1;
-    }
 
     req.service = t->service;
     req.method = t->method;
@@ -175,7 +171,7 @@ static void handler_task_run(void *user) {
     req.peer_ip = call->peer_ip;
     req.peer_port = call->peer_port;
     req.deadline_ms = t->deadline_ms;
-    req.metadata = t->has_metadata ? &t->metadata : NULL;
+    req.metadata = t->metadata;
 
     /*
      * 排队期间可能已过期或被客户端取消：启动 handler 前再检查一次，避免做
@@ -396,9 +392,15 @@ static int handler_task_create(node_t *node, zri_transport_t *transport,
     zri_copy_str(t->method, sizeof(t->method), method, "");
     t->encoding = msg->payload.encoding;
     t->deadline_ms = deadline_from_timeout(msg->timeout_ms);
-    if (msg->metadata_len > 0 && msg->metadata &&
-        metadata_decode(&t->metadata, msg->metadata, msg->metadata_len) == OK) {
-        t->has_metadata = t->metadata.count > 0;
+    if (msg->metadata_len > 0 && msg->metadata) {
+        metadata_t *md = (metadata_t *)malloc(sizeof(*md));
+        if (md) {
+            if (metadata_decode(md, msg->metadata, msg->metadata_len) == OK && md->count > 0) {
+                t->metadata = md;
+            } else {
+                free(md);
+            }
+        }
     }
     t->payload_len = payload_len;
     if (payload_len > 0) {
@@ -578,10 +580,8 @@ void zri_service_handle_request(node_t *node, zri_transport_t *transport,
             metadata_decode(&request_metadata, msg->metadata, msg->metadata_len) == OK &&
             request_metadata.count > 0) {
             has_metadata = 1;
-            call->metadata = request_metadata;
-            call->has_metadata = 1;
         }
-        req.metadata = has_metadata ? &call->metadata : NULL;
+        req.metadata = has_metadata ? &request_metadata : NULL;
         {
             int one_way = call->one_way;
             int st = svc->interceptor ? svc->interceptor(call, &req, svc->interceptor_user) : OK;
@@ -677,8 +677,7 @@ typedef struct zri_stream_task {
     uint8_t encoding;
     unsigned flags;
     uint64_t offset;
-    metadata_t metadata;
-    int has_metadata;
+    const metadata_t *metadata; /* 借用 stream 状态里的副本；仅本次任务内有效 */
     uint64_t deadline_ms;
     service_interceptor_fn interceptor;
     void *interceptor_user;
@@ -714,6 +713,7 @@ static void stream_clear_pending(zri_recv_stream_t *state) {
 static void stream_close(zri_recv_stream_t *state) {
     call_t *call = state->call;
     stream_clear_pending(state);
+    free(state->metadata);
     memset(state, 0, sizeof(*state));
     if (call) {
         zri_mem_free(call);
@@ -786,7 +786,7 @@ static void stream_task_run(void *user) {
     req.peer_ip = call->peer_ip;
     req.peer_port = call->peer_port;
     req.deadline_ms = task->deadline_ms;
-    req.metadata = task->has_metadata ? &task->metadata : NULL;
+    req.metadata = task->metadata;
     chunk.data = task->data;
     chunk.len = task->len;
     chunk.encoding = task->encoding;
@@ -900,9 +900,16 @@ void zri_service_handle_stream_chunk(node_t *node, zri_transport_t *transport,
             state->interceptor = svc ? svc->interceptor : NULL;
             state->interceptor_user = svc ? svc->interceptor_user : NULL;
             state->deadline_ms = state->call ? state->call->deadline_ms : 0;
-            if (msg->metadata_len > 0 && msg->metadata &&
-                metadata_decode(&state->metadata, msg->metadata, msg->metadata_len) == OK) {
-                state->has_metadata = state->metadata.count > 0;
+            if (msg->metadata_len > 0 && msg->metadata) {
+                metadata_t *md = (metadata_t *)calloc(1, sizeof(*md));
+                if (md) {
+                    if (metadata_decode(md, msg->metadata, msg->metadata_len) == OK &&
+                        md->count > 0) {
+                        state->metadata = md;
+                    } else {
+                        free(md);
+                    }
+                }
             }
             zri_copy_str(state->service, sizeof(state->service), tmp, "");
             zri_copy_str(state->method_name, sizeof(state->method_name), dot + 1, "");
@@ -942,9 +949,8 @@ void zri_service_handle_stream_chunk(node_t *node, zri_transport_t *transport,
             }
             memcpy(task->data, msg->payload.data, task->len);
         }
-        if (state->has_metadata) {
+        if (state->metadata) {
             task->metadata = state->metadata;
-            task->has_metadata = 1;
         }
         state->intercepted = 1;
         state->last_ms = zri_now_ms();
@@ -978,7 +984,7 @@ void zri_service_handle_stream_chunk(node_t *node, zri_transport_t *transport,
     request.peer_ip = state->call->peer_ip;
     request.peer_port = msg->peer_port;
     request.deadline_ms = state->call->deadline_ms;
-    request.metadata = state->has_metadata ? &state->metadata : NULL;
+    request.metadata = state->metadata;
     memset(&chunk, 0, sizeof(chunk));
     chunk.data = msg->payload.data;
     chunk.len = msg->payload.len;
@@ -991,8 +997,7 @@ void zri_service_handle_stream_chunk(node_t *node, zri_transport_t *transport,
         if (st != OK) {
             state->intercepted = 1;
             reply_stream(state->call, st, NULL);
-            zri_mem_free(state->call);
-            memset(state, 0, sizeof(*state));
+            stream_close(state);
             return;
         }
     }
@@ -1000,8 +1005,7 @@ void zri_service_handle_stream_chunk(node_t *node, zri_transport_t *transport,
     method->stream_fn(state->call, &request, &chunk, method->user);
 
     if (stream_meta->flags & STREAM_LAST) {
-        zri_mem_free(state->call);
-        memset(state, 0, sizeof(*state));
+        stream_close(state);
     }
 }
 
