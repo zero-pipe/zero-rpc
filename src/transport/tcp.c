@@ -16,6 +16,7 @@
  */
 #include "transport_internal.h"
 
+#include "atomic.h"
 #include "envelope.h"
 #include "iobuf.h"
 #include "util.h"
@@ -187,7 +188,7 @@ static void tcp_link_consume(zri_tcp_transport_t *t, zri_tcp_link_t *link)
             return;
         }
         if (zri_tcp_parse(a->buf + a->rpos, frame, &body, &body_len) == 1) {
-            t->base.metrics->tcp_frames_received++;
+            ZRI_METRIC_INC(t->base.metrics->tcp_frames_received);
             tcp_link_dispatch(t, link, body, body_len);
         }
         a->rpos += frame;
@@ -275,7 +276,7 @@ static int tcp_link_emit(zri_tcp_transport_t *t,
         lens[1] = payload_len;
         rc = ntk_tcp_session_sendv(link->session, parts, lens, payload_len ? 2u : 1u);
         if (rc == NTK_OK) {
-            t->base.metrics->tcp_frames_sent++;
+            ZRI_METRIC_INC(t->base.metrics->tcp_frames_sent);
             return OK;
         }
         return (rc == NTK_ERR_AGAIN) ? ERR_AGAIN : ERR_IO;
@@ -304,7 +305,7 @@ static int tcp_link_emit(zri_tcp_transport_t *t,
             return ERR_NOMEM;
         }
         tcp_link_flush_tx(t, link);
-        t->base.metrics->tcp_frames_sent++;
+        ZRI_METRIC_INC(t->base.metrics->tcp_frames_sent);
         return OK;
     }
 
@@ -326,7 +327,7 @@ static int tcp_link_emit(zri_tcp_transport_t *t,
             sent = ntk_socket_send(sock, header, header_len);
         }
         if (sent == (ntk_ssize_t)total) {
-            t->base.metrics->tcp_frames_sent++;
+            ZRI_METRIC_INC(t->base.metrics->tcp_frames_sent);
             return OK;
         }
         if (sent == NTK_ERR_AGAIN) {
@@ -352,7 +353,7 @@ static int tcp_link_emit(zri_tcp_transport_t *t,
             }
         }
         tcp_link_flush_tx(t, link);
-        t->base.metrics->tcp_frames_sent++;
+        ZRI_METRIC_INC(t->base.metrics->tcp_frames_sent);
         return OK;
     }
 }
@@ -672,7 +673,7 @@ static int tcp_send_common(zri_tcp_transport_t *t, zri_tcp_link_t *link, const z
     }
     if (!zri_iobuf_empty(&link->tx) &&
         zri_iobuf_len(&link->tx) + need > (size_t)t->base.bp_high_water) {
-        t->base.metrics->backpressure_events++;
+        ZRI_METRIC_INC(t->base.metrics->backpressure_events);
         return ERR_AGAIN;
     }
 

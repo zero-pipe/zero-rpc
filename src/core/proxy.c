@@ -3,6 +3,7 @@
 #include "proxy_internal.h"
 
 #include "envelope.h"
+#include "atomic.h"
 #include "util.h"
 
 #include <stdio.h>
@@ -166,6 +167,10 @@ void proxy_destroy(proxy_t *proxy)
 {
     if (!proxy) {
         return;
+    }
+    /* 先取消该 proxy 名下在途调用；回调在 poller 上完成后再释放 proxy/stub。 */
+    if (proxy->stub) {
+        (void)zri_stub_cancel_all(proxy->stub, ERR_CLOSED);
     }
     stub_destroy(proxy->stub);
     free(proxy);
@@ -429,5 +434,5 @@ void zri_pending_retx(node_t *node, zri_pending_t *p)
                              remaining,
                              p->metadata,
                              p->metadata_len);
-    node->metrics.retries++;
+    ZRI_METRIC_INC(node->metrics.retries);
 }

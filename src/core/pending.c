@@ -3,6 +3,7 @@
  */
 #include "pending.h"
 
+#include "atomic.h"
 #include "mem.h"
 #include "node_internal.h"
 
@@ -12,7 +13,11 @@
 static void pending_recycle(node_t *node, zri_pending_t *p)
 {
     p->used = 0;
+    if (node && node->pending_count > 0) {
+        node->pending_count--;
+    }
     p->node = NULL;
+    p->owner = NULL;
     p->cb = NULL;
     p->user = NULL;
     p->streaming = 0;
@@ -66,10 +71,10 @@ void zri_pending_invoke(zri_pending_t *p, int status, const response_t *resp)
     p->len = 0;
     if (node) {
         if (status == ERR_TIMEOUT) {
-            node->metrics.timeouts++;
+            ZRI_METRIC_INC(node->metrics.timeouts);
         }
         if (status != OK) {
-            node->metrics.requests_failed++;
+            ZRI_METRIC_INC(node->metrics.requests_failed);
         }
     }
     if (p->streaming) {
@@ -123,10 +128,22 @@ void zri_pending_release(zri_pending_t *p)
 }
 
 zri_pending_t *zri_pending_add(
-    node_t *node, uint64_t id, response_fn cb, void *user, uint64_t timeout_ms)
+    node_t *node, uint64_t id, response_fn cb, void *user, uint64_t timeout_ms, int *out_rc)
 {
     zri_pending_t *p;
+    if (out_rc) {
+        *out_rc = OK;
+    }
     if (!node) {
+        if (out_rc) {
+            *out_rc = ERR_INVALID;
+        }
+        return NULL;
+    }
+    if (node->max_inflight && node->pending_count >= node->max_inflight) {
+        if (out_rc) {
+            *out_rc = ERR_AGAIN;
+        }
         return NULL;
     }
     if (node->pending_free) {
@@ -136,6 +153,9 @@ zri_pending_t *zri_pending_add(
     } else {
         p = (zri_pending_t *)calloc(1, sizeof(*p));
         if (!p) {
+            if (out_rc) {
+                *out_rc = ERR_NOMEM;
+            }
             return NULL;
         }
         p->next = node->pending;
@@ -143,6 +163,7 @@ zri_pending_t *zri_pending_add(
     }
     p->used = 1;
     p->node = node;
+    p->owner = NULL;
     p->request_id = id;
     p->cb = cb;
     p->user = user;
@@ -163,6 +184,7 @@ zri_pending_t *zri_pending_add(
     p->retries = 0;
     p->bp_retries = 0;
     HASH_ADD(hh, node->pending_hash, request_id, sizeof(p->request_id), p);
+    node->pending_count++;
     return p;
 }
 
@@ -236,4 +258,5 @@ void zri_pending_cleanup(node_t *node)
     node->pending = NULL;
     node->pending_hash = NULL;
     node->pending_free = NULL;
+    node->pending_count = 0;
 }

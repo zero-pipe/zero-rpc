@@ -53,7 +53,26 @@ static int send_reply(zri_transport_t *transport,
         reply.stream = *stream;
         reply.has_stream = 1;
     }
-    return zri_transport_reply(transport, &reply);
+    {
+        int rc = zri_transport_reply(transport, &reply);
+        /*
+         * 记录 UDP unary 的最终响应，供重复请求（重传）重放；框架状态包、
+         * 流式分块、EVENT 不参与去重。
+         */
+        if (rc == OK && flags == 0 && !stream && request->kind == KIND_REQUEST &&
+            request->request_id != 0 && transport->kind == TRANSPORT_UDP && transport->node) {
+            zri_dedup_complete(&transport->node->dedup,
+                               transport,
+                               request,
+                               status,
+                               payload,
+                               metadata,
+                               metadata_len,
+                               message,
+                               message_len);
+        }
+        return rc;
+    }
 }
 
 /* 从 call_t 还原请求上下文（异步 reply 时请求视图已失效，只保留寻址信息）。 */

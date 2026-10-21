@@ -19,6 +19,7 @@
 #include <stdint.h>
 
 #include "caps.h"
+#include "dedup.h"
 #include "discovery.h"
 #include "pending.h"
 #include "registry.h"
@@ -69,6 +70,9 @@ struct node {
     unsigned handler_max_concurrency; /* 0 = 不限制 */
     unsigned handler_inflight;        /* worker 排队 + 执行中的任务数 */
     unsigned external_inflight;       /* 自定义 executor 未完成任务数（诊断用） */
+    uint32_t max_inflight;             /* 客户端 pending 上限 */
+    unsigned pending_count;            /* 当前未完成调用数（仅 node->poller 线程访问） */
+    int shutting_down;                 /* node_destroy 已开始 */
     zri_obj_pool_t worker_call_pool;  /* worker 路径 call_t 复用池 */
     zri_obj_pool_t handler_task_pool; /* worker/executor 任务头复用池 */
     zri_obj_pool_t reply_task_pool;   /* 跨线程回复任务头复用池 */
@@ -78,13 +82,16 @@ struct node {
     ntk_timer *node_timer;
 
     service_t *services;
+    ntk_mutex *services_lock; /* 保护 services/methods 链表（注册 vs 请求分发） */
+    ntk_mutex *codecs_lock;   /* 保护 codecs 链表 */
     zri_discovery_state_t discovery;
     zri_pending_t *pending;      /* 全部 pending 槽位（按需分配） */
     zri_pending_t *pending_hash; /* request_id -> pending，O(1) 查找 */
     zri_pending_t *pending_free; /* 可复用的空闲槽位 */
+    zri_dedup_t dedup;           /* 服务端请求去重 / 响应重放（UDP unary） */
     zri_recv_stream_t recv_streams[MAX_RECV_STREAMS];
     zri_cancel_slot_t cancels[CANCEL_SLOTS]; /* 在途调用取消登记（best-effort） */
-    volatile unsigned cancel_count;          /* 已登记取消数；0 时查询走无锁快路径 */
+    unsigned cancel_count;                   /* 已登记取消数；原子访问，0 时查询走快路径 */
     zri_codec_entry_t *codecs;
 
     node_mode_t mode;

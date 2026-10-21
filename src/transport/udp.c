@@ -6,6 +6,7 @@
  */
 #include "transport_internal.h"
 
+#include "atomic.h"
 #include "envelope.h"
 #include "reasm.h"
 #include "rx_window.h"
@@ -110,26 +111,41 @@ typedef struct zri_udp_transport {
     int io_count;
 } zri_udp_transport_t;
 
+/* 伪随机：会话可能在任意 poller 上创建，状态必须无数据竞争。 */
+static uint32_t xorshift_next(uint32_t *state)
+{
+    uint32_t cur = zri_atomic_load_u32(state);
+    if (cur == 0) {
+        cur = (uint32_t)ntk_monotonic_ms() ^ 0x9e3779b9u;
+        if (cur == 0) {
+            cur = 0x9e3779b9u;
+        }
+    }
+    for (;;) {
+        uint32_t next = cur;
+        next ^= next << 13;
+        next ^= next >> 17;
+        next ^= next << 5;
+        if (next == 0) {
+            next = 1;
+        }
+        if (zri_atomic_cas_u32(state, &cur, next)) {
+            return next;
+        }
+    }
+}
+
 /* 丢包注入用的确定性伪随机 */
 static uint32_t sess_rand(void)
 {
     static uint32_t st = 0x9e3779b9u;
-    st ^= st << 13;
-    st ^= st >> 17;
-    st ^= st << 5;
-    return st;
+    return xorshift_next(&st);
 }
 
 static uint32_t udp_rand(void)
 {
     static uint32_t st;
-    if (st == 0) {
-        st = (uint32_t)ntk_monotonic_ms() ^ 0x9e3779b9u;
-    }
-    st ^= st << 13;
-    st ^= st >> 17;
-    st ^= st << 5;
-    return st;
+    return xorshift_next(&st);
 }
 
 static void session_cleanup(zri_session_t *s)
@@ -341,7 +357,7 @@ static void emit_frag(zri_udp_transport_t *udp,
     }
     s->send_seq++;
     s->tx_pkts++;
-    udp->base.metrics->udp_packets_sent++;
+    ZRI_METRIC_INC(udp->base.metrics->udp_packets_sent);
     /* RTCP Sender Report 的收发计数与时间戳映射 */
     s->rtcp_pkt_count++;
     s->rtcp_octet_count += chunk;
@@ -473,7 +489,7 @@ static void fec_try_reconstruct(zri_udp_transport_t *udp,
         v2.chunk = acc;
         s->fec_rx_valid = 0; /* 已消费 */
         if (s->metrics) {
-            s->metrics->udp_retransmissions++; /* FEC 重建计一次恢复 */
+            ZRI_METRIC_INC(s->metrics->udp_retransmissions); /* FEC 重建计一次恢复 */
         }
         (void)session_on_data(udp, s, &v2, now_ms);
     }
@@ -539,7 +555,7 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_me
 
     if (s->txq) {
         /* 上一条消息仍在拥塞排空：返回背压，不覆盖，避免隐性丢包。 */
-        udp->base.metrics->backpressure_events++;
+        ZRI_METRIC_INC(udp->base.metrics->backpressure_events);
         return ERR_AGAIN;
     }
     env_len = zri_envelope_size(route_len, metadata_len, status_len, len);
@@ -717,7 +733,7 @@ static int session_on_data(zri_udp_transport_t *udp,
     s->last_rx_data_ms = now_ms;
     s->acked_upto = s->send_seq;
     s->rto_attempts = 0;
-    udp->base.metrics->udp_packets_received++;
+    ZRI_METRIC_INC(udp->base.metrics->udp_packets_received);
     if (!s->ssrc_remote_known) {
         s->ssrc_remote = v->ssrc;
         s->ssrc_remote_known = 1;
@@ -747,7 +763,7 @@ static int session_on_data(zri_udp_transport_t *udp,
             }
             s->jitter += ((double)d - s->jitter) / 16.0;
             if (s->metrics) {
-                s->metrics->rtcp_jitter_ms = (uint32_t)s->jitter;
+                zri_atomic_store_u32(&s->metrics->rtcp_jitter_ms, (uint32_t)s->jitter);
             }
         }
         s->transit_prev = transit;
@@ -823,7 +839,7 @@ static void session_on_nack(zri_udp_transport_t *udp,
             s->retx++;
             lost_sent = 1;
             if (s->metrics) {
-                s->metrics->udp_retransmissions++;
+                ZRI_METRIC_INC(s->metrics->udp_retransmissions);
             }
         }
     }
@@ -902,7 +918,8 @@ static void apply_report_blocks(zri_session_t *s, const zri_rtcp_report_block_t 
         }
         s->rtcp_remote_lost = rb[i].cumulative_lost;
         if (s->metrics) {
-            s->metrics->rtcp_remote_lost = rb[i].cumulative_lost;
+        zri_atomic_store_u32((uint32_t *)&s->metrics->rtcp_remote_lost,
+                             (uint32_t)rb[i].cumulative_lost);
         }
         if (rb[i].lsr != 0) {
             /* RTT = now - LSR - DLSR，单位 1/65536 秒。 */
@@ -910,7 +927,7 @@ static void apply_report_blocks(zri_session_t *s, const zri_rtcp_report_block_t 
             uint32_t rtt_ms = (uint32_t)(((uint64_t)d * 1000ull) >> 16);
             s->last_rtt_ms = rtt_ms;
             if (s->metrics) {
-                s->metrics->rtcp_rtt_ms = rtt_ms;
+                zri_atomic_store_u32(&s->metrics->rtcp_rtt_ms, rtt_ms);
             }
         }
     }
@@ -928,7 +945,7 @@ static void session_on_rtcp(
         if (zri_frame_parse_sr(buf, n, &sr) == 1) {
             s->rtcp_sr_received++;
             if (s->metrics) {
-                s->metrics->rtcp_sr_received++;
+                ZRI_METRIC_INC(s->metrics->rtcp_sr_received);
             }
             s->ssrc_remote = sr.ssrc;
             s->ssrc_remote_known = 1;
@@ -942,7 +959,7 @@ static void session_on_rtcp(
         if (zri_frame_parse_rr(buf, n, &rr) == 1) {
             s->rtcp_rr_received++;
             if (s->metrics) {
-                s->metrics->rtcp_rr_received++;
+                ZRI_METRIC_INC(s->metrics->rtcp_rr_received);
             }
             if (!s->ssrc_remote_known) {
                 s->ssrc_remote = rr.ssrc;
@@ -984,7 +1001,7 @@ static void session_send_rtcp(zri_udp_transport_t *udp, zri_session_t *s, uint64
             s->rtcp_last_sr_ntp = ntp_middle32(msw, lsw);
             s->rtcp_sr_sent++;
             if (s->metrics) {
-                s->metrics->rtcp_sr_sent++;
+                ZRI_METRIC_INC(s->metrics->rtcp_sr_sent);
             }
         }
     } else {
@@ -993,7 +1010,7 @@ static void session_send_rtcp(zri_udp_transport_t *udp, zri_session_t *s, uint64
         if (n > 0) {
             s->rtcp_rr_sent++;
             if (s->metrics) {
-                s->metrics->rtcp_rr_sent++;
+                ZRI_METRIC_INC(s->metrics->rtcp_rr_sent);
             }
         }
     }
@@ -1021,7 +1038,7 @@ static void session_send_bye(zri_udp_transport_t *udp, zri_session_t *s)
     }
     (void)ntk_socket_sendto(s->sock, buf, n, s->peer_ip_s, s->peer_port);
     if (s->metrics) {
-        s->metrics->rtcp_bye_sent++;
+        ZRI_METRIC_INC(s->metrics->rtcp_bye_sent);
     }
 }
 
@@ -1032,7 +1049,7 @@ static void reasm_on_lost(const zri_reasm_slot_t *slot, void *user)
     if (s) {
         s->lost++;
         if (s->metrics) {
-            s->metrics->udp_reassembly_expired++;
+            ZRI_METRIC_INC(s->metrics->udp_reassembly_expired);
         }
     }
 }
@@ -1107,7 +1124,7 @@ static void session_tick(zri_udp_transport_t *udp, zri_session_t *s, uint64_t no
             zri_tx_ring_mark_sent(&s->tx_ring, seq, now_ms);
             s->retx++;
             if (s->metrics) {
-                s->metrics->udp_retransmissions++;
+                ZRI_METRIC_INC(s->metrics->udp_retransmissions);
             }
         }
         s->rto_attempts++;
@@ -1134,7 +1151,7 @@ static void session_tick(zri_udp_transport_t *udp, zri_session_t *s, uint64_t no
                 (void)ntk_socket_sendto(s->sock, nack, n, s->peer_ip_s, s->peer_port);
                 s->last_nack_ms = now_ms;
                 if (s->metrics) {
-                    s->metrics->udp_nacks_sent++;
+                    ZRI_METRIC_INC(s->metrics->udp_nacks_sent);
                 }
             }
         }
@@ -1199,7 +1216,7 @@ static void data_recv_cb(ntk_socket *sock, void *user)
                         s->ssrc_remote_known = 0;
                         s->have_last_rx_sr = 0;
                         if (s->metrics) {
-                            s->metrics->rtcp_bye_received++;
+                            ZRI_METRIC_INC(s->metrics->rtcp_bye_received);
                         }
                     }
                     continue;

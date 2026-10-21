@@ -15,6 +15,7 @@
 typedef struct zri_pending {
     int used;
     node_t *node;
+    const void *owner; /* 创建该调用的 stub；用于 stub/proxy 销毁时批量取消 */
     uint64_t request_id;
     response_fn cb;
     void *user;
@@ -48,7 +49,7 @@ typedef struct zri_pending {
 } zri_pending_t;
 
 zri_pending_t *zri_pending_add(
-    node_t *node, uint64_t id, response_fn cb, void *user, uint64_t timeout_ms);
+    node_t *node, uint64_t id, response_fn cb, void *user, uint64_t timeout_ms, int *out_rc);
 zri_pending_t *zri_pending_find(node_t *node, uint64_t id);
 void zri_pending_invoke(zri_pending_t *p, int status, const response_t *resp);
 void zri_pending_release(zri_pending_t *p);

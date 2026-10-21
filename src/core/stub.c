@@ -3,6 +3,7 @@
 #include "proxy_internal.h"
 
 #include "envelope.h"
+#include "atomic.h"
 #include "mem.h"
 #include "util.h"
 
@@ -105,18 +106,21 @@ static void stub_call_now(stub_t *stub,
     payload_t pl;
     stub_target_t target;
     int rc;
+    int prc = OK;
 
-    p = zri_pending_add(node, id, streaming ? NULL : cb, user, timeout_ms);
+    p = zri_pending_add(node, id, streaming ? NULL : cb, user, timeout_ms, &prc);
     if (!p) {
+        int err = prc == OK ? ERR_NOMEM : prc;
         if (streaming) {
             if (done_cb) {
-                done_cb(ERR_NOMEM, user);
+                done_cb(err, user);
             }
         } else if (cb) {
-            cb(ERR_NOMEM, NULL, user);
+            cb(err, NULL, user);
         }
         return;
     }
+    p->owner = stub;
     p->streaming = streaming;
     p->chunk_cb = chunk_cb;
     p->done_cb = done_cb;
@@ -176,8 +180,8 @@ static void stub_call_now(stub_t *stub,
     p->transport = target.transport;
     zri_copy_str(p->scheme, sizeof(p->scheme), target.scheme, "udp");
     if (rc == OK) {
-        node->metrics.requests_sent++;
-        node->metrics.bytes_sent += len;
+        ZRI_METRIC_INC(node->metrics.requests_sent);
+        ZRI_METRIC_ADD(node->metrics.bytes_sent, len);
         return;
     }
     if (rc == ERR_AGAIN && p->bp_retries++ < 1000) {
@@ -566,4 +570,88 @@ int stub_call_async_ex(stub_t *stub,
                             timeout_ms,
                             out_request_id,
                             metadata);
+}
+
+/* ---- 批量取消（销毁前调用，避免回调访问已释放对象） ---- */
+
+typedef struct zri_stub_cancel_all_task {
+    stub_t *stub;
+    int status;
+    ntk_sem *sem;
+} zri_stub_cancel_all_task_t;
+
+static void stub_cancel_all_now(stub_t *stub, int status)
+{
+    node_t *node = stub ? stub->node : NULL;
+    zri_pending_t *p;
+    zri_pending_t *tail = NULL;
+    if (!node) {
+        return;
+    }
+    /* 记录初始尾节点，避免回调内再次发起调用被误取消。 */
+    for (p = node->pending; p; p = p->next) {
+        tail = p;
+    }
+    p = node->pending;
+    while (p) {
+        zri_pending_t *next = p->next;
+        if (p->used && p->owner == stub) {
+            zri_pending_invoke(p, status, NULL);
+        }
+        if (p == tail) {
+            break;
+        }
+        p = next;
+    }
+}
+
+static void stub_cancel_all_task_fn(void *user)
+{
+    zri_stub_cancel_all_task_t *t = (zri_stub_cancel_all_task_t *)user;
+    stub_cancel_all_now(t->stub, t->status);
+    if (t->sem) {
+        ntk_sem_post(t->sem, 1);
+    }
+    free(t);
+}
+
+int zri_stub_cancel_all(stub_t *stub, int status)
+{
+    node_t *node;
+    if (!stub || !(node = stub->node)) {
+        return ERR_INVALID;
+    }
+    if (node->shutting_down) {
+        return OK; /* poller 已停，回调不会再运行，无需取消 */
+    }
+    if (ntk_poller_is_current_thread(node->poller)) {
+        stub_cancel_all_now(stub, status);
+        return OK;
+    }
+    {
+        ntk_sem *sem = ntk_sem_create(0);
+        zri_stub_cancel_all_task_t *t;
+        if (!sem) {
+            return ERR_NOMEM;
+        }
+        t = (zri_stub_cancel_all_task_t *)calloc(1, sizeof(*t));
+        if (!t) {
+            ntk_sem_destroy(sem);
+            return ERR_NOMEM;
+        }
+        t->stub = stub;
+        t->status = status;
+        t->sem = sem;
+        if (ntk_poller_async(node->poller, stub_cancel_all_task_fn, t, 1) != NTK_OK) {
+            free(t);
+            ntk_sem_destroy(sem);
+            return ERR_IO;
+        }
+        if (ntk_sem_timedwait(sem, 5000) != NTK_OK) {
+            /* 超时：任务可能仍在执行，sem 交给任务/后续回收，这里不销毁。 */
+            return ERR_TIMEOUT;
+        }
+        ntk_sem_destroy(sem);
+    }
+    return OK;
 }

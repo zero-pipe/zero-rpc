@@ -7,6 +7,7 @@
 #include "node_internal.h"
 
 #include "envelope.h"
+#include "atomic.h"
 #include "pending.h"
 #include "service_internal.h"
 #include "util.h"
@@ -98,8 +99,8 @@ static void node_dispatch(node_t *node, zri_transport_t *transport, const zri_me
         if (!p) {
             return;
         }
-        node->metrics.responses_received++;
-        node->metrics.bytes_received += msg->payload.len;
+        ZRI_METRIC_INC(node->metrics.responses_received);
+        ZRI_METRIC_ADD(node->metrics.bytes_received, msg->payload.len);
         if (msg->flags & MSG_FLAG_FRAMEWORK_STATUS) {
             /* 框架错误走回调 status 通道，response_t.status 只放业务码。 */
             zri_pending_invoke(p, msg->status, NULL);

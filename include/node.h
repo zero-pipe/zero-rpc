@@ -48,6 +48,11 @@ typedef struct node_config {
      * max_concurrency/ELIMIT），避免无界排队导致内存与尾延迟失控。
      */
     unsigned handler_max_concurrency;
+    /*
+     * 客户端未完成调用（pending）上限：0 = 默认 65536。超出后新调用直接返回
+     * ERR_AGAIN，避免无界排队耗尽内存（对齐 gRPC 的并发流上限）。
+     */
+    uint32_t max_inflight;
     uint32_t hello_interval_ms;  /* 心跳间隔，0 = 3000 */
     uint32_t node_ttl_ms;        /* 对端过期时间，0 = 9000 */
     node_mode_t mode;            /* 0 = MESH（默认），1 = STATIC */

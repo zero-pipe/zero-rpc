@@ -29,6 +29,7 @@ struct service {
     zri_method_t *methods;
     service_interceptor_fn interceptor;
     void *interceptor_user;
+    int removed; /* service_destroy 后置位：不再匹配新请求，内存留到 node 销毁 */
 };
 
 struct call {

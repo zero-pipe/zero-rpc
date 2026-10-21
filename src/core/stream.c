@@ -73,6 +73,7 @@ static void stream_open_task_fn(void *user)
     zri_stream_open_task_t *task = (zri_stream_open_task_t *)user;
     stream_t *stream = task->stream;
     zri_pending_t *pending;
+    int prc = OK;
     if (stream->closed) {
         free(task);
         return;
@@ -81,10 +82,12 @@ static void stream_open_task_fn(void *user)
                               stream->request_id,
                               stream->bidi ? NULL : stream_response,
                               stream,
-                              stream->timeout_ms);
+                              stream->timeout_ms,
+                              &prc);
     if (!pending) {
-        stream_response(ERR_NOMEM, NULL, stream);
+        stream_response(prc == OK ? ERR_NOMEM : prc, NULL, stream);
     } else {
+        pending->owner = stream->stub;
         if (stream->bidi) {
             pending->streaming = 1;
             pending->chunk_cb = stream_bidi_chunk;
@@ -211,6 +214,7 @@ int proxy_stream_open(proxy_t *proxy,
         return ERR_NOMEM;
     }
     stream->proxy = proxy;
+    stream->stub = proxy->stub;
     stream->node = proxy->node;
     stream->cb = cb;
     stream->user = user;
@@ -275,6 +279,7 @@ int proxy_stream_open_bidi(proxy_t *proxy,
         return ERR_NOMEM;
     }
     stream->proxy = proxy;
+    stream->stub = proxy->stub;
     stream->node = proxy->node;
     stream->bidi = 1;
     stream->chunk_cb = on_chunk;

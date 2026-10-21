@@ -1,6 +1,7 @@
 /* 节点：生命周期、传输装配、线程/发现配置与阻塞运行（分发见 zri_dispatch.c）。 */
 #include "node_internal.h"
 
+#include "atomic.h"
 #include "mem.h"
 #include "transport_factory.h"
 #include "util.h"
@@ -120,6 +121,7 @@ static void node_timer_cb(void *user)
     zri_service_expire_streams(node, now);
     zri_node_expire_cancels(node, now);
     zri_pending_tick(node, now);
+    zri_dedup_expire(&node->dedup, now);
 }
 
 /* ---- 公共 API ---- */
@@ -176,6 +178,7 @@ int node_create(const node_config_t *cfg, node_t **out)
     node->rtcp_interval_ms = cfg->rtcp_interval_ms ? cfg->rtcp_interval_ms : RTCP_INTERVAL_MS;
     node->rtcp_disabled = cfg->rtcp_disabled;
     node->handler_max_concurrency = cfg->handler_max_concurrency;
+    node->max_inflight = cfg->max_inflight ? cfg->max_inflight : DEFAULT_MAX_INFLIGHT;
     {
         const char *dp = getenv("DROP_PERCENT");
         int v = dp ? atoi(dp) : 0;
@@ -197,6 +200,12 @@ int node_create(const node_config_t *cfg, node_t **out)
     node->registry_backend = (cfg->mode == MODE_MESH) ? zri_registry_backend_mesh() : NULL;
     node->id_lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
     if (!node->id_lock) {
+        node_destroy(node);
+        return ERR_NOMEM;
+    }
+    node->services_lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    node->codecs_lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    if (!node->services_lock || !node->codecs_lock) {
         node_destroy(node);
         return ERR_NOMEM;
     }
@@ -312,6 +321,7 @@ void node_destroy(node_t *node)
     if (!node) {
         return;
     }
+    node->shutting_down = 1;
     if (node->started && node->mode == MODE_MESH) {
         if (node->registry_backend && node->registry_backend->ops->announce) {
             node->registry_backend->ops->announce(node, 1); /* BYE */
@@ -427,6 +437,14 @@ void node_destroy(node_t *node)
     if (node->id_lock) {
         ntk_mutex_destroy(node->id_lock);
     }
+    if (node->services_lock) {
+        ntk_mutex_destroy(node->services_lock);
+        node->services_lock = NULL;
+    }
+    if (node->codecs_lock) {
+        ntk_mutex_destroy(node->codecs_lock);
+        node->codecs_lock = NULL;
+    }
     {
         int i;
         for (i = 0; i < MAX_RECV_STREAMS; i++) {
@@ -497,7 +515,35 @@ void node_metrics(const node_t *node, metrics_t *out)
         memset(out, 0, sizeof(*out));
         return;
     }
-    *out = node->metrics;
+    /* 逐字段原子读，避免与多个 poller 的增量并发时读到撕裂值。 */
+#define ZRI_METRICS_SNAPSHOT_U64(field) \
+    out->field = zri_atomic_load_u64(&node->metrics.field)
+    ZRI_METRICS_SNAPSHOT_U64(requests_sent);
+    ZRI_METRICS_SNAPSHOT_U64(responses_received);
+    ZRI_METRICS_SNAPSHOT_U64(requests_failed);
+    ZRI_METRICS_SNAPSHOT_U64(timeouts);
+    ZRI_METRICS_SNAPSHOT_U64(retries);
+    ZRI_METRICS_SNAPSHOT_U64(bytes_sent);
+    ZRI_METRICS_SNAPSHOT_U64(bytes_received);
+    ZRI_METRICS_SNAPSHOT_U64(udp_packets_sent);
+    ZRI_METRICS_SNAPSHOT_U64(udp_packets_received);
+    ZRI_METRICS_SNAPSHOT_U64(udp_retransmissions);
+    ZRI_METRICS_SNAPSHOT_U64(udp_nacks_sent);
+    ZRI_METRICS_SNAPSHOT_U64(udp_reassembly_expired);
+    ZRI_METRICS_SNAPSHOT_U64(tcp_frames_sent);
+    ZRI_METRICS_SNAPSHOT_U64(tcp_frames_received);
+    ZRI_METRICS_SNAPSHOT_U64(backpressure_events);
+    ZRI_METRICS_SNAPSHOT_U64(rtcp_sr_sent);
+    ZRI_METRICS_SNAPSHOT_U64(rtcp_rr_sent);
+    ZRI_METRICS_SNAPSHOT_U64(rtcp_sr_received);
+    ZRI_METRICS_SNAPSHOT_U64(rtcp_rr_received);
+    ZRI_METRICS_SNAPSHOT_U64(rtcp_bye_sent);
+    ZRI_METRICS_SNAPSHOT_U64(rtcp_bye_received);
+    out->rtcp_rtt_ms = zri_atomic_load_u32(&node->metrics.rtcp_rtt_ms);
+    out->rtcp_jitter_ms = zri_atomic_load_u32(&node->metrics.rtcp_jitter_ms);
+    out->rtcp_remote_lost =
+        (int32_t)zri_atomic_load_u32((const uint32_t *)&node->metrics.rtcp_remote_lost);
+#undef ZRI_METRICS_SNAPSHOT_U64
 }
 
 int node_peer_stats(const node_t *node, const char *ip, uint16_t port, peer_stats_t *out)

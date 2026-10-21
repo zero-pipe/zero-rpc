@@ -13,6 +13,7 @@ add_library(rpc STATIC
     core/service_table.c
     core/sync.c
     core/pending.c
+    core/dedup.c
     core/codec.c
     core/log.c
     core/mem.c

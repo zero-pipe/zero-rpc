@@ -52,27 +52,44 @@ static void sync_response_cb(int status, const response_t *resp, void *user)
     }
     c->status = status;
     if (status == OK && resp) {
+        int oom = 0;
         c->app_status = resp->status;
         c->encoding = resp->payload.encoding;
         if (resp->metadata && resp->metadata->count > 0) {
             c->metadata = (metadata_t *)malloc(sizeof(*c->metadata));
             if (c->metadata) {
                 *c->metadata = *resp->metadata;
+            } else {
+                oom = 1;
             }
         }
-        if (resp->message && resp->message[0]) {
+        if (!oom && resp->message && resp->message[0]) {
             size_t n = strlen(resp->message) + 1;
             c->message = (char *)malloc(n);
             if (c->message) {
                 memcpy(c->message, resp->message, n);
+            } else {
+                oom = 1;
             }
         }
-        if (resp->payload.len > 0 && resp->payload.data) {
+        if (!oom && resp->payload.len > 0 && resp->payload.data) {
             c->data = malloc(resp->payload.len);
             if (c->data) {
                 memcpy(c->data, resp->payload.data, resp->payload.len);
                 c->len = resp->payload.len;
+            } else {
+                oom = 1;
             }
+        }
+        if (oom) {
+            free(c->data);
+            c->data = NULL;
+            c->len = 0;
+            free(c->metadata);
+            c->metadata = NULL;
+            free(c->message);
+            c->message = NULL;
+            c->status = ERR_NOMEM;
         }
     }
     c->done = 1;

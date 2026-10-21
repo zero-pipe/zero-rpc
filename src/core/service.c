@@ -3,6 +3,7 @@
 #include "service_internal.h"
 
 #include "envelope.h"
+#include "atomic.h"
 #include "mem.h"
 #include "util.h"
 
@@ -36,11 +37,28 @@ typedef struct zri_svc_task {
     zri_method_t *method;
 } zri_svc_task_t;
 
+typedef struct zri_announce_task {
+    node_t *node;
+} zri_announce_task_t;
+
+static void announce_task_fn(void *user)
+{
+    zri_announce_task_t *t = (zri_announce_task_t *)user;
+    if (t) {
+        if (t->node && t->node->registry_backend && t->node->registry_backend->ops->announce) {
+            t->node->registry_backend->ops->announce(t->node, 0);
+        }
+        free(t);
+    }
+}
+
 static void svc_link_task(void *user)
 {
     zri_svc_task_t *t = (zri_svc_task_t *)user;
+    ntk_mutex_lock(t->node->services_lock);
     t->svc->next = t->node->services;
     t->node->services = t->svc;
+    ntk_mutex_unlock(t->node->services_lock);
     if (t->node->registry_backend && t->node->registry_backend->ops->announce) {
         t->node->registry_backend->ops->announce(t->node, 0);
     }
@@ -50,8 +68,10 @@ static void svc_link_task(void *user)
 static void svc_method_task(void *user)
 {
     zri_svc_task_t *t = (zri_svc_task_t *)user;
+    ntk_mutex_lock(t->node->services_lock);
     t->method->next = t->svc->methods;
     t->svc->methods = t->method;
+    ntk_mutex_unlock(t->node->services_lock);
     free(t);
 }
 
@@ -300,7 +320,7 @@ void zri_node_cancel_record(node_t *node,
         if (s->used && s->expires_ms <= now) {
             s->used = 0;
             if (node->cancel_count > 0) {
-                node->cancel_count--;
+                zri_atomic_sub_u32(&node->cancel_count, 1u);
             }
         }
         if (!s->used) {
@@ -324,7 +344,7 @@ void zri_node_cancel_record(node_t *node,
         zri_copy_str(s->peer_ip, sizeof(s->peer_ip), peer_ip, "0.0.0.0");
         s->peer_port = peer_port;
         s->expires_ms = now + CANCEL_TTL_MS;
-        node->cancel_count++;
+        zri_atomic_add_u32(&node->cancel_count, 1u);
     }
     ntk_mutex_unlock(node->handler_limit_mutex);
 }
@@ -337,7 +357,8 @@ int zri_node_is_canceled(const node_t *node,
     int found = 0;
     int i;
     uint64_t now;
-    if (!node || !node->handler_limit_mutex || node->cancel_count == 0) {
+    if (!node || !node->handler_limit_mutex ||
+        zri_atomic_load_u32(&node->cancel_count) == 0) {
         return 0;
     }
     now = zri_now_ms();
@@ -366,7 +387,7 @@ void zri_node_expire_cancels(node_t *node, uint64_t now_ms)
         if (s->used && s->expires_ms <= now_ms) {
             s->used = 0;
             if (node->cancel_count > 0) {
-                node->cancel_count--;
+                zri_atomic_sub_u32(&node->cancel_count, 1u);
             }
         }
     }
@@ -519,9 +540,12 @@ void zri_service_handle_request(node_t *node, zri_transport_t *transport, const 
     char tmp[MAX_ROUTE];
     char *dot;
     service_t *svc;
-    zri_method_t *m;
+    zri_method_t *m = NULL;
     handler_fn fn = NULL;
     void *user = NULL;
+    service_interceptor_fn interceptor = NULL;
+    void *interceptor_user = NULL;
+    int dedup_active = 0;
 
     if (!node || !msg) {
         return;
@@ -533,8 +557,9 @@ void zri_service_handle_request(node_t *node, zri_transport_t *transport, const 
         return;
     }
     *dot = '\0';
+    ntk_mutex_lock(node->services_lock);
     for (svc = node->services; svc; svc = svc->next) {
-        if (strcmp(svc->name, tmp) != 0) {
+        if (svc->removed || strcmp(svc->name, tmp) != 0) {
             continue;
         }
         for (m = svc->methods; m; m = m->next) {
@@ -544,11 +569,32 @@ void zri_service_handle_request(node_t *node, zri_transport_t *transport, const 
                 break;
             }
         }
+        if (fn) {
+            interceptor = svc->interceptor;
+            interceptor_user = svc->interceptor_user;
+        }
         break;
     }
+    ntk_mutex_unlock(node->services_lock);
     if (!fn) {
         zri_service_send_status(transport, msg, ERR_NOTFOUND);
         return;
+    }
+    /*
+     * UDP unary 去重：命中已完成请求直接重放缓存响应；命中在途请求丢弃重复，
+     * 避免非幂等 handler 被重传执行多次。TCP 可靠，不参与。
+     */
+    if (transport && transport->kind == TRANSPORT_UDP && msg->kind == KIND_REQUEST &&
+        msg->request_id != 0) {
+        int dstate = 0;
+        (void)zri_dedup_begin(&node->dedup, transport, msg, &dstate);
+        if (dstate == 1) {
+            return;
+        }
+        if (dstate == 2) {
+            return;
+        }
+        dedup_active = 1;
     }
     /*
      * WORKER 方法走节点线程池。池未配置时退化为内联并告警；入池失败时直接
@@ -563,12 +609,15 @@ void zri_service_handle_request(node_t *node, zri_transport_t *transport, const 
                                            fn,
                                            user,
                                            m->executor,
-                                           svc->interceptor,
-                                           svc->interceptor_user);
+                                           interceptor,
+                                           interceptor_user);
         if (rc == OK) {
             return;
         }
         rpc_log_error("executor dispatch failed: service=%s method=%s rc=%d", tmp, dot + 1, rc);
+        if (dedup_active) {
+            zri_dedup_abort(&node->dedup, msg);
+        }
         zri_service_send_status(transport, msg, rc);
         return;
     }
@@ -581,8 +630,8 @@ void zri_service_handle_request(node_t *node, zri_transport_t *transport, const 
                                              dot + 1,
                                              fn,
                                              user,
-                                             svc->interceptor,
-                                             svc->interceptor_user);
+                                             interceptor,
+                                             interceptor_user);
             if (rc == OK) {
                 return;
             }
@@ -592,11 +641,13 @@ void zri_service_handle_request(node_t *node, zri_transport_t *transport, const 
                 rpc_log_error(
                     "worker dispatch failed: service=%s method=%s rc=%d", tmp, dot + 1, rc);
             }
+            if (dedup_active) {
+                zri_dedup_abort(&node->dedup, msg);
+            }
             zri_service_send_status(transport, msg, rc);
             return;
         }
-        if (!node->worker_fallback_warned) {
-            node->worker_fallback_warned = 1;
+        if (zri_atomic_exchange_u32((uint32_t *)&node->worker_fallback_warned, 1u) == 0) {
             rpc_log_warn(
                 "handler_threads=0: worker method %s.%s runs inline on poller", tmp, dot + 1);
         }
@@ -614,6 +665,9 @@ void zri_service_handle_request(node_t *node, zri_transport_t *transport, const 
         metadata_t request_metadata;
         int has_metadata = 0;
         if (!call) {
+            if (dedup_active) {
+                zri_dedup_abort(&node->dedup, msg);
+            }
             zri_service_send_status(transport, msg, ERR_NOMEM);
             return;
         }
@@ -641,7 +695,7 @@ void zri_service_handle_request(node_t *node, zri_transport_t *transport, const 
         req.metadata = has_metadata ? &request_metadata : NULL;
         {
             int one_way = call->one_way;
-            int st = svc->interceptor ? svc->interceptor(call, &req, svc->interceptor_user) : OK;
+            int st = interceptor ? interceptor(call, &req, interceptor_user) : OK;
             if (st == OK) {
                 fn(call, &req, user);
             } else {
@@ -913,6 +967,8 @@ void zri_service_handle_stream_chunk(node_t *node,
     chunk_t chunk;
     const stream_meta_t *stream_meta;
     int use_worker;
+    service_interceptor_fn interceptor = NULL;
+    void *interceptor_user = NULL;
 
     if (!node || !msg || !msg->has_stream) {
         return;
@@ -949,8 +1005,9 @@ void zri_service_handle_stream_chunk(node_t *node,
             return;
         }
         *dot = '\0';
+        ntk_mutex_lock(node->services_lock);
         for (svc = node->services; svc; svc = svc->next) {
-            if (strcmp(svc->name, tmp) != 0) {
+            if (svc->removed || strcmp(svc->name, tmp) != 0) {
                 continue;
             }
             for (method = svc->methods; method; method = method->next) {
@@ -958,8 +1015,13 @@ void zri_service_handle_stream_chunk(node_t *node,
                     break;
                 }
             }
+            if (method) {
+                interceptor = svc->interceptor;
+                interceptor_user = svc->interceptor_user;
+            }
             break;
         }
+        ntk_mutex_unlock(node->services_lock);
         if (!method) {
             return;
         }
@@ -968,8 +1030,8 @@ void zri_service_handle_stream_chunk(node_t *node,
             state->method = method;
             state->run_in_worker = method->run_in_worker;
             state->executor = method->executor;
-            state->interceptor = svc ? svc->interceptor : NULL;
-            state->interceptor_user = svc ? svc->interceptor_user : NULL;
+            state->interceptor = interceptor;
+            state->interceptor_user = interceptor_user;
             state->deadline_ms = state->call ? state->call->deadline_ms : 0;
             if (msg->metadata_len > 0 && msg->metadata) {
                 metadata_t *md = (metadata_t *)calloc(1, sizeof(*md));
@@ -1041,8 +1103,8 @@ void zri_service_handle_stream_chunk(node_t *node,
         }
         return;
     }
-    if (state->run_in_worker && !node->handler_pool && !node->worker_fallback_warned) {
-        node->worker_fallback_warned = 1;
+    if (state->run_in_worker && !node->handler_pool &&
+        zri_atomic_exchange_u32((uint32_t *)&node->worker_fallback_warned, 1u) == 0) {
         rpc_log_warn("handler_threads=0: worker stream %s.%s runs inline on poller",
                      state->service,
                      state->method_name);
@@ -1139,8 +1201,27 @@ int service_create(node_t *node, const char *service_name, service_t **out)
 
 void service_destroy(service_t *svc)
 {
-    /* v1：不在运行期注销；节点销毁时统一释放。 */
-    (void)svc;
+    /*
+     * 运行期摘除：置 removed 后不再匹配新请求（查找路径跳过）。方法与服务
+     * 内存保留到 node_destroy 统一释放，避免在途 handler 仍持有 method 指针
+     * 时被释放。announce 回投 poller，保持发现面一致（best-effort）。
+     */
+    if (!svc || !svc->node || !svc->node->services_lock) {
+        return;
+    }
+    ntk_mutex_lock(svc->node->services_lock);
+    svc->removed = 1;
+    ntk_mutex_unlock(svc->node->services_lock);
+    if (svc->node->poller && svc->node->registry_backend &&
+        svc->node->registry_backend->ops->announce) {
+        zri_announce_task_t *t = (zri_announce_task_t *)calloc(1, sizeof(*t));
+        if (t) {
+            t->node = svc->node;
+            if (node_post(svc->node, announce_task_fn, t) != OK) {
+                free(t);
+            }
+        }
+    }
 }
 
 int service_set_interceptor(service_t *svc, service_interceptor_fn fn, void *user)
@@ -1148,8 +1229,14 @@ int service_set_interceptor(service_t *svc, service_interceptor_fn fn, void *use
     if (!svc) {
         return ERR_INVALID;
     }
+    if (svc->node && svc->node->services_lock) {
+        ntk_mutex_lock(svc->node->services_lock);
+    }
     svc->interceptor = fn;
     svc->interceptor_user = user;
+    if (svc->node && svc->node->services_lock) {
+        ntk_mutex_unlock(svc->node->services_lock);
+    }
     return OK;
 }
 

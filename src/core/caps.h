@@ -26,6 +26,7 @@
 
 /* ---- 每节点容量 ---- */
 #define MAX_PEERS 64
+#define DEFAULT_MAX_INFLIGHT 65536u /* 客户端未完成调用上限（防无界增长） */
 #define DISC_TARGET_MAX 32
 #define PEER_MAX_SERVICES 32
 #define CODEC_MAX 8

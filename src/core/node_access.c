@@ -52,8 +52,16 @@ size_t zri_node_service_count(const node_t *node)
     if (!node) {
         return 0;
     }
+    if (node->services_lock) {
+        ntk_mutex_lock((ntk_mutex *)node->services_lock);
+    }
     for (svc = node->services; svc; svc = svc->next) {
-        n++;
+        if (!svc->removed) {
+            n++;
+        }
+    }
+    if (node->services_lock) {
+        ntk_mutex_unlock((ntk_mutex *)node->services_lock);
     }
     return n;
 }
@@ -64,11 +72,23 @@ const char *zri_node_service_name(const node_t *node, size_t index)
     if (!node) {
         return NULL;
     }
+    if (node->services_lock) {
+        ntk_mutex_lock((ntk_mutex *)node->services_lock);
+    }
     for (svc = node->services; svc; svc = svc->next) {
+        if (svc->removed) {
+            continue;
+        }
         if (index == 0) {
+            if (node->services_lock) {
+                ntk_mutex_unlock((ntk_mutex *)node->services_lock);
+            }
             return svc->name;
         }
         index--;
+    }
+    if (node->services_lock) {
+        ntk_mutex_unlock((ntk_mutex *)node->services_lock);
     }
     return NULL;
 }

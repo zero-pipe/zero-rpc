@@ -36,6 +36,7 @@ struct stub {
 
 struct stream {
     proxy_t *proxy;
+    stub_t *stub; /* open 后只依赖 stub 指针做 owner 标记，不再解引用 proxy */
     node_t *node;
     uint64_t request_id;
     uint32_t stream_id;
@@ -81,5 +82,8 @@ int zri_stub_call_ex(stub_t *stub,
                      uint64_t timeout_ms,
                      uint64_t *out_request_id,
                      const metadata_t *metadata);
+
+/* 取消该 stub 名下所有未完成调用（proxy/stub 销毁前调用，避免回调 UAF）。 */
+int zri_stub_cancel_all(stub_t *stub, int status);
 
 #endif /* PROXY_INTERNAL_H */
