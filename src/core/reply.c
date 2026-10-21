@@ -19,15 +19,25 @@
  * 这样 reply 路径与普通发送共用同一个 zri_message_t 抽象。
  */
 static int send_reply(zri_transport_t *transport, const zri_message_t *request, int status,
-                      const payload_t *payload, const stream_meta_t *stream) {
+                      const void *metadata, uint16_t metadata_len, const char *message,
+                      uint16_t message_len, const payload_t *payload,
+                      const stream_meta_t *stream) {
     zri_message_t reply;
     if (!transport || !request) {
         return ERR_STATE;
+    }
+    /* 传输层状态消息缓冲固定为 STATUS_MSG_MAX，这里统一截断避免越界。 */
+    if (message_len > STATUS_MSG_MAX) {
+        message_len = STATUS_MSG_MAX;
     }
     reply = *request;
     reply.kind = KIND_RESPONSE;
     reply.status = status;
     reply.route = NULL;
+    reply.metadata = metadata;
+    reply.metadata_len = metadata_len;
+    reply.status_msg = message;
+    reply.status_msg_len = message_len;
     reply.payload = payload ? *payload : (payload_t){0};
     if (stream) {
         reply.stream = *stream;
@@ -68,6 +78,10 @@ typedef struct zri_reply_task {
     uint16_t peer_port;
     uint32_t msg_id;
     int status;
+    uint8_t metadata[METADATA_WIRE_MAX];
+    uint16_t metadata_len;
+    char message[STATUS_MSG_MAX];
+    uint16_t message_len;
     uint8_t *data;
     uint8_t inline_data[128]; /* 小响应免一次 malloc */
     size_t len;
@@ -104,6 +118,10 @@ static void reply_task_fn(void *user) {
     request.peer_ip = t->peer_ip;
     request.peer_port = t->peer_port;
     request.peer_token = t->token;
+    request.metadata = t->metadata_len ? t->metadata : NULL;
+    request.metadata_len = t->metadata_len;
+    request.status_msg = t->message_len ? t->message : NULL;
+    request.status_msg_len = t->message_len;
 
     memset(&payload, 0, sizeof(payload));
     payload.data = t->data;
@@ -117,7 +135,9 @@ static void reply_task_fn(void *user) {
         stream.offset = t->stream_offset;
         stream_ptr = &stream;
     }
-    (void)send_reply(t->transport, &request, t->status, &payload, stream_ptr);
+    (void)send_reply(t->transport, &request, t->status, t->metadata_len ? t->metadata : NULL,
+                     t->metadata_len, t->message_len ? t->message : NULL, t->message_len,
+                     &payload, stream_ptr);
     reply_task_destroy(t);
 }
 
@@ -126,7 +146,8 @@ static void reply_task_fn(void *user) {
  * （unary 回复 / STREAM_LAST）；分块响应的中间 chunk 保留 call。
  */
 static int reply_marshal(call_t *call, int status, const payload_t *payload,
-                         const stream_meta_t *stream, int release_call) {
+                         const stream_meta_t *stream, int release_call, const metadata_t *metadata,
+                         const char *message) {
     zri_reply_task_t *t;
     int free_call = release_call && !call->stream_owned;
 
@@ -153,6 +174,21 @@ static int reply_marshal(call_t *call, int status, const payload_t *payload,
     t->peer_port = call->peer_port;
     t->msg_id = call->msg_id;
     t->status = status;
+    if (metadata && metadata->count > 0) {
+        size_t meta_len = 0;
+        if (metadata_encode(metadata, t->metadata, sizeof(t->metadata), &meta_len) == OK) {
+            t->metadata_len = (uint16_t)meta_len;
+        }
+    }
+    if (message && message[0]) {
+        size_t msg_len = strlen(message);
+        if (msg_len >= sizeof(t->message)) {
+            msg_len = sizeof(t->message) - 1;
+        }
+        memcpy(t->message, message, msg_len);
+        t->message[msg_len] = '\0';
+        t->message_len = (uint16_t)msg_len;
+    }
     if (payload && payload->len > 0 && payload->data) {
         t->data = payload->len <= sizeof(t->inline_data)
                       ? t->inline_data
@@ -193,13 +229,16 @@ void zri_service_send_status(zri_transport_t *transport, const zri_message_t *re
         return;
     }
     memset(&empty, 0, sizeof(empty));
-    (void)send_reply(transport, request, status, &empty, NULL);
+    (void)send_reply(transport, request, status, NULL, 0, NULL, 0, &empty, NULL);
 }
 
 /* ---- 回复 ---- */
 
-void reply(call_t *call, int status, const payload_t *payload) {
+void reply_ex(call_t *call, int status, const char *message, const payload_t *payload,
+              const metadata_t *metadata) {
     zri_message_t request;
+    uint8_t meta_buf[METADATA_WIRE_MAX];
+    size_t meta_len = 0;
     if (!call || call->replied) {
         return;
     }
@@ -211,15 +250,26 @@ void reply(call_t *call, int status, const payload_t *payload) {
         call_release(call);
         return;
     }
+    if (metadata && metadata->count > 0) {
+        if (metadata_encode(metadata, meta_buf, sizeof(meta_buf), &meta_len) != OK) {
+            meta_len = 0;
+        }
+    }
     if (call->poller && !ntk_poller_is_current_thread(call->poller)) {
-        (void)reply_marshal(call, status, payload, NULL, 1);
+        (void)reply_marshal(call, status, payload, NULL, 1, metadata, message);
         return;
     }
     call_request_context(call, &request);
-    (void)send_reply(call->transport, &request, status, payload, NULL);
+    (void)send_reply(call->transport, &request, status, meta_len ? meta_buf : NULL,
+                     (uint16_t)meta_len, message,
+                     message ? (uint16_t)strlen(message) : 0, payload, NULL);
     if (!call->stream_owned) {
         call_release(call);
     }
+}
+
+void reply(call_t *call, int status, const payload_t *payload) {
+    reply_ex(call, status, NULL, payload, NULL);
 }
 
 void reply_bytes(call_t *call, int status, const void *data, size_t len) {
@@ -234,6 +284,8 @@ int reply_stream(call_t *call, int status, const chunk_t *chunk) {
     zri_message_t request;
     payload_t payload;
     stream_meta_t stream;
+    uint8_t meta_buf[METADATA_WIRE_MAX];
+    size_t meta_len = 0;
     int rc;
     if (!call || !call->node || !call->transport || (chunk && chunk->len > 0 && !chunk->data)) {
         return ERR_INVALID;
@@ -255,11 +307,20 @@ int reply_stream(call_t *call, int status, const chunk_t *chunk) {
         if (last) {
             call->replied = 1;
         }
-        return reply_marshal(call, status, &payload, &stream, last);
+        return reply_marshal(call, status, &payload, &stream, last,
+                             chunk ? chunk->metadata : NULL, chunk ? chunk->message : NULL);
     }
 
+    if (chunk && chunk->metadata && chunk->metadata->count > 0) {
+        if (metadata_encode(chunk->metadata, meta_buf, sizeof(meta_buf), &meta_len) != OK) {
+            meta_len = 0;
+        }
+    }
     call_request_context(call, &request);
-    rc = send_reply(call->transport, &request, status, &payload, &stream);
+    rc = send_reply(call->transport, &request, status, meta_len ? meta_buf : NULL,
+                    (uint16_t)meta_len, chunk ? chunk->message : NULL,
+                    chunk && chunk->message ? (uint16_t)strlen(chunk->message) : 0, &payload,
+                    &stream);
     if (chunk && (chunk->flags & STREAM_LAST)) {
         call->replied = 1;
         if (!call->stream_owned) {

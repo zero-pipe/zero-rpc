@@ -69,6 +69,8 @@ typedef struct zri_handler_task {
     int one_way;
     handler_fn fn;
     void *user;
+    service_interceptor_fn interceptor;
+    void *interceptor_user;
     char service[SERVICE_NAME_MAX];
     char method[METHOD_NAME_MAX];
     uint8_t *payload;
@@ -76,6 +78,8 @@ typedef struct zri_handler_task {
     size_t payload_len;
     uint8_t encoding;
     uint64_t deadline_ms; /* 请求 deadline（绝对单调 ms，0 = 无） */
+    metadata_t metadata;
+    int has_metadata;
     int external; /* 1 = 自定义 executor 任务 */
 } zri_handler_task_t;
 
@@ -158,6 +162,10 @@ static void handler_task_run(void *user) {
     call->msg_id = t->msg_id;
     call->one_way = one_way;
     call->deadline_ms = t->deadline_ms;
+    if (t->has_metadata) {
+        call->metadata = t->metadata;
+        call->has_metadata = 1;
+    }
 
     req.service = t->service;
     req.method = t->method;
@@ -167,6 +175,7 @@ static void handler_task_run(void *user) {
     req.peer_ip = call->peer_ip;
     req.peer_port = call->peer_port;
     req.deadline_ms = t->deadline_ms;
+    req.metadata = t->has_metadata ? &t->metadata : NULL;
 
     /*
      * 排队期间可能已过期或被客户端取消：启动 handler 前再检查一次，避免做
@@ -178,6 +187,19 @@ static void handler_task_run(void *user) {
         if (canceled || expired) {
             if (!one_way) {
                 reply(call, canceled ? ERR_NOTFOUND : ERR_TIMEOUT, NULL);
+            } else {
+                zri_worker_call_free(t->node, call);
+            }
+            handler_task_release(t);
+            handler_task_destroy(t);
+            return;
+        }
+    }
+    if (t->interceptor) {
+        int st = t->interceptor(call, &req, t->interceptor_user);
+        if (st != OK) {
+            if (!one_way) {
+                reply(call, st, NULL);
             } else {
                 zri_worker_call_free(t->node, call);
             }
@@ -343,6 +365,7 @@ static uint64_t deadline_from_timeout(uint32_t timeout_ms) {
 static int handler_task_create(node_t *node, zri_transport_t *transport,
                                const zri_message_t *msg, const char *service,
                                const char *method, handler_fn fn, void *user,
+                               service_interceptor_fn interceptor, void *interceptor_user,
                                int external, zri_handler_task_t **out) {
     zri_handler_task_t *t;
     size_t payload_len = msg->payload.len;
@@ -366,11 +389,17 @@ static int handler_task_create(node_t *node, zri_transport_t *transport,
     t->one_way = msg->kind == KIND_EVENT;
     t->fn = fn;
     t->user = user;
+    t->interceptor = interceptor;
+    t->interceptor_user = interceptor_user;
     t->external = external;
     zri_copy_str(t->service, sizeof(t->service), service, "");
     zri_copy_str(t->method, sizeof(t->method), method, "");
     t->encoding = msg->payload.encoding;
     t->deadline_ms = deadline_from_timeout(msg->timeout_ms);
+    if (msg->metadata_len > 0 && msg->metadata &&
+        metadata_decode(&t->metadata, msg->metadata, msg->metadata_len) == OK) {
+        t->has_metadata = t->metadata.count > 0;
+    }
     t->payload_len = payload_len;
     if (payload_len > 0) {
         t->payload = payload_len <= sizeof(t->inline_payload)
@@ -389,7 +418,8 @@ static int handler_task_create(node_t *node, zri_transport_t *transport,
 /* 投递到节点内置 handler 线程池。 */
 static int service_dispatch_worker(node_t *node, zri_transport_t *transport,
                                    const zri_message_t *msg, const char *service,
-                                   const char *method, handler_fn fn, void *user) {
+                                   const char *method, handler_fn fn, void *user,
+                                   service_interceptor_fn interceptor, void *interceptor_user) {
     zri_handler_task_t *t = NULL;
     int rc;
 
@@ -397,7 +427,8 @@ static int service_dispatch_worker(node_t *node, zri_transport_t *transport,
     if (rc != OK) {
         return rc;
     }
-    rc = handler_task_create(node, transport, msg, service, method, fn, user, 0, &t);
+    rc = handler_task_create(node, transport, msg, service, method, fn, user, interceptor,
+                             interceptor_user, 0, &t);
     if (rc != OK) {
         handler_inflight_release(node);
         return rc;
@@ -414,7 +445,8 @@ static int service_dispatch_worker(node_t *node, zri_transport_t *transport,
 static int service_dispatch_external(node_t *node, zri_transport_t *transport,
                                      const zri_message_t *msg, const char *service,
                                      const char *method, handler_fn fn, void *user,
-                                     const service_executor_t *executor) {
+                                     const service_executor_t *executor,
+                                     service_interceptor_fn interceptor, void *interceptor_user) {
     zri_handler_task_t *t = NULL;
     int rc;
 
@@ -423,7 +455,8 @@ static int service_dispatch_external(node_t *node, zri_transport_t *transport,
     if (rc != OK) {
         return rc;
     }
-    rc = handler_task_create(node, transport, msg, service, method, fn, user, 1, &t);
+    rc = handler_task_create(node, transport, msg, service, method, fn, user, interceptor,
+                             interceptor_user, 1, &t);
     if (rc != OK) {
         handler_inflight_release(node);
         return rc;
@@ -481,7 +514,8 @@ void zri_service_handle_request(node_t *node, zri_transport_t *transport,
      */
     if (m->executor) {
         int rc = service_dispatch_external(node, transport, msg, tmp, dot + 1, fn, user,
-                                           m->executor);
+                                           m->executor, svc->interceptor,
+                                           svc->interceptor_user);
         if (rc == OK) {
             return;
         }
@@ -492,7 +526,8 @@ void zri_service_handle_request(node_t *node, zri_transport_t *transport,
     }
     if (m->run_in_worker) {
         if (node->handler_pool) {
-            int rc = service_dispatch_worker(node, transport, msg, tmp, dot + 1, fn, user);
+            int rc = service_dispatch_worker(node, transport, msg, tmp, dot + 1, fn, user,
+                                             svc->interceptor, svc->interceptor_user);
             if (rc == OK) {
                 return;
             }
@@ -517,6 +552,8 @@ void zri_service_handle_request(node_t *node, zri_transport_t *transport,
     {
         call_t *call = (call_t *)zri_mem_alloc(sizeof(*call));
         request_t req;
+        metadata_t request_metadata;
+        int has_metadata = 0;
         if (!call) {
             zri_service_send_status(transport, msg, ERR_NOMEM);
             return;
@@ -537,9 +574,25 @@ void zri_service_handle_request(node_t *node, zri_transport_t *transport,
         req.peer_ip = call->peer_ip;
         req.peer_port = msg->peer_port;
         req.deadline_ms = call->deadline_ms;
-        fn(call, &req, user);
-        if (call->one_way) {
-            zri_mem_free(call);
+        if (msg->metadata_len > 0 && msg->metadata &&
+            metadata_decode(&request_metadata, msg->metadata, msg->metadata_len) == OK &&
+            request_metadata.count > 0) {
+            has_metadata = 1;
+            call->metadata = request_metadata;
+            call->has_metadata = 1;
+        }
+        req.metadata = has_metadata ? &call->metadata : NULL;
+        {
+            int one_way = call->one_way;
+            int st = svc->interceptor ? svc->interceptor(call, &req, svc->interceptor_user) : OK;
+            if (st == OK) {
+                fn(call, &req, user);
+            } else {
+                reply(call, st, NULL);
+            }
+            if (one_way) {
+                zri_mem_free(call);
+            }
         }
     }
 }
@@ -614,16 +667,181 @@ static zri_recv_stream_t *alloc_recv_stream(node_t *node, zri_transport_t *trans
     return NULL;
 }
 
+/* ---- 流式 chunk 的 worker/executor 派发（每个 stream 串行，保证顺序） ---- */
+
+typedef struct zri_stream_task {
+    zri_recv_stream_t *state;
+    call_t *call;
+    uint8_t *data;
+    size_t len;
+    uint8_t encoding;
+    unsigned flags;
+    uint64_t offset;
+    metadata_t metadata;
+    int has_metadata;
+    uint64_t deadline_ms;
+    service_interceptor_fn interceptor;
+    void *interceptor_user;
+    chunk_handler_fn fn;
+    void *user;
+    int first;
+    int rejected;
+    struct zri_stream_task *next;
+} zri_stream_task_t;
+
+static void stream_task_run(void *user);
+static void stream_task_complete(void *user);
+
+static void stream_task_free(zri_stream_task_t *t) {
+    if (!t) {
+        return;
+    }
+    free(t->data);
+    free(t);
+}
+
+static void stream_clear_pending(zri_recv_stream_t *state) {
+    zri_stream_task_t *t = state->pending_head;
+    while (t) {
+        zri_stream_task_t *next = t->next;
+        stream_task_free(t);
+        t = next;
+    }
+    state->pending_head = NULL;
+    state->pending_tail = NULL;
+}
+
+static void stream_close(zri_recv_stream_t *state) {
+    call_t *call = state->call;
+    stream_clear_pending(state);
+    memset(state, 0, sizeof(*state));
+    if (call) {
+        zri_mem_free(call);
+    }
+}
+
+static int stream_submit(zri_recv_stream_t *state, zri_stream_task_t *task) {
+    zri_method_t *m = state->method;
+    node_t *node = state->call ? state->call->node : NULL;
+    if (!m) {
+        stream_task_free(task);
+        return ERR_STATE;
+    }
+    if (m->executor) {
+        if (m->executor->submit(m->executor->ctx, stream_task_run, task) != OK) {
+            stream_task_free(task);
+            return ERR_IO;
+        }
+        return OK;
+    }
+    if (node && node->handler_pool) {
+        if (ntk_thread_pool_async(node->handler_pool, stream_task_run, task, 1) != NTK_OK) {
+            stream_task_free(task);
+            return ERR_IO;
+        }
+        return OK;
+    }
+    stream_task_free(task);
+    return ERR_STATE;
+}
+
+static void stream_dispatch_next(zri_recv_stream_t *state) {
+    zri_stream_task_t *task;
+    if (!state || state->in_flight) {
+        return;
+    }
+    task = state->pending_head;
+    if (!task) {
+        return;
+    }
+    state->pending_head = task->next;
+    if (!state->pending_head) {
+        state->pending_tail = NULL;
+    }
+    task->next = NULL;
+    state->in_flight = 1;
+    if (stream_submit(state, task) != OK) {
+        state->in_flight = 0;
+        state->closing = 1;
+    }
+}
+
+static void stream_task_run(void *user) {
+    zri_stream_task_t *task = (zri_stream_task_t *)user;
+    zri_recv_stream_t *state = task->state;
+    call_t *call = task->call;
+    request_t req;
+    chunk_t chunk;
+    int rejected = 0;
+
+    if (!state || !call) {
+        stream_task_free(task);
+        return;
+    }
+    req.service = state->service;
+    req.method = state->method_name;
+    req.payload.data = task->data;
+    req.payload.len = task->len;
+    req.payload.encoding = task->encoding;
+    req.peer_ip = call->peer_ip;
+    req.peer_port = call->peer_port;
+    req.deadline_ms = task->deadline_ms;
+    req.metadata = task->has_metadata ? &task->metadata : NULL;
+    chunk.data = task->data;
+    chunk.len = task->len;
+    chunk.encoding = task->encoding;
+    chunk.offset = task->offset;
+    chunk.flags = task->flags;
+    chunk.metadata = NULL;
+    chunk.message = NULL;
+    if (task->first && task->interceptor) {
+        int st = task->interceptor(call, &req, task->interceptor_user);
+        if (st != OK) {
+            reply_stream(call, st, NULL);
+            rejected = 1;
+        }
+    }
+    if (!rejected) {
+        task->fn(call, &req, &chunk, task->user);
+    }
+    task->rejected = rejected;
+    if (ntk_poller_async(call->poller, stream_task_complete, task, 1) != NTK_OK) {
+        stream_task_free(task);
+    }
+}
+
+static void stream_task_complete(void *user) {
+    zri_stream_task_t *task = (zri_stream_task_t *)user;
+    zri_recv_stream_t *state = task->state;
+    int rejected = task->rejected;
+    stream_task_free(task);
+    if (!state || !state->used) {
+        return;
+    }
+    state->in_flight = 0;
+    state->last_ms = zri_now_ms();
+    if (rejected) {
+        state->closing = 1;
+        stream_clear_pending(state);
+    }
+    if (state->closing && !state->pending_head) {
+        stream_close(state);
+        return;
+    }
+    stream_dispatch_next(state);
+}
+
 void zri_service_handle_stream_chunk(node_t *node, zri_transport_t *transport,
                                      const zri_message_t *msg) {
     char tmp[MAX_ROUTE];
     char *dot;
-    service_t *svc;
+    service_t *svc = NULL;
     zri_method_t *method = NULL;
     zri_recv_stream_t *state;
     request_t request;
     chunk_t chunk;
     const stream_meta_t *stream_meta;
+    int use_worker;
 
     if (!node || !msg || !msg->has_stream) {
         return;
@@ -633,8 +851,17 @@ void zri_service_handle_stream_chunk(node_t *node, zri_transport_t *transport,
 
     if (stream_meta->flags & STREAM_CANCEL) {
         if (state) {
-            zri_mem_free(state->call);
-            memset(state, 0, sizeof(*state));
+            if ((state->run_in_worker || state->executor) &&
+                (state->in_flight || state->pending_head)) {
+                state->closing = 1;
+                state->canceled = 1;
+                stream_clear_pending(state);
+                if (!state->in_flight) {
+                    stream_close(state);
+                }
+            } else {
+                stream_close(state);
+            }
         }
         return;
     }
@@ -668,6 +895,15 @@ void zri_service_handle_stream_chunk(node_t *node, zri_transport_t *transport,
         state = alloc_recv_stream(node, transport, msg);
         if (state) {
             state->method = method;
+            state->run_in_worker = method->run_in_worker;
+            state->executor = method->executor;
+            state->interceptor = svc ? svc->interceptor : NULL;
+            state->interceptor_user = svc ? svc->interceptor_user : NULL;
+            state->deadline_ms = state->call ? state->call->deadline_ms : 0;
+            if (msg->metadata_len > 0 && msg->metadata &&
+                metadata_decode(&state->metadata, msg->metadata, msg->metadata_len) == OK) {
+                state->has_metadata = state->metadata.count > 0;
+            }
             zri_copy_str(state->service, sizeof(state->service), tmp, "");
             zri_copy_str(state->method_name, sizeof(state->method_name), dot + 1, "");
         }
@@ -675,19 +911,92 @@ void zri_service_handle_stream_chunk(node_t *node, zri_transport_t *transport,
     if (!state || !state->call || !method) {
         return;
     }
+    use_worker = (state->run_in_worker && node->handler_pool) || state->executor;
+    if (use_worker) {
+        int first = !state->intercepted;
+        zri_stream_task_t *task = (zri_stream_task_t *)calloc(1, sizeof(*task));
+        if (!task) {
+            state->closing = 1;
+            stream_close(state);
+            return;
+        }
+        task->state = state;
+        task->call = state->call;
+        task->fn = method->stream_fn;
+        task->user = method->user;
+        task->first = first;
+        task->interceptor = state->interceptor;
+        task->interceptor_user = state->interceptor_user;
+        task->deadline_ms = state->deadline_ms;
+        task->flags = stream_meta->flags;
+        task->offset = stream_meta->offset;
+        task->encoding = msg->payload.encoding;
+        task->len = msg->payload.len;
+        if (task->len > 0) {
+            task->data = (uint8_t *)malloc(task->len);
+            if (!task->data) {
+                free(task);
+                state->closing = 1;
+                stream_close(state);
+                return;
+            }
+            memcpy(task->data, msg->payload.data, task->len);
+        }
+        if (state->has_metadata) {
+            task->metadata = state->metadata;
+            task->has_metadata = 1;
+        }
+        state->intercepted = 1;
+        state->last_ms = zri_now_ms();
+        state->bytes += msg->payload.len;
+        if (state->pending_tail) {
+            state->pending_tail->next = task;
+        } else {
+            state->pending_head = task;
+        }
+        state->pending_tail = task;
+        if (stream_meta->flags & STREAM_LAST) {
+            state->closing = 1;
+        }
+        stream_dispatch_next(state);
+        if (state->closing && !state->in_flight && !state->pending_head) {
+            stream_close(state);
+        }
+        return;
+    }
+    if (state->run_in_worker && !node->handler_pool && !node->worker_fallback_warned) {
+        node->worker_fallback_warned = 1;
+        rpc_log_warn("handler_threads=0: worker stream %s.%s runs inline on poller",
+                     state->service, state->method_name);
+    }
     state->last_ms = zri_now_ms();
     state->bytes += msg->payload.len;
+    memset(&request, 0, sizeof(request));
     request.service = state->service;
     request.method = state->method_name;
     request.payload = msg->payload;
     request.peer_ip = state->call->peer_ip;
     request.peer_port = msg->peer_port;
     request.deadline_ms = state->call->deadline_ms;
+    request.metadata = state->has_metadata ? &state->metadata : NULL;
+    memset(&chunk, 0, sizeof(chunk));
     chunk.data = msg->payload.data;
     chunk.len = msg->payload.len;
     chunk.encoding = msg->payload.encoding;
     chunk.offset = stream_meta->offset;
     chunk.flags = stream_meta->flags;
+
+    if (!state->intercepted && state->interceptor) {
+        int st = state->interceptor(state->call, &request, state->interceptor_user);
+        if (st != OK) {
+            state->intercepted = 1;
+            reply_stream(state->call, st, NULL);
+            zri_mem_free(state->call);
+            memset(state, 0, sizeof(*state));
+            return;
+        }
+    }
+    state->intercepted = 1;
     method->stream_fn(state->call, &request, &chunk, method->user);
 
     if (stream_meta->flags & STREAM_LAST) {
@@ -704,8 +1013,16 @@ void zri_service_expire_streams(node_t *node, uint64_t now_ms) {
     for (i = 0; i < MAX_RECV_STREAMS; i++) {
         zri_recv_stream_t *stream = &node->recv_streams[i];
         if (stream->used && now_ms - stream->last_ms > STREAM_IDLE_TIMEOUT_MS) {
-            zri_mem_free(stream->call);
-            memset(stream, 0, sizeof(*stream));
+            if ((stream->run_in_worker || stream->executor) &&
+                (stream->in_flight || stream->pending_head)) {
+                stream->closing = 1;
+                stream_clear_pending(stream);
+                if (!stream->in_flight) {
+                    stream_close(stream);
+                }
+            } else {
+                stream_close(stream);
+            }
         }
     }
 }
@@ -745,6 +1062,15 @@ int service_create(node_t *node, const char *service_name, service_t **out) {
 void service_destroy(service_t *svc) {
     /* v1：不在运行期注销；节点销毁时统一释放。 */
     (void)svc;
+}
+
+int service_set_interceptor(service_t *svc, service_interceptor_fn fn, void *user) {
+    if (!svc) {
+        return ERR_INVALID;
+    }
+    svc->interceptor = fn;
+    svc->interceptor_user = user;
+    return OK;
 }
 
 /* ---- 方法注册 ---- */
@@ -889,7 +1215,7 @@ int service_add_stream_method_ex(service_t *svc, const char *method, chunk_handl
                                  void *user, const service_method_options_t *options) {
     int run_in_worker;
     const service_executor_t *executor;
-    int rc = service_parse_exec(options, 0, &run_in_worker, &executor);
+    int rc = service_parse_exec(options, 1, &run_in_worker, &executor);
     if (rc != OK) {
         return rc;
     }

@@ -38,6 +38,10 @@ typedef struct zri_pending {
     uint8_t *data;
     size_t len;
     uint8_t encoding;
+    uint8_t *metadata; /* 请求 metadata 的 TLV 副本，用于重传 */
+    uint16_t metadata_len;
+    metadata_t *response_metadata; /* 响应 metadata（按需分配） */
+    char *response_message;        /* 响应状态消息（按需分配） */
     UT_hash_handle hh;              /* request_id 哈希索引 */
     struct zri_pending *next;      /* 节点持有的全部槽位链表 */
     struct zri_pending *free_next; /* 空闲槽位复用链表 */

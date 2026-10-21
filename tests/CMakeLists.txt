@@ -53,6 +53,10 @@ add_executable(test_worker test_worker.c)
 target_link_libraries(test_worker PRIVATE rpc)
 add_test(NAME worker COMMAND test_worker)
 
+add_executable(test_semantics test_semantics.c)
+target_link_libraries(test_semantics PRIVATE rpc)
+add_test(NAME semantics COMMAND test_semantics)
+
 add_executable(test_headers test_headers.c)
 target_link_libraries(test_headers PRIVATE rpc)
 add_test(NAME headers COMMAND test_headers)
@@ -64,5 +68,5 @@ set_tests_properties(framing config registry reliable pool iobuf
     PROPERTIES LABELS "unit" TIMEOUT 120)
 set_tests_properties(loopback stream
     PROPERTIES LABELS "integration" TIMEOUT 300)
-set_tests_properties(api worker PROPERTIES LABELS "integration" TIMEOUT 120)
+set_tests_properties(api worker semantics PROPERTIES LABELS "integration" TIMEOUT 120)
 set_tests_properties(headers PROPERTIES LABELS "unit" TIMEOUT 30)

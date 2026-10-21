@@ -15,6 +15,8 @@ typedef struct zri_sync_ctx {
     void *data;
     size_t len;
     uint8_t encoding;
+    metadata_t *metadata;
+    char *message;
 } zri_sync_ctx_t;
 
 static void sync_ctx_put(zri_sync_ctx_t *c) {
@@ -25,6 +27,12 @@ static void sync_ctx_put(zri_sync_ctx_t *c) {
     if (last) {
         if (c->data) {
             free(c->data);
+        }
+        if (c->metadata) {
+            free(c->metadata);
+        }
+        if (c->message) {
+            free(c->message);
         }
         ntk_mutex_destroy(c->lock);
         ntk_sem_destroy(c->sem);
@@ -44,6 +52,19 @@ static void sync_response_cb(int status, const response_t *resp, void *user) {
     if (status == OK && resp) {
         c->app_status = resp->status;
         c->encoding = resp->payload.encoding;
+        if (resp->metadata && resp->metadata->count > 0) {
+            c->metadata = (metadata_t *)malloc(sizeof(*c->metadata));
+            if (c->metadata) {
+                *c->metadata = *resp->metadata;
+            }
+        }
+        if (resp->message && resp->message[0]) {
+            size_t n = strlen(resp->message) + 1;
+            c->message = (char *)malloc(n);
+            if (c->message) {
+                memcpy(c->message, resp->message, n);
+            }
+        }
         if (resp->payload.len > 0 && resp->payload.data) {
             c->data = malloc(resp->payload.len);
             if (c->data) {
@@ -60,9 +81,9 @@ static void sync_response_cb(int status, const response_t *resp, void *user) {
 
 /* ---- 同步调用 ---- */
 
-int proxy_call_sync(proxy_t *proxy, const char *service, const char *method,
-                         const payload_t *request, response_t *response,
-                         uint64_t timeout_ms, uint64_t *out_request_id) {
+int proxy_call_sync_ex(proxy_t *proxy, const char *service, const char *method,
+                       const payload_t *request, const metadata_t *metadata,
+                       response_t *response, uint64_t timeout_ms, uint64_t *out_request_id) {
     zri_sync_ctx_t *c;
     uint64_t id = 0;
     int rc;
@@ -89,8 +110,8 @@ int proxy_call_sync(proxy_t *proxy, const char *service, const char *method,
     }
     c->refs = 2;
 
-    rc = proxy_call_async(proxy, service, method, request, sync_response_cb, c, timeout_ms,
-                               &id);
+    rc = proxy_call_async_ex(proxy, service, method, request, metadata, sync_response_cb, c,
+                             timeout_ms, &id);
     if (rc != OK) {
         sync_ctx_put(c);
         sync_ctx_put(c);
@@ -108,10 +129,14 @@ int proxy_call_sync(proxy_t *proxy, const char *service, const char *method,
     }
     if (c->status == OK) {
         response->status = c->app_status;
+        response->message = c->message;
+        response->metadata = c->metadata;
         response->payload.data = c->data;
         response->payload.len = c->len;
         response->payload.encoding = c->encoding;
         c->data = NULL; /* 所有权转移给调用方 */
+        c->message = NULL;
+        c->metadata = NULL;
         sync_ctx_put(c);
         return OK;
     }
@@ -120,13 +145,24 @@ int proxy_call_sync(proxy_t *proxy, const char *service, const char *method,
     return rc;
 }
 
+int proxy_call_sync(proxy_t *proxy, const char *service, const char *method,
+                         const payload_t *request, response_t *response,
+                         uint64_t timeout_ms, uint64_t *out_request_id) {
+    return proxy_call_sync_ex(proxy, service, method, request, NULL, response, timeout_ms,
+                              out_request_id);
+}
+
 void response_release(response_t *response) {
     if (!response) {
         return;
     }
     free((void *)response->payload.data);
+    free((void *)response->metadata);
+    free((void *)response->message);
     response->payload.data = NULL;
     response->payload.len = 0;
     response->payload.encoding = 0;
     response->status = 0;
+    response->metadata = NULL;
+    response->message = NULL;
 }

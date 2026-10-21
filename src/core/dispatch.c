@@ -11,7 +11,40 @@
 #include "service_internal.h"
 #include "util.h"
 
+#include <stdlib.h>
 #include <string.h>
+
+/* 把响应帧上的 metadata / status message 解析到 pending（按需分配）。 */
+static void pending_attach_response(zri_pending_t *p, const zri_message_t *msg) {
+    if (!p) {
+        return;
+    }
+    if (p->response_metadata) {
+        free(p->response_metadata);
+        p->response_metadata = NULL;
+    }
+    if (p->response_message) {
+        free(p->response_message);
+        p->response_message = NULL;
+    }
+    if (msg->metadata_len > 0 && msg->metadata) {
+        metadata_t *md = (metadata_t *)calloc(1, sizeof(*md));
+        if (md) {
+            if (metadata_decode(md, msg->metadata, msg->metadata_len) == OK && md->count > 0) {
+                p->response_metadata = md;
+            } else {
+                free(md);
+            }
+        }
+    }
+    if (msg->status_msg_len > 0 && msg->status_msg) {
+        p->response_message = (char *)malloc((size_t)msg->status_msg_len + 1);
+        if (p->response_message) {
+            memcpy(p->response_message, msg->status_msg, msg->status_msg_len);
+            p->response_message[msg->status_msg_len] = '\0';
+        }
+    }
+}
 
 int zri_node_resolve(node_t *node, const char *service, int prefer_stream,
                       stub_target_t *out) {
@@ -60,6 +93,7 @@ static void node_dispatch(node_t *node, zri_transport_t *transport,
         }
         node->metrics.responses_received++;
         node->metrics.bytes_received += msg->payload.len;
+        pending_attach_response(p, msg);
         if (p->streaming) {
             int app_status = msg->status;
             chunk_t chunk;
@@ -68,6 +102,8 @@ static void node_dispatch(node_t *node, zri_transport_t *transport,
             chunk.encoding = msg->payload.encoding;
             chunk.offset = msg->has_stream ? msg->stream.offset : p->expected_offset;
             chunk.flags = msg->has_stream ? msg->stream.flags : 0;
+            chunk.metadata = p->response_metadata;
+            chunk.message = p->response_message;
             if (p->chunk_cb) {
                 p->chunk_cb(app_status, &chunk, p->stream_user);
             }
@@ -85,7 +121,9 @@ static void node_dispatch(node_t *node, zri_transport_t *transport,
             return;
         }
         resp.status = msg->status;
+        resp.message = p->response_message;
         resp.payload = msg->payload;
+        resp.metadata = p->response_metadata;
         zri_pending_invoke(p, OK, &resp);
         return;
     }
@@ -124,7 +162,8 @@ int zri_node_send(node_t *node, transport_kind_t transport_kind, const char *sch
 
 int zri_node_send_call(node_t *node, const stub_target_t *target, const char *service,
                        const char *method, const payload_t *payload, uint8_t kind,
-                       uint64_t request_id, uint64_t timeout_ms) {
+                       uint64_t request_id, uint64_t timeout_ms, const void *metadata,
+                       uint16_t metadata_len) {
     zri_message_t message;
     char route[ROUTE_MAX];
 
@@ -139,6 +178,8 @@ int zri_node_send_call(node_t *node, const stub_target_t *target, const char *se
     message.request_id = (uint32_t)request_id;
     /* 请求剩余超时透传给服务端（0 = 无 deadline）；CANCEL 不使用该字段。 */
     message.timeout_ms = timeout_ms > 0xffffffffull ? 0xffffffffu : (uint32_t)timeout_ms;
+    message.metadata = metadata;
+    message.metadata_len = metadata_len;
     message.route = route;
     message.payload = payload ? *payload : (payload_t){0};
     message.peer_ip = target->ip;

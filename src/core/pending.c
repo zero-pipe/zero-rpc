@@ -20,6 +20,16 @@ static void pending_recycle(node_t *node, zri_pending_t *p) {
     p->stream_user = NULL;
     p->data = NULL;
     p->len = 0;
+    p->metadata = NULL;
+    p->metadata_len = 0;
+    if (p->response_metadata) {
+        free(p->response_metadata);
+        p->response_metadata = NULL;
+    }
+    if (p->response_message) {
+        free(p->response_message);
+        p->response_message = NULL;
+    }
     p->has_req = 0;
     p->free_next = node->pending_free;
     node->pending_free = p;
@@ -44,6 +54,12 @@ void zri_pending_invoke(zri_pending_t *p, int status, const response_t *resp) {
         zri_mem_free(p->data);
         p->data = NULL;
     }
+    if (p->metadata) {
+        free(p->metadata);
+        p->metadata = NULL;
+    }
+    p->metadata_len = 0;
+    /* response_metadata / response_message 由回调借用，必须等 pending_recycle 再释放。 */
     p->has_req = 0;
     p->len = 0;
     if (node) {
@@ -83,6 +99,19 @@ void zri_pending_release(zri_pending_t *p) {
         zri_mem_free(p->data);
         p->data = NULL;
     }
+    if (p->metadata) {
+        free(p->metadata);
+        p->metadata = NULL;
+    }
+    p->metadata_len = 0;
+    if (p->response_metadata) {
+        free(p->response_metadata);
+        p->response_metadata = NULL;
+    }
+    if (p->response_message) {
+        free(p->response_message);
+        p->response_message = NULL;
+    }
     if (node) {
         pending_recycle(node, p);
     } else {
@@ -121,6 +150,10 @@ zri_pending_t *zri_pending_add(node_t *node, uint64_t id, response_fn cb, void *
     p->stream_user = NULL;
     p->data = NULL;
     p->len = 0;
+    p->metadata = NULL;
+    p->metadata_len = 0;
+    p->response_metadata = NULL;
+    p->response_message = NULL;
     p->expected_offset = 0;
     p->next_retx_ms = 0;
     p->retries = 0;
@@ -177,6 +210,18 @@ void zri_pending_cleanup(node_t *node) {
         if (p->data) {
             zri_mem_free(p->data);
             p->data = NULL;
+        }
+        if (p->metadata) {
+            free(p->metadata);
+            p->metadata = NULL;
+        }
+        if (p->response_metadata) {
+            free(p->response_metadata);
+            p->response_metadata = NULL;
+        }
+        if (p->response_message) {
+            free(p->response_message);
+            p->response_message = NULL;
         }
         free(p);
         p = next;

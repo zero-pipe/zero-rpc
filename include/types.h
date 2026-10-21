@@ -30,6 +30,33 @@ extern "C" {
 #define ERR_TOOBIG (-8)
 #define ERR_CLOSED (-9)
 
+/* ---- 元数据（对齐 gRPC metadata：字符串 key + 二进制 value） ---- */
+#define METADATA_MAX_ENTRIES 16
+#define METADATA_KEY_MAX 64
+#define METADATA_VALUE_MAX 256
+#define METADATA_WIRE_MAX 4096
+#define STATUS_MSG_MAX 512
+
+typedef struct metadata_entry {
+    char key[METADATA_KEY_MAX];
+    uint8_t value[METADATA_VALUE_MAX];
+    uint16_t value_len;
+} metadata_entry_t;
+
+typedef struct metadata {
+    uint16_t count;
+    metadata_entry_t entries[METADATA_MAX_ENTRIES];
+} metadata_t;
+
+void metadata_init(metadata_t *metadata);
+int metadata_set(metadata_t *metadata, const char *key, const void *value, size_t len);
+int metadata_set_string(metadata_t *metadata, const char *key, const char *value);
+const void *metadata_get(const metadata_t *metadata, const char *key, size_t *len);
+const char *metadata_get_string(const metadata_t *metadata, const char *key);
+int metadata_remove(metadata_t *metadata, const char *key);
+int metadata_encode(const metadata_t *metadata, void *buf, size_t cap, size_t *out_len);
+int metadata_decode(metadata_t *metadata, const void *buf, size_t len);
+
 /* ---- 不透明句柄 ---- */
 typedef struct node node_t;
 typedef struct service service_t;
@@ -49,6 +76,8 @@ typedef struct chunk {
     uint8_t encoding;
     uint64_t offset;
     unsigned flags;
+    const metadata_t *metadata; /* 可为 NULL；仅在本次回调内有效 */
+    const char *message;        /* 状态消息，可为 NULL */
 } chunk_t;
 
 /* 传输层透传的 stream 元数据；unary 消息为 NULL。 */
@@ -113,11 +142,14 @@ typedef struct request {
      * 放弃注定会被客户端丢弃的重活；框架也会在 handler 启动前跳过已过期请求。
      */
     uint64_t deadline_ms;
+    const metadata_t *metadata; /* 请求 metadata，可为 NULL；仅本次回调内有效 */
 } request_t;
 
 typedef struct response {
     int status;             /* 应用定义，0 建议表示成功 */
+    const char *message;    /* 状态消息，可为 NULL；仅回调内有效 */
     payload_t payload;
+    const metadata_t *metadata; /* 响应 metadata，可为 NULL；仅回调内有效 */
 } response_t;
 
 /* ---- 回调 ---- */

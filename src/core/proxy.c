@@ -56,8 +56,8 @@ int zri_proxy_resolve(proxy_t *proxy, const char *service, char *ip_out, size_t 
  */
 static int proxy_stub_send(stub_t *stub, const char *service, const char *method,
                            const payload_t *payload, stub_kind_t kind,
-                           uint64_t request_id, uint64_t timeout_ms, stub_target_t *target,
-                           void *user_data) {
+                           uint64_t request_id, uint64_t timeout_ms, const void *metadata,
+                           uint16_t metadata_len, stub_target_t *target, void *user_data) {
     proxy_t *proxy = (proxy_t *)user_data;
     node_t *node = stub_node(stub);
     transport_kind_t transport = TRANSPORT_UDP;
@@ -74,7 +74,7 @@ static int proxy_stub_send(stub_t *stub, const char *service, const char *method
     target->transport = transport;
     return zri_node_send_call(node, target, service, method, payload,
                               kind == STUB_EVENT ? KIND_EVENT : KIND_REQUEST,
-                              request_id, timeout_ms);
+                              request_id, timeout_ms, metadata, metadata_len);
 }
 
 static void cancel_task_fn(void *user) {
@@ -94,7 +94,7 @@ static void cancel_task_fn(void *user) {
             target.port = p->port;
             target.transport = p->transport;
             (void)zri_node_send_call(node, &target, p->service, p->method, NULL,
-                                     KIND_CANCEL, p->request_id, 0);
+                                     KIND_CANCEL, p->request_id, 0, NULL, 0);
         }
         zri_pending_invoke(p, ERR_NOTFOUND, NULL);
     }
@@ -170,22 +170,115 @@ int proxy_set_endpoint_uri(proxy_t *proxy, const char *endpoint) {
 
 /* ---- Unary 调用 ---- */
 
-int proxy_call_async(proxy_t *proxy, const char *service, const char *method,
-                          const payload_t *payload, response_fn cb, void *user,
-                          uint64_t timeout_ms, uint64_t *out_request_id) {
+typedef struct zri_proxy_cb_ctx {
+    proxy_t *proxy;
+    response_fn cb;
+    void *user;
+} zri_proxy_cb_ctx_t;
+
+static void proxy_response_wrapper(int status, const response_t *resp, void *user) {
+    zri_proxy_cb_ctx_t *ctx = (zri_proxy_cb_ctx_t *)user;
+    if (!ctx) {
+        return;
+    }
+    if (ctx->proxy && ctx->proxy->has_interceptor && ctx->proxy->interceptor.after) {
+        ctx->proxy->interceptor.after(ctx->proxy->interceptor.ctx, status, resp);
+    }
+    if (ctx->cb) {
+        ctx->cb(status, resp, ctx->user);
+    }
+    free(ctx);
+}
+
+int proxy_set_interceptor(proxy_t *proxy, const proxy_interceptor_t *interceptor) {
+    if (!proxy) {
+        return ERR_INVALID;
+    }
+    if (interceptor) {
+        proxy->interceptor = *interceptor;
+        proxy->has_interceptor = 1;
+    } else {
+        memset(&proxy->interceptor, 0, sizeof(proxy->interceptor));
+        proxy->has_interceptor = 0;
+    }
+    return OK;
+}
+
+int proxy_call_async_ex(proxy_t *proxy, const char *service, const char *method,
+                        const payload_t *payload, const metadata_t *metadata, response_fn cb,
+                        void *user, uint64_t timeout_ms, uint64_t *out_request_id) {
+    metadata_t meta;
+    zri_proxy_cb_ctx_t *ctx = NULL;
+    response_fn use_cb = cb;
+    void *use_user = user;
+    uint64_t timeout = timeout_ms;
+    int rc;
+
     if (!proxy || !proxy->node || !proxy->stub || !service || !method || !cb) {
         return ERR_INVALID;
     }
-    return zri_stub_call_ex(proxy->stub, service, method, payload, cb, NULL, NULL, 0, user,
-                             timeout_ms, out_request_id);
+    metadata_init(&meta);
+    if (metadata) {
+        meta = *metadata;
+    }
+    if (proxy->has_interceptor && proxy->interceptor.before) {
+        rc = proxy->interceptor.before(proxy->interceptor.ctx, service, method, &meta, &timeout);
+        if (rc != OK) {
+            return rc;
+        }
+    }
+    if (proxy->has_interceptor && proxy->interceptor.after) {
+        ctx = (zri_proxy_cb_ctx_t *)calloc(1, sizeof(*ctx));
+        if (!ctx) {
+            return ERR_NOMEM;
+        }
+        ctx->proxy = proxy;
+        ctx->cb = cb;
+        ctx->user = user;
+        use_cb = proxy_response_wrapper;
+        use_user = ctx;
+    }
+    rc = zri_stub_call_ex(proxy->stub, service, method, payload, use_cb, NULL, NULL, 0, use_user,
+                          timeout, out_request_id, meta.count ? &meta : NULL);
+    if (rc != OK && ctx) {
+        free(ctx);
+    }
+    return rc;
+}
+
+int proxy_call_async(proxy_t *proxy, const char *service, const char *method,
+                          const payload_t *payload, response_fn cb, void *user,
+                          uint64_t timeout_ms, uint64_t *out_request_id) {
+    return proxy_call_async_ex(proxy, service, method, payload, NULL, cb, user, timeout_ms,
+                               out_request_id);
+}
+
+int proxy_call_event_ex(proxy_t *proxy, const char *service, const char *method,
+                        const payload_t *payload, const metadata_t *metadata,
+                        uint64_t *out_request_id) {
+    metadata_t meta;
+    int rc;
+    if (!proxy || !proxy->node || !proxy->stub || !service || !method) {
+        return ERR_INVALID;
+    }
+    metadata_init(&meta);
+    if (metadata) {
+        meta = *metadata;
+    }
+    if (proxy->has_interceptor && proxy->interceptor.before) {
+        uint64_t timeout = 0;
+        rc = proxy->interceptor.before(proxy->interceptor.ctx, service, method, &meta, &timeout);
+        if (rc != OK) {
+            return rc;
+        }
+    }
+    return stub_call_ex(proxy->stub, service, method, payload, meta.count ? &meta : NULL,
+                        out_request_id);
 }
 
 int proxy_call_event(proxy_t *proxy, const char *service, const char *method,
                           const payload_t *payload, uint64_t *out_request_id) {
-    if (!proxy || !proxy->node || !proxy->stub || !service || !method) {
-        return ERR_INVALID;
-    }
-    return stub_call(proxy->stub, service, method, payload, out_request_id);
+    return proxy_call_event_ex(proxy, service, method, payload, NULL, out_request_id);
 }
 
 /* ---- 调用控制 ---- */
@@ -218,7 +311,7 @@ int proxy_call_stream(proxy_t *proxy, const char *service, const char *method,
         return ERR_INVALID;
     }
     return zri_stub_call_ex(proxy->stub, service, method, request, NULL, on_chunk, on_done, 1, user,
-                             timeout_ms, out_request_id);
+                             timeout_ms, out_request_id, NULL);
 }
 
 /* RTO 重传：按保存的请求参数重发（同一 msg_id）。 */
@@ -241,6 +334,6 @@ void zri_pending_retx(node_t *node, zri_pending_t *p) {
     now = zri_now_ms();
     remaining = p->deadline_ms > now ? p->deadline_ms - now : 1;
     (void)zri_node_send_call(node, &target, p->service, p->method, &pl, KIND_REQUEST,
-                             p->request_id, remaining);
+                             p->request_id, remaining, p->metadata, p->metadata_len);
     node->metrics.retries++;
 }

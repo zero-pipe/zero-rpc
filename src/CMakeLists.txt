@@ -9,6 +9,7 @@ add_library(rpc STATIC
     core/stub.c
     core/stream.c
     core/message_view.c
+    core/metadata.c
     core/service_table.c
     core/sync.c
     core/pending.c

@@ -493,16 +493,16 @@ static int run_api_checks(void) {
     }
 
     opts = method_opts(SERVICE_EXEC_WORKER, NULL);
-    if (service_add_stream_method_ex(svc, "badstream", dummy_chunk_handler, NULL, &opts) !=
-        ERR_INVALID) {
-        rpc_log_error("[api] stream worker accepted");
+    if (service_add_stream_method_ex(svc, "workerstream", dummy_chunk_handler, NULL, &opts) !=
+        OK) {
+        rpc_log_error("[api] stream worker registration failed");
         failed = 1;
     }
 
     opts = method_opts(SERVICE_EXEC_EXECUTOR, &good_exec);
-    if (service_add_stream_method_ex(svc, "badstream2", dummy_chunk_handler, NULL, &opts) !=
-        ERR_INVALID) {
-        rpc_log_error("[api] stream executor accepted");
+    if (service_add_stream_method_ex(svc, "execstream", dummy_chunk_handler, NULL, &opts) !=
+        OK) {
+        rpc_log_error("[api] stream executor registration failed");
         failed = 1;
     }
 

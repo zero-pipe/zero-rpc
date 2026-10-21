@@ -91,7 +91,7 @@ int service_add_sync_method(service_t *svc, const char *method,
 int service_add_sync_method_ex(service_t *svc, const char *method,
                                sync_handler_fn fn, void *user,
                                const service_method_options_t *options);
-/* 流式方法目前只支持 SERVICE_EXEC_INLINE；传 WORKER 返回 ERR_INVALID。 */
+/* 流式方法支持 INLINE / WORKER / EXECUTOR；worker 模式下每个 stream 串行派发。 */
 int service_add_stream_method(service_t *svc, const char *method,
                                     chunk_handler_fn fn, void *user);
 int service_add_stream_method_ex(service_t *svc, const char *method,
@@ -110,10 +110,24 @@ int service_add_sync_method_worker(service_t *svc, const char *method,
 /* ---- 回复 ---- */
 /* 一次性、异步回复。status 由应用定义；EVENT 请求上的回复会被静默忽略。 */
 void reply(call_t *call, int status, const payload_t *payload);
+/*
+ * 带状态消息与 metadata 的回复（对齐 gRPC status message / response metadata）。
+ * message / metadata 可为 NULL；框架会在发送前复制，返回后即可释放。
+ */
+void reply_ex(call_t *call, int status, const char *message, const payload_t *payload,
+              const metadata_t *metadata);
 /* 便捷版本：直接回复裸字节（encoding = 0）。 */
 void reply_bytes(call_t *call, int status, const void *data, size_t len);
 /* 分多次发送 response chunk；最后一个 chunk 必须带 STREAM_LAST。 */
 int reply_stream(call_t *call, int status, const chunk_t *chunk);
+
+/* ---- 服务端拦截器 ---- */
+/*
+ * 在 handler 之前调用（worker/executor 模式下在对应线程执行）。返回 OK 继续；
+ * 返回其它状态码则短路，框架直接以该状态回复，handler 不会被调用。
+ */
+typedef int (*service_interceptor_fn)(call_t *call, const request_t *req, void *user);
+int service_set_interceptor(service_t *svc, service_interceptor_fn fn, void *user);
 
 /* ---- 调用上下文 ---- */
 /*

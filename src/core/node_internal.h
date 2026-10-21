@@ -107,7 +107,8 @@ int zri_node_send(node_t *node, transport_kind_t transport_kind, const char *sch
 /* 组装 "service.method" 路由并发送一次调用（stub/proxy/重传共用）。 */
 int zri_node_send_call(node_t *node, const stub_target_t *target, const char *service,
                        const char *method, const payload_t *payload, uint8_t kind,
-                       uint64_t request_id, uint64_t timeout_ms);
+                       uint64_t request_id, uint64_t timeout_ms, const void *metadata,
+                       uint16_t metadata_len);
 /* 默认解析：静态路由表 / 服务发现（不含 proxy 的端点覆盖）。 */
 int zri_node_resolve(node_t *node, const char *service, int prefer_stream,
                       stub_target_t *out);

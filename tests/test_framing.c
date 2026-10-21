@@ -38,7 +38,7 @@ static void test_envelope_roundtrip(void) {
     envelope.payload = payload;
     envelope.payload_len = sizeof(payload);
     n = zri_envelope_encode(buf, sizeof(buf), &envelope);
-    CHECK(n == zri_envelope_size(strlen(route), sizeof(payload)));
+    CHECK(n == zri_envelope_size(strlen(route), 0, 0, sizeof(payload)));
     CHECK(zri_envelope_decode(buf, n, &view) == OK);
     CHECK(view.kind == KIND_REQUEST);
     CHECK(view.encoding == 3);

@@ -24,6 +24,8 @@ typedef struct zri_stub_task {
     char service[SERVICE_NAME_MAX];
     char method[METHOD_NAME_MAX];
     uint8_t *data;
+    uint8_t *metadata;
+    uint16_t metadata_len;
     size_t len;
     uint8_t encoding;
 } zri_stub_task_t;
@@ -42,7 +44,8 @@ static uint8_t stub_msg_kind(stub_kind_t kind) {
 /* 默认解析：静态路由表 + 服务发现。 */
 static int stub_default_send(stub_t *stub, const char *service, const char *method,
                              const payload_t *payload, stub_kind_t kind,
-                             uint64_t request_id, uint64_t timeout_ms, stub_target_t *target,
+                             uint64_t request_id, uint64_t timeout_ms, const void *metadata,
+                             uint16_t metadata_len, stub_target_t *target,
                              void *user_data) {
     node_t *node = stub->node;
     (void)user_data;
@@ -50,7 +53,7 @@ static int stub_default_send(stub_t *stub, const char *service, const char *meth
         return ERR_NOTFOUND;
     }
     return zri_node_send_call(node, target, service, method, payload, stub_msg_kind(kind),
-                              request_id, timeout_ms);
+                              request_id, timeout_ms, metadata, metadata_len);
 }
 
 static uint64_t stub_resend_task_fn(void *user) {
@@ -67,7 +70,8 @@ static uint64_t stub_resend_task_fn(void *user) {
 static void stub_call_now(stub_t *stub, uint64_t id, const char *service, const char *method,
                           const uint8_t *data, size_t len, uint8_t encoding, response_fn cb,
                           response_chunk_fn chunk_cb, stream_done_fn done_cb, int streaming,
-                          void *user, uint64_t timeout_ms) {
+                          void *user, uint64_t timeout_ms, const uint8_t *metadata,
+                          uint16_t metadata_len) {
     node_t *node = stub->node;
     zri_pending_t *p;
     payload_t pl;
@@ -95,6 +99,8 @@ static void stub_call_now(stub_t *stub, uint64_t id, const char *service, const 
     p->encoding = encoding;
     p->len = len;
     p->data = NULL;
+    p->metadata = NULL;
+    p->metadata_len = 0;
     if (len > 0) {
         p->data = (uint8_t *)zri_mem_alloc(len);
         if (p->data) {
@@ -102,6 +108,13 @@ static void stub_call_now(stub_t *stub, uint64_t id, const char *service, const 
         } else {
             p->has_req = 0;
             p->len = 0;
+        }
+    }
+    if (metadata_len > 0 && metadata) {
+        p->metadata = (uint8_t *)malloc(metadata_len);
+        if (p->metadata) {
+            memcpy(p->metadata, metadata, metadata_len);
+            p->metadata_len = metadata_len;
         }
     }
     p->retries = 0;
@@ -114,8 +127,8 @@ static void stub_call_now(stub_t *stub, uint64_t id, const char *service, const 
     pl.len = len;
     pl.encoding = encoding;
     memset(&target, 0, sizeof(target));
-    rc = stub->send(stub, service, method, &pl, STUB_REQUEST, id, timeout_ms, &target,
-                    stub->user_data);
+    rc = stub->send(stub, service, method, &pl, STUB_REQUEST, id, timeout_ms, metadata,
+                    metadata_len, &target, stub->user_data);
     /* 目标在解析成功时即已回填，先落进 pending 供重传使用。 */
     zri_copy_str(p->ip, sizeof(p->ip), target.ip, "0.0.0.0");
     p->port = target.port;
@@ -142,23 +155,27 @@ static void stub_call_now(stub_t *stub, uint64_t id, const char *service, const 
 }
 
 static void stub_event_now(stub_t *stub, uint64_t id, const char *service, const char *method,
-                           const uint8_t *data, size_t len, uint8_t encoding) {
+                           const uint8_t *data, size_t len, uint8_t encoding,
+                           const uint8_t *metadata, uint16_t metadata_len) {
     payload_t pl;
     stub_target_t target;
     pl.data = data;
     pl.len = len;
     pl.encoding = encoding;
     memset(&target, 0, sizeof(target));
-    (void)stub->send(stub, service, method, &pl, STUB_EVENT, id, 0, &target, stub->user_data);
+    (void)stub->send(stub, service, method, &pl, STUB_EVENT, id, 0, metadata, metadata_len, &target,
+                     stub->user_data);
 }
 
 static void stub_call_task_fn(void *user) {
     zri_stub_task_t *t = (zri_stub_task_t *)user;
     if (t->event) {
-        stub_event_now(t->stub, t->id, t->service, t->method, t->data, t->len, t->encoding);
+        stub_event_now(t->stub, t->id, t->service, t->method, t->data, t->len, t->encoding,
+                       t->metadata, t->metadata_len);
     } else {
         stub_call_now(t->stub, t->id, t->service, t->method, t->data, t->len, t->encoding, t->cb,
-                      t->chunk_cb, t->done_cb, t->streaming, t->user, t->timeout_ms);
+                      t->chunk_cb, t->done_cb, t->streaming, t->user, t->timeout_ms, t->metadata,
+                      t->metadata_len);
     }
     stub_task_free(t);
 }
@@ -176,13 +193,15 @@ static void stub_task_free(zri_stub_task_t *task) {
         return;
     }
     free(task->data);
+    free(task->metadata);
     free(task);
 }
 
 /* 创建一次调用的任务快照（service/method/payload 全部深拷贝）。 */
 static zri_stub_task_t *stub_task_create(stub_t *stub, uint64_t id, const char *service,
                                           const char *method, const uint8_t *data, size_t len,
-                                          uint8_t encoding) {
+                                          uint8_t encoding, const uint8_t *metadata,
+                                          uint16_t metadata_len) {
     zri_stub_task_t *task;
 
     task = (zri_stub_task_t *)calloc(1, sizeof(*task));
@@ -202,6 +221,15 @@ static zri_stub_task_t *stub_task_create(stub_t *stub, uint64_t id, const char *
             return NULL;
         }
         memcpy(task->data, data, len);
+    }
+    if (metadata_len > 0 && metadata) {
+        task->metadata = (uint8_t *)malloc(metadata_len);
+        if (!task->metadata) {
+            stub_task_free(task);
+            return NULL;
+        }
+        memcpy(task->metadata, metadata, metadata_len);
+        task->metadata_len = metadata_len;
     }
     return task;
 }
@@ -263,13 +291,16 @@ node_t *stub_node(const stub_t *stub) {
 
 /* ---- 调用 ---- */
 
-int stub_call(stub_t *stub, const char *service, const char *method,
-                   const payload_t *payload, uint64_t *out_request_id) {
+int stub_call_ex(stub_t *stub, const char *service, const char *method,
+                 const payload_t *payload, const metadata_t *metadata,
+                 uint64_t *out_request_id) {
     zri_stub_task_t *t;
     uint64_t id;
     const uint8_t *data;
     size_t len;
     uint8_t encoding;
+    uint8_t metadata_buf[METADATA_WIRE_MAX];
+    size_t metadata_len = 0;
     int rc;
 
     if (!stub || !stub->node || !service || !method) {
@@ -280,14 +311,20 @@ int stub_call(stub_t *stub, const char *service, const char *method,
         return rc;
     }
     id = stub_next_id(stub->node);
+    if (metadata && metadata_encode(metadata, metadata_buf, sizeof(metadata_buf),
+                                    &metadata_len) != OK) {
+        metadata_len = 0;
+    }
     if (ntk_poller_is_current_thread(stub->node->poller)) {
-        stub_event_now(stub, id, service, method, data, len, encoding);
+        stub_event_now(stub, id, service, method, data, len, encoding, metadata_buf,
+                       (uint16_t)metadata_len);
         if (out_request_id) {
             *out_request_id = id;
         }
         return OK;
     }
-    t = stub_task_create(stub, id, service, method, data, len, encoding);
+    t = stub_task_create(stub, id, service, method, data, len, encoding, metadata_buf,
+                         (uint16_t)metadata_len);
     if (!t) {
         return ERR_NOMEM;
     }
@@ -302,15 +339,23 @@ int stub_call(stub_t *stub, const char *service, const char *method,
     return OK;
 }
 
+int stub_call(stub_t *stub, const char *service, const char *method,
+                   const payload_t *payload, uint64_t *out_request_id) {
+    return stub_call_ex(stub, service, method, payload, NULL, out_request_id);
+}
+
 int zri_stub_call_ex(stub_t *stub, const char *service, const char *method,
                       const payload_t *payload, response_fn cb,
                       response_chunk_fn chunk_cb, stream_done_fn done_cb, int streaming,
-                      void *user, uint64_t timeout_ms, uint64_t *out_request_id) {
+                      void *user, uint64_t timeout_ms, uint64_t *out_request_id,
+                      const metadata_t *metadata) {
     zri_stub_task_t *t;
     uint64_t id;
     const uint8_t *data;
     size_t len;
     uint8_t encoding;
+    uint8_t metadata_buf[METADATA_WIRE_MAX];
+    size_t metadata_len = 0;
     int rc;
 
     if (!stub || !stub->node || !service || !method) {
@@ -327,17 +372,22 @@ int zri_stub_call_ex(stub_t *stub, const char *service, const char *method,
         return rc;
     }
     id = stub_next_id(stub->node);
+    if (metadata && metadata_encode(metadata, metadata_buf, sizeof(metadata_buf),
+                                    &metadata_len) != OK) {
+        metadata_len = 0;
+    }
 
     if (ntk_poller_is_current_thread(stub->node->poller)) {
         stub_call_now(stub, id, service, method, data, len, encoding, cb, chunk_cb, done_cb,
-                      streaming, user, timeout_ms);
+                      streaming, user, timeout_ms, metadata_buf, (uint16_t)metadata_len);
         if (out_request_id) {
             *out_request_id = id;
         }
         return OK;
     }
 
-    t = stub_task_create(stub, id, service, method, data, len, encoding);
+    t = stub_task_create(stub, id, service, method, data, len, encoding, metadata_buf,
+                         (uint16_t)metadata_len);
     if (!t) {
         return ERR_NOMEM;
     }
@@ -361,5 +411,12 @@ int stub_call_async(stub_t *stub, const char *service, const char *method,
                          const payload_t *payload, response_fn cb, void *user,
                          uint64_t timeout_ms, uint64_t *out_request_id) {
     return zri_stub_call_ex(stub, service, method, payload, cb, NULL, NULL, 0, user, timeout_ms,
-                             out_request_id);
+                             out_request_id, NULL);
+}
+
+int stub_call_async_ex(stub_t *stub, const char *service, const char *method,
+                       const payload_t *payload, const metadata_t *metadata, response_fn cb,
+                       void *user, uint64_t timeout_ms, uint64_t *out_request_id) {
+    return zri_stub_call_ex(stub, service, method, payload, cb, NULL, NULL, 0, user, timeout_ms,
+                             out_request_id, metadata);
 }

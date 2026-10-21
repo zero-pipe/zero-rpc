@@ -4,8 +4,9 @@
 
 #include <string.h>
 
-size_t zri_envelope_size(size_t route_len, size_t payload_len) {
-    return (size_t)ENVELOPE_HDR_LEN + route_len + payload_len;
+size_t zri_envelope_size(size_t route_len, size_t metadata_len, size_t status_msg_len,
+                         size_t payload_len) {
+    return (size_t)ENVELOPE_HDR_LEN + route_len + metadata_len + status_msg_len + payload_len;
 }
 
 size_t zri_envelope_encode(uint8_t *buf, size_t cap, const zri_envelope_t *envelope) {
@@ -17,10 +18,14 @@ size_t zri_envelope_encode(uint8_t *buf, size_t cap, const zri_envelope_t *envel
         return 0;
     }
     route_len = envelope->route ? strlen(envelope->route) : 0;
-    if (route_len > 0xffffu || (envelope->payload_len > 0 && !envelope->payload)) {
+    if (route_len > 0xffffu || envelope->metadata_len > 0xffffu ||
+        envelope->status_msg_len > 0xffffu || (envelope->payload_len > 0 && !envelope->payload) ||
+        (envelope->metadata_len > 0 && !envelope->metadata) ||
+        (envelope->status_msg_len > 0 && !envelope->status_msg)) {
         return 0;
     }
-    need = zri_envelope_size(route_len, envelope->payload_len);
+    need = zri_envelope_size(route_len, envelope->metadata_len, envelope->status_msg_len,
+                             envelope->payload_len);
     if (need > cap) {
         return 0;
     }
@@ -35,12 +40,22 @@ size_t zri_envelope_encode(uint8_t *buf, size_t cap, const zri_envelope_t *envel
     zri_put_u64(p + 16, envelope->stream_offset);
     zri_put_u64(p + 24, envelope->stream_total_size);
     zri_put_u16(p + 32, (uint16_t)route_len);
-    zri_put_u16(p + 34, 0);
+    zri_put_u16(p + 34, envelope->metadata_len);
     zri_put_u32(p + 36, envelope->timeout_ms);
+    zri_put_u16(p + 40, envelope->status_msg_len);
+    zri_put_u16(p + 42, 0);
     p += ENVELOPE_HDR_LEN;
     if (route_len > 0) {
         memcpy(p, envelope->route, route_len);
         p += route_len;
+    }
+    if (envelope->metadata_len > 0) {
+        memcpy(p, envelope->metadata, envelope->metadata_len);
+        p += envelope->metadata_len;
+    }
+    if (envelope->status_msg_len > 0) {
+        memcpy(p, envelope->status_msg, envelope->status_msg_len);
+        p += envelope->status_msg_len;
     }
     if (envelope->payload_len > 0) {
         memcpy(p, envelope->payload, envelope->payload_len);
@@ -50,11 +65,15 @@ size_t zri_envelope_encode(uint8_t *buf, size_t cap, const zri_envelope_t *envel
 
 int zri_envelope_decode(const uint8_t *buf, size_t len, zri_envelope_t *view) {
     uint16_t route_len;
+    uint16_t metadata_len;
+    uint16_t status_msg_len;
     if (!buf || !view || len < ENVELOPE_HDR_LEN) {
         return ERR_INVALID;
     }
     route_len = zri_get_u16(buf + 32);
-    if ((size_t)ENVELOPE_HDR_LEN + route_len > len) {
+    metadata_len = zri_get_u16(buf + 34);
+    status_msg_len = zri_get_u16(buf + 40);
+    if ((size_t)ENVELOPE_HDR_LEN + route_len + metadata_len + status_msg_len > len) {
         return ERR_INVALID;
     }
     view->kind = buf[0];
@@ -68,8 +87,12 @@ int zri_envelope_decode(const uint8_t *buf, size_t len, zri_envelope_t *view) {
     view->timeout_ms = zri_get_u32(buf + 36);
     view->route = (const char *)(buf + ENVELOPE_HDR_LEN);
     view->route_len = route_len;
-    view->payload = buf + ENVELOPE_HDR_LEN + route_len;
-    view->payload_len = len - ENVELOPE_HDR_LEN - route_len;
+    view->metadata = buf + ENVELOPE_HDR_LEN + route_len;
+    view->metadata_len = metadata_len;
+    view->status_msg = (const char *)(buf + ENVELOPE_HDR_LEN + route_len + metadata_len);
+    view->status_msg_len = status_msg_len;
+    view->payload = buf + ENVELOPE_HDR_LEN + route_len + metadata_len + status_msg_len;
+    view->payload_len = len - ENVELOPE_HDR_LEN - route_len - metadata_len - status_msg_len;
     return OK;
 }
 
@@ -96,6 +119,10 @@ void zri_envelope_to_message(const zri_envelope_t *envelope, char *route_buf, si
     out->status = envelope->status;
     out->request_id = envelope->request_id;
     out->timeout_ms = envelope->timeout_ms;
+    out->metadata = envelope->metadata;
+    out->metadata_len = envelope->metadata_len;
+    out->status_msg = envelope->status_msg;
+    out->status_msg_len = envelope->status_msg_len;
     out->route = route_buf;
     out->payload.data = envelope->payload;
     out->payload.len = envelope->payload_len;

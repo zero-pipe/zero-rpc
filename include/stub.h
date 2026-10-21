@@ -44,6 +44,7 @@ typedef enum stub_kind {
 typedef int (*stub_send_fn)(stub_t *stub, const char *service, const char *method,
                                  const payload_t *payload, stub_kind_t kind,
                                  uint64_t request_id, uint64_t timeout_ms,
+                                 const void *metadata, uint16_t metadata_len,
                                  stub_target_t *target, void *user_data);
 
 typedef struct stub_options {
@@ -63,6 +64,9 @@ node_t *stub_node(const stub_t *stub);
 /* 单向发送（EVENT）。不等待响应；发送在节点 poller 线程上完成。 */
 int stub_call(stub_t *stub, const char *service, const char *method,
                    const payload_t *payload, uint64_t *out_request_id);
+int stub_call_ex(stub_t *stub, const char *service, const char *method,
+                 const payload_t *payload, const metadata_t *metadata,
+                 uint64_t *out_request_id);
 
 /*
  * 异步请求。发现并发送后立即返回；响应或超时通过 cb 回调（在 poller 线程）。
@@ -72,6 +76,10 @@ int stub_call(stub_t *stub, const char *service, const char *method,
 int stub_call_async(stub_t *stub, const char *service, const char *method,
                          const payload_t *payload, response_fn cb, void *user,
                          uint64_t timeout_ms, uint64_t *out_request_id);
+/* 带 metadata 的异步请求；metadata 为 NULL 时等价于 stub_call_async。 */
+int stub_call_async_ex(stub_t *stub, const char *service, const char *method,
+                       const payload_t *payload, const metadata_t *metadata, response_fn cb,
+                       void *user, uint64_t timeout_ms, uint64_t *out_request_id);
 
 #ifdef __cplusplus
 }

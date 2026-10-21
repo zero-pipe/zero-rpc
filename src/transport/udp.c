@@ -469,10 +469,12 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_me
     ntk_udp_dgram_t msgs[TX_BATCH_MAX];
     unsigned nm = 0;
     size_t route_len;
+    size_t metadata_len;
+    size_t status_len;
     const uint8_t *data;
     size_t len;
     zri_envelope_t envelope;
-    uint8_t prefix[ENVELOPE_HDR_LEN + MAX_ROUTE];
+    uint8_t prefix[ENVELOPE_HDR_LEN + MAX_ROUTE + METADATA_WIRE_MAX + STATUS_MSG_MAX];
     zri_env_view_t view;
     size_t prefix_len;
     size_t env_len;
@@ -485,6 +487,8 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_me
         return ERR_INVALID;
     }
     route_len = msg->route ? strlen(msg->route) : 0;
+    metadata_len = msg->metadata_len;
+    status_len = msg->status_msg_len;
     data = (const uint8_t *)msg->payload.data;
     len = msg->payload.len;
     if (len > udp->base.max_msg_bytes || route_len >= MAX_ROUTE) {
@@ -499,8 +503,9 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_me
         udp->base.metrics->backpressure_events++;
         return ERR_AGAIN;
     }
-    env_len = zri_envelope_size(route_len, len);
-    if (env_len > (size_t)udp->base.max_msg_bytes + MAX_ROUTE + ENVELOPE_HDR_LEN) {
+    env_len = zri_envelope_size(route_len, metadata_len, status_len, len);
+    if (env_len > (size_t)udp->base.max_msg_bytes + MAX_ROUTE + METADATA_WIRE_MAX +
+                      STATUS_MSG_MAX + ENVELOPE_HDR_LEN) {
         return ERR_TOOBIG;
     }
     /* 仅把 envelope 头 + route 编进栈上前缀；payload 保持借用，不做整包拷贝。 */
@@ -511,6 +516,10 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_me
     envelope.request_id = msg->request_id;
     envelope.timeout_ms = msg->timeout_ms;
     envelope.route = msg->route;
+    envelope.metadata = msg->metadata;
+    envelope.metadata_len = msg->metadata_len;
+    envelope.status_msg = msg->status_msg;
+    envelope.status_msg_len = msg->status_msg_len;
     envelope.payload = NULL;
     envelope.payload_len = 0;
     if (msg->has_stream) {
@@ -520,7 +529,7 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_me
         envelope.stream_total_size = msg->stream.total_size;
     }
     prefix_len = zri_envelope_encode(prefix, sizeof(prefix), &envelope);
-    if (prefix_len != ENVELOPE_HDR_LEN + route_len) {
+    if (prefix_len != ENVELOPE_HDR_LEN + route_len + metadata_len + status_len) {
         return ERR_INVALID;
     }
     view.prefix = prefix;

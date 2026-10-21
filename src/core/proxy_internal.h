@@ -22,6 +22,8 @@ struct proxy {
     char endpoint_scheme[SCHEME_MAX];
     uint16_t endpoint_port;
     transport_kind_t endpoint_transport;
+    int has_interceptor;
+    proxy_interceptor_t interceptor;
 };
 
 /* Stub：node 之上的传输无关调用原语；proxy 在它之上注入路由。 */
@@ -64,6 +66,7 @@ int zri_proxy_resolve(proxy_t *proxy, const char *service, char *ip_out, size_t 
 int zri_stub_call_ex(stub_t *stub, const char *service, const char *method,
                       const payload_t *payload, response_fn cb,
                       response_chunk_fn chunk_cb, stream_done_fn done_cb,
-                      int streaming, void *user, uint64_t timeout_ms, uint64_t *out_request_id);
+                      int streaming, void *user, uint64_t timeout_ms, uint64_t *out_request_id,
+                      const metadata_t *metadata);
 
 #endif /* PROXY_INTERNAL_H */

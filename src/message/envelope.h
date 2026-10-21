@@ -13,7 +13,7 @@ extern "C" {
 #endif
 
 /* Provider-neutral RPC envelope. All integer fields are big-endian. */
-#define ENVELOPE_HDR_LEN 40
+#define ENVELOPE_HDR_LEN 44
 
 /* RPC kind (envelope-level semantics). */
 #define KIND_REQUEST 0
@@ -31,7 +31,7 @@ extern "C" {
  * "view" type): encode reads the fields, decode fills them. route_len is an
  * output on decode and ignored on encode (derived from strlen(route)).
  *
- * Wire header (big-endian), 40 bytes:
+ * Wire header (big-endian), 44 bytes:
  *   [0]      kind
  *   [1]      encoding
  *   [2]      stream_flags
@@ -42,8 +42,12 @@ extern "C" {
  *   [16..23] stream_offset
  *   [24..31] stream_total_size
  *   [32..33] route_len
- *   [34..35] reserved
+ *   [34..35] metadata_len
  *   [36..39] timeout_ms   (请求剩余超时；0 = 无 deadline；CANCEL 时忽略)
+ *   [40..41] status_msg_len
+ *   [42..43] reserved
+ *
+ * 布局：header + route + metadata + status_msg + payload。
  */
 typedef struct zri_envelope {
     uint8_t kind;
@@ -57,11 +61,16 @@ typedef struct zri_envelope {
     uint32_t timeout_ms; /* 请求剩余超时毫秒；0 = 无 deadline */
     const char *route;
     uint16_t route_len; /* decode: filled; encode: ignored */
+    const void *metadata; /* metadata TLV 字节；可为 NULL */
+    uint16_t metadata_len;
+    const char *status_msg; /* 状态消息；可为 NULL */
+    uint16_t status_msg_len;
     const void *payload;
     size_t payload_len;
 } zri_envelope_t;
 
-size_t zri_envelope_size(size_t route_len, size_t payload_len);
+size_t zri_envelope_size(size_t route_len, size_t metadata_len, size_t status_msg_len,
+                         size_t payload_len);
 size_t zri_envelope_encode(uint8_t *buf, size_t cap, const zri_envelope_t *envelope);
 int zri_envelope_decode(const uint8_t *buf, size_t len, zri_envelope_t *view);
 

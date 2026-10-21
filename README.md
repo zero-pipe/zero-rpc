@@ -348,6 +348,23 @@ service_add_method_ex(svc, "slow_query", slow_handler, user, &opts);
   仍在排队的 worker 任务启动前被跳过；已运行的 handler 无法被抢占，可用
   `call_canceled(call)` 周期检查后尽快退出。取消登记有 TTL，不会无界增长。
 
+- metadata（对齐 gRPC metadata）：`metadata_t` 是固定容量（16 项、key 64B、
+  value 256B）的 key/value 容器，支持二进制 value。服务端从
+  `req->metadata` 读取，用 `reply_ex(call, status, message, payload, metadata)`
+  回传响应 metadata 与状态消息；客户端用 `proxy_call_async_ex` /
+  `stub_call_async_ex` / `proxy_call_event_ex` 发送请求 metadata，响应回调里的
+  `response_t.metadata/message` 仅在本次回调内有效。同步调用用
+  `proxy_call_sync_ex`，返回的 metadata 由 `response_release` 释放。
+- 拦截器：服务端 `service_set_interceptor` 在 handler 前执行，返回非 OK 会短路
+  并直接回复该状态；worker/executor 模式下在对应执行线程运行。客户端
+  `proxy_set_interceptor` 的 `before` 在调用线程修改 metadata/timeout，
+  `after` 在 poller 线程、用户回调前执行。
+- 流式方法现在也支持 `SERVICE_EXEC_WORKER` / `SERVICE_EXEC_EXECUTOR`：
+  框架按 stream 串行派发 chunk（保证顺序），reply 仍自动回投原 poller；
+  取消/过期时停止派发并在在途任务完成后释放 call。
+- `handler_max_concurrency` 现在同时约束内置 worker 池和自定义 executor 的
+  未完成任务数；超限统一返回 `ERR_AGAIN`。
+
 ## 压测
 
 `tools/bench_server` + `tools/loadgen` + `tools/perf/zbench.py`，CLI/结果 JSON 与

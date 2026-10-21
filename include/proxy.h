@@ -25,6 +25,21 @@ typedef struct proxy_options {
     uint32_t prefer_stream_threshold; /* 0=disabled; larger payloads prefer TCP */
 } proxy_options_t;
 
+/*
+ * 客户端拦截器（对齐 gRPC unary client interceptor 的最小形态）。
+ * before 在调用线程执行，可修改 metadata / timeout；非 OK 返回值直接短路。
+ * after 在 poller 线程、用户回调之前执行，可观测最终状态与响应 metadata。
+ */
+typedef struct proxy_interceptor {
+    void *ctx;
+    int (*before)(void *ctx, const char *service, const char *method, metadata_t *metadata,
+                  uint64_t *timeout_ms);
+    void (*after)(void *ctx, int status, const response_t *resp);
+} proxy_interceptor_t;
+
+/* 安装/清除客户端拦截器；interceptor 为 NULL 时清除。 */
+int proxy_set_interceptor(proxy_t *proxy, const proxy_interceptor_t *interceptor);
+
 /* ---- 生命周期 ---- */
 int proxy_create(node_t *node, const proxy_options_t *options, proxy_t **out);
 void proxy_destroy(proxy_t *proxy);
@@ -51,6 +66,10 @@ int proxy_set_endpoint_uri(proxy_t *proxy, const char *endpoint);
 int proxy_call_async(proxy_t *proxy, const char *service, const char *method,
                           const payload_t *payload, response_fn cb, void *user,
                           uint64_t timeout_ms, uint64_t *out_request_id);
+/* 带 metadata 的异步请求。 */
+int proxy_call_async_ex(proxy_t *proxy, const char *service, const char *method,
+                        const payload_t *payload, const metadata_t *metadata, response_fn cb,
+                        void *user, uint64_t timeout_ms, uint64_t *out_request_id);
 
 /*
  * 单向事件：只发送、不等待响应（EVENT）。发送在 poller 线程完成。
@@ -59,6 +78,9 @@ int proxy_call_async(proxy_t *proxy, const char *service, const char *method,
  */
 int proxy_call_event(proxy_t *proxy, const char *service, const char *method,
                           const payload_t *payload, uint64_t *out_request_id);
+int proxy_call_event_ex(proxy_t *proxy, const char *service, const char *method,
+                        const payload_t *payload, const metadata_t *metadata,
+                        uint64_t *out_request_id);
 
 /*
  * 同步请求：阻塞直到响应、错误或超时。成功时 response->payload 由内部缓冲持有，
@@ -67,6 +89,9 @@ int proxy_call_event(proxy_t *proxy, const char *service, const char *method,
 int proxy_call_sync(proxy_t *proxy, const char *service, const char *method,
                          const payload_t *request, response_t *response,
                          uint64_t timeout_ms, uint64_t *out_request_id);
+int proxy_call_sync_ex(proxy_t *proxy, const char *service, const char *method,
+                       const payload_t *request, const metadata_t *metadata,
+                       response_t *response, uint64_t timeout_ms, uint64_t *out_request_id);
 
 /* 释放 proxy_call_sync 填出的响应缓冲并清零。 */
 void response_release(response_t *response);
