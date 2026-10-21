@@ -22,20 +22,30 @@ typedef struct zri_registry {
 void zri_registry_init(zri_registry_t *registry);
 void zri_registry_cleanup(zri_registry_t *registry);
 
-int zri_registry_upsert(zri_registry_t *registry, const char *service, const char *instance_id,
-                         const endpoint_t *endpoints, size_t endpoint_count,
-                         uint32_t node_id, uint64_t last_seen_ms);
+int zri_registry_upsert(zri_registry_t *registry,
+                        const char *service,
+                        const char *instance_id,
+                        const endpoint_t *endpoints,
+                        size_t endpoint_count,
+                        uint32_t node_id,
+                        uint64_t last_seen_ms);
 void zri_registry_remove_node(zri_registry_t *registry, uint32_t node_id);
-int zri_registry_replace_node(zri_registry_t *registry, uint32_t node_id, const char *instance_id,
-                               const char *const *services, size_t service_count,
-                               const endpoint_t *endpoints, size_t endpoint_count,
-                               uint64_t last_seen_ms);
+int zri_registry_replace_node(zri_registry_t *registry,
+                              uint32_t node_id,
+                              const char *instance_id,
+                              const char *const *services,
+                              size_t service_count,
+                              const endpoint_t *endpoints,
+                              size_t endpoint_count,
+                              uint64_t last_seen_ms);
 void zri_registry_expire(zri_registry_t *registry, uint64_t now_ms, uint64_t ttl_ms);
 
 /* Selector operation: returns one endpoint using registry-local round robin. */
 int zri_registry_select(zri_registry_t *registry, const char *service, endpoint_t *out);
 /* Prefer a TCP endpoint when prefer_stream is set. */
-int zri_registry_select_prefer(zri_registry_t *registry, const char *service, int prefer_stream,
-                                endpoint_t *out);
+int zri_registry_select_prefer(zri_registry_t *registry,
+                               const char *service,
+                               int prefer_stream,
+                               endpoint_t *out);
 
 #endif /* REGISTRY_H */

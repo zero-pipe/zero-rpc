@@ -2,7 +2,8 @@
 
 #include <stdio.h>
 
-int zri_route_format(char *out, size_t cap, const char *service, const char *method) {
+int zri_route_format(char *out, size_t cap, const char *service, const char *method)
+{
     int n;
 
     if (!out || cap == 0 || !service || !method) {

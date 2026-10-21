@@ -22,8 +22,8 @@ extern "C" {
 #define KIND_CANCEL 3 /* 客户端取消：按 request_id + 对端定位在途调用 */
 
 #define STREAM_FLAG_STREAM 0x80
-#define STREAM_FLAG_FIRST  STREAM_FIRST
-#define STREAM_FLAG_LAST   STREAM_LAST
+#define STREAM_FLAG_FIRST STREAM_FIRST
+#define STREAM_FLAG_LAST STREAM_LAST
 #define STREAM_FLAG_CANCEL STREAM_CANCEL
 
 /*
@@ -60,7 +60,7 @@ typedef struct zri_envelope {
     uint64_t stream_total_size;
     uint32_t timeout_ms; /* 请求剩余超时毫秒；0 = 无 deadline */
     const char *route;
-    uint16_t route_len; /* decode: filled; encode: ignored */
+    uint16_t route_len;   /* decode: filled; encode: ignored */
     const void *metadata; /* metadata TLV 字节；可为 NULL */
     uint16_t metadata_len;
     const char *status_msg; /* 状态消息；可为 NULL */
@@ -69,7 +69,9 @@ typedef struct zri_envelope {
     size_t payload_len;
 } zri_envelope_t;
 
-size_t zri_envelope_size(size_t route_len, size_t metadata_len, size_t status_msg_len,
+size_t zri_envelope_size(size_t route_len,
+                         size_t metadata_len,
+                         size_t status_msg_len,
                          size_t payload_len);
 size_t zri_envelope_encode(uint8_t *buf, size_t cap, const zri_envelope_t *envelope);
 int zri_envelope_decode(const uint8_t *buf, size_t len, zri_envelope_t *view);
@@ -78,7 +80,9 @@ int zri_envelope_decode(const uint8_t *buf, size_t len, zri_envelope_t *view);
  * 把解码后的 envelope 转成统一消息上下文。route 会被拷贝到调用方提供的
  * route_buf（保证 NUL 结尾），其余字段直接借用 envelope 所在缓冲。
  */
-void zri_envelope_to_message(const zri_envelope_t *envelope, char *route_buf, size_t route_cap,
+void zri_envelope_to_message(const zri_envelope_t *envelope,
+                             char *route_buf,
+                             size_t route_cap,
                              zri_message_t *out);
 
 #ifdef __cplusplus

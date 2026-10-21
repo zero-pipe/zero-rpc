@@ -14,20 +14,21 @@
 #include <stdlib.h>
 #include <string.h>
 
-static int discovery_echo(const request_t *req, message_view_t *resp, void *user) {
+static int discovery_echo(const request_t *req, message_view_t *resp, void *user)
+{
     (void)user;
     return message_view_set_data(resp, req->payload.data, req->payload.len);
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char **argv)
+{
     node_config_t cfg;
     node_t *node = NULL;
     service_t *svc = NULL;
     uint16_t data_port = (uint16_t)(argc > 1 ? atoi(argv[1]) : 42450);
     uint16_t discovery_port = (uint16_t)(argc > 2 ? atoi(argv[2]) : 41953);
     const char *client_ip = argc > 3 ? argv[3] : "127.0.0.1";
-    uint16_t client_discovery_port =
-        (uint16_t)(argc > 4 ? atoi(argv[4]) : 41954);
+    uint16_t client_discovery_port = (uint16_t)(argc > 4 ? atoi(argv[4]) : 41954);
     int rc;
 
     memset(&cfg, 0, sizeof(cfg));
@@ -60,7 +61,9 @@ int main(int argc, char **argv) {
 
     rpc_log_info("service=DiscoveryService method=echo data=tcp://0.0.0.0:%u "
                  "discovery=udp://0.0.0.0:%u peer=%s:%u (Ctrl+C to stop)",
-                 (unsigned)data_port, (unsigned)discovery_port, client_ip,
+                 (unsigned)data_port,
+                 (unsigned)discovery_port,
+                 client_ip,
                  (unsigned)client_discovery_port);
     (void)node_spin(node);
     node_destroy(node);

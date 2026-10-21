@@ -6,7 +6,8 @@
 
 /* ---- 生命周期 ---- */
 
-void message_view_init(message_view_t *view) {
+void message_view_init(message_view_t *view)
+{
     if (!view) {
         return;
     }
@@ -16,7 +17,8 @@ void message_view_init(message_view_t *view) {
     view->owned = NULL;
 }
 
-void message_view_release(message_view_t *view) {
+void message_view_release(message_view_t *view)
+{
     if (!view) {
         return;
     }
@@ -30,7 +32,8 @@ void message_view_release(message_view_t *view) {
 
 /* ---- 写入 ---- */
 
-int message_view_set_borrowed(message_view_t *view, const void *data, size_t len) {
+int message_view_set_borrowed(message_view_t *view, const void *data, size_t len)
+{
     if (!view || (len > 0 && !data)) {
         return ERR_INVALID;
     }
@@ -43,7 +46,8 @@ int message_view_set_borrowed(message_view_t *view, const void *data, size_t len
     return OK;
 }
 
-int message_view_set_data(message_view_t *view, const void *data, size_t len) {
+int message_view_set_data(message_view_t *view, const void *data, size_t len)
+{
     void *copy = NULL;
     if (!view || (len > 0 && !data)) {
         return ERR_INVALID;
@@ -64,14 +68,16 @@ int message_view_set_data(message_view_t *view, const void *data, size_t len) {
     return OK;
 }
 
-int message_view_set_string(message_view_t *view, const char *text) {
+int message_view_set_string(message_view_t *view, const char *text)
+{
     if (!text) {
         return ERR_INVALID;
     }
     return message_view_set_data(view, text, strlen(text));
 }
 
-int message_view_set_payload(message_view_t *view, const payload_t *payload) {
+int message_view_set_payload(message_view_t *view, const payload_t *payload)
+{
     int rc;
     if (!view) {
         return ERR_INVALID;
@@ -95,7 +101,8 @@ int message_view_set_payload(message_view_t *view, const payload_t *payload) {
 
 /* ---- 导出 ---- */
 
-void message_view_to_payload(const message_view_t *view, payload_t *out) {
+void message_view_to_payload(const message_view_t *view, payload_t *out)
+{
     if (!out) {
         return;
     }

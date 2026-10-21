@@ -18,7 +18,8 @@
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-static uint64_t now_ns(void) {
+static uint64_t now_ns(void)
+{
     static LARGE_INTEGER freq;
     LARGE_INTEGER counter;
     if (freq.QuadPart == 0) {
@@ -29,7 +30,8 @@ static uint64_t now_ns(void) {
 }
 #else
 #include <time.h>
-static uint64_t now_ns(void) {
+static uint64_t now_ns(void)
+{
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
@@ -45,7 +47,8 @@ static uint64_t now_ns(void) {
 #define LAT_HIST_SIZE (LAT_LINEAR_MAX + LAT_LOG_BUCKETS)
 
 /* 延迟(µs) -> 直方图桶索引 */
-static int lat_hist_index(uint64_t us) {
+static int lat_hist_index(uint64_t us)
+{
     int b = 0;
     if (us < LAT_LINEAR_MAX) {
         return (int)us;
@@ -61,7 +64,8 @@ static int lat_hist_index(uint64_t us) {
 }
 
 /* 直方图桶索引 -> 代表值(µs)：线性桶取精确值，对数桶取区间中点 */
-static uint64_t lat_hist_key(int idx) {
+static uint64_t lat_hist_key(int idx)
+{
     int k;
     uint64_t lower;
     uint64_t upper;
@@ -120,7 +124,8 @@ static int g_status;
 static const uint8_t *g_expect_data;
 static size_t g_expect_len;
 
-static void on_response(int status, const response_t *resp, void *user) {
+static void on_response(int status, const response_t *resp, void *user)
+{
     callout_t *co = (callout_t *)user;
     co->status = status;
     co->app_status = resp ? resp->status : status;
@@ -134,7 +139,8 @@ static void on_response(int status, const response_t *resp, void *user) {
     ntk_sem_post(co->sem, 1);
 }
 
-static uint64_t sleep_until_ns(uint64_t deadline) {
+static uint64_t sleep_until_ns(uint64_t deadline)
+{
     for (;;) {
         uint64_t now = now_ns();
         uint64_t remain;
@@ -150,7 +156,8 @@ static uint64_t sleep_until_ns(uint64_t deadline) {
     }
 }
 
-static int parse_u64(const char *s, uint64_t *out) {
+static int parse_u64(const char *s, uint64_t *out)
+{
     char *end = NULL;
     unsigned long long v;
     if (!s || !s[0]) {
@@ -164,7 +171,8 @@ static int parse_u64(const char *s, uint64_t *out) {
     return 1;
 }
 
-static int parse_size(const char *s, size_t *out) {
+static int parse_size(const char *s, size_t *out)
+{
     uint64_t v;
     if (!parse_u64(s, &v)) {
         return 0;
@@ -173,19 +181,21 @@ static int parse_size(const char *s, size_t *out) {
     return 1;
 }
 
-static void usage(const char *argv0) {
-    rpc_log_error(
-        "usage: %s [--service s] [--method m] [--duration-seconds n]\n"
-        "          [--transport udp|tcp]\n"
-        "          [--max-requests n] [--payload-bytes n] [--expect-response-bytes n]\n"
-        "          [--timeout-ms n] [--rate qps] [--window n] [--verify-response]\n"
-        "          [--connect-timeout-seconds n] [--worker-id id] [--output path|-]\n"
-        "          [--mode static|mesh]\n"
-        "          [--discovery-port p] [--data-port p] [--max-msg-bytes n] [--bind ip] [--peer host:port]",
-        argv0);
+static void usage(const char *argv0)
+{
+    rpc_log_error("usage: %s [--service s] [--method m] [--duration-seconds n]\n"
+                  "          [--transport udp|tcp]\n"
+                  "          [--max-requests n] [--payload-bytes n] [--expect-response-bytes n]\n"
+                  "          [--timeout-ms n] [--rate qps] [--window n] [--verify-response]\n"
+                  "          [--connect-timeout-seconds n] [--worker-id id] [--output path|-]\n"
+                  "          [--mode static|mesh]\n"
+                  "          [--discovery-port p] [--data-port p] [--max-msg-bytes n] [--bind ip] "
+                  "[--peer host:port]",
+                  argv0);
 }
 
-static void error_add(error_entry_t *errors, int *error_count, int code) {
+static void error_add(error_entry_t *errors, int *error_count, int code)
+{
     int i;
     for (i = 0; i < *error_count; i++) {
         if (errors[i].code == code) {
@@ -222,7 +232,8 @@ static int g_pause; /* 内联回调要求外层填充循环暂停 */
 
 static void ed_issue(void *user);
 
-static void ed_finish(void) {
+static void ed_finish(void)
+{
     if (g_finished) {
         return;
     }
@@ -230,7 +241,8 @@ static void ed_finish(void) {
     ntk_sem_post(g_done, 1);
 }
 
-static void ed_resp(int status, const response_t *resp, void *user) {
+static void ed_resp(int status, const response_t *resp, void *user)
+{
     int inline_cb = g_in_issue;
     uint64_t send_ns = (uint64_t)(uintptr_t)user;
     uint64_t lat = now_ns() - send_ns;
@@ -245,8 +257,8 @@ static void ed_resp(int status, const response_t *resp, void *user) {
     g_lat_hist[hidx]++;
 
     ok = (status == OK) && resp && resp->status == OK &&
-         (g_opt.expect_response_bytes == 0 ||
-          (resp && resp->payload.len == g_opt.expect_response_bytes));
+        (g_opt.expect_response_bytes == 0 ||
+         (resp && resp->payload.len == g_opt.expect_response_bytes));
     if (ok && g_opt.verify_response && resp) {
         ok = (resp->payload.len == g_opt.payload_bytes &&
               memcmp(resp->payload.data, g_payload, g_opt.payload_bytes) == 0);
@@ -264,8 +276,8 @@ static void ed_resp(int status, const response_t *resp, void *user) {
         g_lat_count++;
     } else {
         g_failed++;
-        error_add(g_errors, &g_error_count,
-                  status != OK ? status : (resp ? resp->status : ERR_STATE));
+        error_add(
+            g_errors, &g_error_count, status != OK ? status : (resp ? resp->status : ERR_STATE));
     }
 
     if (now_ns() >= g_deadline_ns ||
@@ -290,7 +302,8 @@ static void ed_resp(int status, const response_t *resp, void *user) {
     }
 }
 
-static void ed_issue(void *user) {
+static void ed_issue(void *user)
+{
     (void)user;
     if (g_in_issue) {
         return;
@@ -321,8 +334,14 @@ static void ed_issue(void *user) {
             pl.data = g_payload;
             pl.len = g_opt.payload_bytes;
             pl.encoding = 0;
-            rc = proxy_call_async(g_proxy, g_opt.service, g_opt.method, &pl, ed_resp,
-                                  (void *)(uintptr_t)now_ns(), g_opt.timeout_ms, &id);
+            rc = proxy_call_async(g_proxy,
+                                  g_opt.service,
+                                  g_opt.method,
+                                  &pl,
+                                  ed_resp,
+                                  (void *)(uintptr_t)now_ns(),
+                                  g_opt.timeout_ms,
+                                  &id);
         }
         if (rc != OK) {
             g_failed++;
@@ -338,7 +357,8 @@ static void ed_issue(void *user) {
     g_in_issue = 0;
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char **argv)
+{
     options_t opt;
     node_config_t cfg;
     node_t *node = NULL;
@@ -374,8 +394,8 @@ int main(int argc, char **argv) {
         const char *a = argv[i];
         if (strcmp(a, "--transport") == 0 && i + 1 < argc) {
             const char *t = argv[++i];
-            opt.transport = (strcmp(t, "tcp") == 0 || strcmp(t, "TCP") == 0) ? TRANSPORT_TCP
-                                                                             : TRANSPORT_UDP;
+            opt.transport =
+                (strcmp(t, "tcp") == 0 || strcmp(t, "TCP") == 0) ? TRANSPORT_TCP : TRANSPORT_UDP;
         } else if (strcmp(a, "--service") == 0 && i + 1 < argc) {
             opt.service = argv[++i];
         } else if (strcmp(a, "--mode") == 0 && i + 1 < argc) {
@@ -494,8 +514,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     if (opt.target_ip && opt.target_port) {
-        (void)proxy_set_endpoint(proxy, opt.target_ip, opt.target_port,
-                                      node_transport(node));
+        (void)proxy_set_endpoint(proxy, opt.target_ip, opt.target_port, node_transport(node));
     }
 
     memset(&co, 0, sizeof(co));
@@ -503,8 +522,8 @@ int main(int argc, char **argv) {
 
     /* MESH：先等目标服务进入路由表（启动等待），再做预热。 */
     if (!(opt.target_ip && opt.target_port)) {
-        (void)node_wait_for_service(node, opt.service,
-                                         (uint64_t)opt.connect_timeout_seconds * 1000ull);
+        (void)node_wait_for_service(
+            node, opt.service, (uint64_t)opt.connect_timeout_seconds * 1000ull);
     }
 
     /* 预热：等发现收敛（NOTFOUND 视为尚未发现，继续重试）。 */
@@ -519,8 +538,8 @@ int main(int argc, char **argv) {
             pl.encoding = 0;
             co.status = -999;
             co.send_ns = now_ns();
-            rc = proxy_call_async(proxy, opt.service, opt.method, &pl, on_response, &co,
-                                  opt.timeout_ms, &id);
+            rc = proxy_call_async(
+                proxy, opt.service, opt.method, &pl, on_response, &co, opt.timeout_ms, &id);
             if (rc != OK) {
                 rpc_log_error("proxy_call_async failed: %d", rc);
                 node_destroy(node);
@@ -563,8 +582,8 @@ int main(int argc, char **argv) {
                 co.resp_len = 0;
                 co.verify_ok = 1;
                 co.send_ns = now_ns();
-                rc = proxy_call_async(proxy, opt.service, opt.method, &pl, on_response,
-                                      &co, opt.timeout_ms, &id);
+                rc = proxy_call_async(
+                    proxy, opt.service, opt.method, &pl, on_response, &co, opt.timeout_ms, &id);
                 attempted++;
                 if (rc != OK) {
                     failed++;
@@ -597,8 +616,7 @@ int main(int argc, char **argv) {
                     lat_count++;
                 } else {
                     failed++;
-                    error_add(errors, &error_count,
-                              co.status != OK ? co.status : co.app_status);
+                    error_add(errors, &error_count, co.status != OK ? co.status : co.app_status);
                 }
                 index++;
             }
@@ -655,20 +673,28 @@ int main(int argc, char **argv) {
         fprintf(out, "\"status\":\"%s\",", status);
         fprintf(out, "\"worker_id\":\"%s\",", opt.worker_id ? opt.worker_id : "");
         fprintf(out, "\"service\":\"%s\",\"method\":\"%s\",", opt.service, opt.method);
-        fprintf(out, "\"attempted\":%llu,\"succeeded\":%llu,\"failed\":%llu,",
-                (unsigned long long)attempted, (unsigned long long)succeeded,
+        fprintf(out,
+                "\"attempted\":%llu,\"succeeded\":%llu,\"failed\":%llu,",
+                (unsigned long long)attempted,
+                (unsigned long long)succeeded,
                 (unsigned long long)failed);
         fprintf(out, "\"peak_inflight\":%llu,", (unsigned long long)peak_inflight);
         fprintf(out, "\"response_bytes\":%llu,", (unsigned long long)response_bytes);
-        fprintf(out, "\"expected_response_bytes\":%llu,", (unsigned long long)opt.expect_response_bytes);
+        fprintf(out,
+                "\"expected_response_bytes\":%llu,",
+                (unsigned long long)opt.expect_response_bytes);
         fprintf(out, "\"duration_seconds\":%.6f,", duration);
         fprintf(out, "\"errors\":{");
         for (i = 0; i < error_count; i++) {
-            fprintf(out, "%s\"%d\":%llu", i ? "," : "", errors[i].code,
+            fprintf(out,
+                    "%s\"%d\":%llu",
+                    i ? "," : "",
+                    errors[i].code,
                     (unsigned long long)errors[i].count);
         }
         fprintf(out, "},");
-        fprintf(out, "\"latency_us\":{\"min\":%.1f,\"mean\":%.1f,\"max\":%.1f},",
+        fprintf(out,
+                "\"latency_us\":{\"min\":%.1f,\"mean\":%.1f,\"max\":%.1f},",
                 lat_count ? (double)min_ns / 1000.0 : 0.0,
                 lat_count ? (double)sum_ns / (double)lat_count / 1000.0 : 0.0,
                 lat_count ? (double)max_ns / 1000.0 : 0.0);
@@ -677,7 +703,9 @@ int main(int argc, char **argv) {
             int first = 1;
             for (i = 0; i < LAT_HIST_SIZE; i++) {
                 if (g_lat_hist[i]) {
-                    fprintf(out, "%s\"%llu\":%llu", first ? "" : ",",
+                    fprintf(out,
+                            "%s\"%llu\":%llu",
+                            first ? "" : ",",
                             (unsigned long long)lat_hist_key(i),
                             (unsigned long long)g_lat_hist[i]);
                     first = 0;

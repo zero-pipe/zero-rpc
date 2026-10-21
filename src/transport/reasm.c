@@ -4,7 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-void zri_reasm_init(zri_reasm_t *reasm) {
+void zri_reasm_init(zri_reasm_t *reasm)
+{
     if (reasm) {
         for (size_t i = 0; i < MAX_REASM; i++) {
             reasm->slots[i].used = 0;
@@ -14,7 +15,8 @@ void zri_reasm_init(zri_reasm_t *reasm) {
     }
 }
 
-void zri_reasm_release(zri_reasm_slot_t *slot) {
+void zri_reasm_release(zri_reasm_slot_t *slot)
+{
     if (!slot) {
         return;
     }
@@ -29,7 +31,8 @@ void zri_reasm_release(zri_reasm_slot_t *slot) {
     slot->used = 0;
 }
 
-void zri_reasm_reset(zri_reasm_t *reasm) {
+void zri_reasm_reset(zri_reasm_t *reasm)
+{
     if (!reasm) {
         return;
     }
@@ -38,7 +41,8 @@ void zri_reasm_reset(zri_reasm_t *reasm) {
     }
 }
 
-zri_reasm_slot_t *zri_reasm_find(zri_reasm_t *reasm, uint32_t msg_id) {
+zri_reasm_slot_t *zri_reasm_find(zri_reasm_t *reasm, uint32_t msg_id)
+{
     if (!reasm) {
         return NULL;
     }
@@ -50,8 +54,9 @@ zri_reasm_slot_t *zri_reasm_find(zri_reasm_t *reasm, uint32_t msg_id) {
     return NULL;
 }
 
-zri_reasm_slot_t *zri_reasm_acquire(zri_reasm_t *reasm, uint32_t msg_id, uint32_t total_len,
-                                      uint32_t frag_count, uint64_t now_ms) {
+zri_reasm_slot_t *zri_reasm_acquire(
+    zri_reasm_t *reasm, uint32_t msg_id, uint32_t total_len, uint32_t frag_count, uint64_t now_ms)
+{
     zri_reasm_slot_t *slot = NULL;
     if (!reasm || frag_count == 0 || (total_len > 0 && frag_count == 0)) {
         return NULL;
@@ -95,8 +100,9 @@ zri_reasm_slot_t *zri_reasm_acquire(zri_reasm_t *reasm, uint32_t msg_id, uint32_
     return slot;
 }
 
-int zri_reasm_put(zri_reasm_slot_t *slot, uint32_t frag_index, uint32_t offset,
-                   const uint8_t *data, uint32_t len) {
+int zri_reasm_put(
+    zri_reasm_slot_t *slot, uint32_t frag_index, uint32_t offset, const uint8_t *data, uint32_t len)
+{
     if (!slot || !slot->bits || frag_index >= slot->frag_count || offset > slot->total_len ||
         len > slot->total_len - offset || (len > 0 && !data)) {
         return 0;
@@ -112,7 +118,8 @@ int zri_reasm_put(zri_reasm_slot_t *slot, uint32_t frag_index, uint32_t offset,
     return 1;
 }
 
-size_t zri_reasm_missing(const zri_reasm_t *reasm, uint16_t *out, size_t cap) {
+size_t zri_reasm_missing(const zri_reasm_t *reasm, uint16_t *out, size_t cap)
+{
     size_t count = 0;
     if (!reasm || !out || cap == 0) {
         return 0;
@@ -131,8 +138,12 @@ size_t zri_reasm_missing(const zri_reasm_t *reasm, uint16_t *out, size_t cap) {
     return count;
 }
 
-void zri_reasm_expire(zri_reasm_t *reasm, uint64_t now_ms, uint64_t timeout_ms,
-                       void (*on_lost)(const zri_reasm_slot_t *slot, void *user), void *user) {
+void zri_reasm_expire(zri_reasm_t *reasm,
+                      uint64_t now_ms,
+                      uint64_t timeout_ms,
+                      void (*on_lost)(const zri_reasm_slot_t *slot, void *user),
+                      void *user)
+{
     if (!reasm) {
         return;
     }

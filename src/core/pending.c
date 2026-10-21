@@ -9,7 +9,8 @@
 #include <stdlib.h>
 
 /* 回收一个槽位：清空回调/数据并挂到空闲链表，槽位仍留在节点链表中复用。 */
-static void pending_recycle(node_t *node, zri_pending_t *p) {
+static void pending_recycle(node_t *node, zri_pending_t *p)
+{
     p->used = 0;
     p->node = NULL;
     p->cb = NULL;
@@ -35,7 +36,8 @@ static void pending_recycle(node_t *node, zri_pending_t *p) {
     node->pending_free = p;
 }
 
-void zri_pending_invoke(zri_pending_t *p, int status, const response_t *resp) {
+void zri_pending_invoke(zri_pending_t *p, int status, const response_t *resp)
+{
     response_fn cb;
     void *user;
     node_t *node;
@@ -86,7 +88,8 @@ void zri_pending_invoke(zri_pending_t *p, int status, const response_t *resp) {
     }
 }
 
-void zri_pending_release(zri_pending_t *p) {
+void zri_pending_release(zri_pending_t *p)
+{
     node_t *node;
     if (!p || !p->used) {
         return;
@@ -119,8 +122,9 @@ void zri_pending_release(zri_pending_t *p) {
     }
 }
 
-zri_pending_t *zri_pending_add(node_t *node, uint64_t id, response_fn cb, void *user,
-                                 uint64_t timeout_ms) {
+zri_pending_t *zri_pending_add(
+    node_t *node, uint64_t id, response_fn cb, void *user, uint64_t timeout_ms)
+{
     zri_pending_t *p;
     if (!node) {
         return NULL;
@@ -162,7 +166,8 @@ zri_pending_t *zri_pending_add(node_t *node, uint64_t id, response_fn cb, void *
     return p;
 }
 
-zri_pending_t *zri_pending_find(node_t *node, uint64_t id) {
+zri_pending_t *zri_pending_find(node_t *node, uint64_t id)
+{
     zri_pending_t *p = NULL;
     if (!node) {
         return NULL;
@@ -174,7 +179,8 @@ zri_pending_t *zri_pending_find(node_t *node, uint64_t id) {
     return NULL;
 }
 
-void zri_pending_tick(node_t *node, uint64_t now_ms) {
+void zri_pending_tick(node_t *node, uint64_t now_ms)
+{
     zri_pending_t *p;
     if (!node) {
         return;
@@ -189,8 +195,8 @@ void zri_pending_tick(node_t *node, uint64_t now_ms) {
         }
         /* RTO 超时重传请求（覆盖整包丢失：NACK 无从触发的情况）。
          * 仅用于 UDP：TCP 本身可靠有序，应用层重传只会产生重复请求。 */
-        if (p->has_req && p->transport == TRANSPORT_UDP &&
-            p->retries < MAX_RETX && now_ms >= p->next_retx_ms) {
+        if (p->has_req && p->transport == TRANSPORT_UDP && p->retries < MAX_RETX &&
+            now_ms >= p->next_retx_ms) {
             uint32_t shift = p->retries < 4 ? p->retries : 4;
             zri_pending_retx(node, p);
             p->retries++;
@@ -199,7 +205,8 @@ void zri_pending_tick(node_t *node, uint64_t now_ms) {
     }
 }
 
-void zri_pending_cleanup(node_t *node) {
+void zri_pending_cleanup(node_t *node)
+{
     zri_pending_t *p;
     if (!node) {
         return;

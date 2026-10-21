@@ -63,8 +63,10 @@ size_t zri_iobuf_peek(const zri_iobuf_t *b, size_t off, void *dst, size_t n);
  * 把前缀导出为 iovec。最多 max_count 段、累计不超过 max_bytes（max_bytes=0 表示不限）。
  * 返回写入的 iov 数量。
  */
-unsigned zri_iobuf_iovec(const zri_iobuf_t *b, ntk_socket_iov *iov, unsigned max_count,
-                          size_t max_bytes);
+unsigned zri_iobuf_iovec(const zri_iobuf_t *b,
+                         ntk_socket_iov *iov,
+                         unsigned max_count,
+                         size_t max_bytes);
 
 /* 消费前缀 n 字节；整块消费完的 block 自动释放。n 超过当前长度时消费全部。 */
 void zri_iobuf_consume(zri_iobuf_t *b, size_t n);

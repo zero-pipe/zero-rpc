@@ -11,15 +11,16 @@
 
 static int g_fail;
 
-#define CHECK(cond)                                                \
-    do {                                                           \
-        if (!(cond)) {                                             \
+#define CHECK(cond)                                                     \
+    do {                                                                \
+        if (!(cond)) {                                                  \
             rpc_log_error("FAIL %s:%d: %s", __FILE__, __LINE__, #cond); \
-            g_fail = 1;                                            \
-        }                                                          \
+            g_fail = 1;                                                 \
+        }                                                               \
     } while (0)
 
-static endpoint_t ep(const char *scheme, const char *host, uint16_t port) {
+static endpoint_t ep(const char *scheme, const char *host, uint16_t port)
+{
     endpoint_t endpoint;
     memset(&endpoint, 0, sizeof(endpoint));
     snprintf(endpoint.scheme, sizeof(endpoint.scheme), "%s", scheme);
@@ -29,7 +30,8 @@ static endpoint_t ep(const char *scheme, const char *host, uint16_t port) {
     return endpoint;
 }
 
-int main(void) {
+int main(void)
+{
     zri_registry_t registry;
     endpoint_t endpoints[2];
     endpoint_t selected;
@@ -43,8 +45,8 @@ int main(void) {
     endpoints[1] = ep("tcp", "127.0.0.1", 9002);
     services[0] = "order";
     services[1] = "user";
-    CHECK(zri_registry_replace_node(&registry, 7, "nodeA-00000007", services, 2, endpoints, 2,
-                                     1000) == OK);
+    CHECK(zri_registry_replace_node(
+              &registry, 7, "nodeA-00000007", services, 2, endpoints, 2, 1000) == OK);
 
     /* 一个 instance 有两个 endpoint：对同一 service 轮询。 */
     CHECK(zri_registry_select(&registry, "order", &selected) == OK);
@@ -70,8 +72,8 @@ int main(void) {
     CHECK(zri_registry_select(&registry, "order", &selected) == ERR_NOTFOUND);
 
     /* 过期：last_seen 很早，ttl 之后被清理。 */
-    CHECK(zri_registry_replace_node(&registry, 9, "nodeB-00000009", services, 1, endpoints, 1,
-                                     1000) == OK);
+    CHECK(zri_registry_replace_node(
+              &registry, 9, "nodeB-00000009", services, 1, endpoints, 1, 1000) == OK);
     zri_registry_expire(&registry, 1000 + 5000, 3000);
     CHECK(zri_registry_select(&registry, "order", &selected) == ERR_NOTFOUND);
 

@@ -11,15 +11,16 @@
 
 static int g_fail;
 
-#define CHECK(cond)                                                \
-    do {                                                           \
-        if (!(cond)) {                                             \
+#define CHECK(cond)                                                     \
+    do {                                                                \
+        if (!(cond)) {                                                  \
             rpc_log_error("FAIL %s:%d: %s", __FILE__, __LINE__, #cond); \
-            g_fail = 1;                                            \
-        }                                                          \
+            g_fail = 1;                                                 \
+        }                                                               \
     } while (0)
 
-static void test_rx_window(void) {
+static void test_rx_window(void)
+{
     zri_rx_window_t window;
     uint16_t missing[64];
     size_t n;
@@ -40,12 +41,13 @@ static void test_rx_window(void) {
     CHECK(zri_rx_window_accept(&window, 9) == 0);
 }
 
-static void test_reasm(void) {
+static void test_reasm(void)
+{
     zri_reasm_t reasm;
     zri_reasm_slot_t *slot;
     uint16_t missing[64];
     size_t n;
-    const uint8_t data[4] = {1, 2, 3, 4};
+    const uint8_t data[4] = { 1, 2, 3, 4 };
 
     zri_reasm_init(&reasm);
     slot = zri_reasm_acquire(&reasm, 77, 8, 2, 1000);
@@ -72,7 +74,8 @@ static void test_reasm(void) {
     zri_reasm_reset(&reasm);
 }
 
-static void test_tx_ring(void) {
+static void test_tx_ring(void)
+{
     zri_tx_ring_t ring;
     const uint8_t *packet;
     uint8_t *dst;
@@ -95,7 +98,8 @@ static void test_tx_ring(void) {
     zri_tx_ring_cleanup(&ring);
 }
 
-int main(void) {
+int main(void)
+{
     test_rx_window();
     test_reasm();
     test_tx_ring();

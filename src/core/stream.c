@@ -31,11 +31,13 @@ typedef struct zri_stream_send_task {
 
 static uint64_t stream_send_task_fn(void *user);
 
-static void stream_send_async_fn(void *user) {
+static void stream_send_async_fn(void *user)
+{
     (void)stream_send_task_fn(user);
 }
 
-static void stream_response(int status, const response_t *resp, void *user) {
+static void stream_response(int status, const response_t *resp, void *user)
+{
     stream_t *stream = (stream_t *)user;
     if (!stream) {
         return;
@@ -46,14 +48,16 @@ static void stream_response(int status, const response_t *resp, void *user) {
     }
 }
 
-static void stream_bidi_chunk(int status, const chunk_t *chunk, void *user) {
+static void stream_bidi_chunk(int status, const chunk_t *chunk, void *user)
+{
     stream_t *stream = (stream_t *)user;
     if (stream && stream->chunk_cb) {
         stream->chunk_cb(status, chunk, stream->user);
     }
 }
 
-static void stream_bidi_done(int status, void *user) {
+static void stream_bidi_done(int status, void *user)
+{
     stream_t *stream = (stream_t *)user;
     if (!stream) {
         return;
@@ -64,7 +68,8 @@ static void stream_bidi_done(int status, void *user) {
     }
 }
 
-static void stream_open_task_fn(void *user) {
+static void stream_open_task_fn(void *user)
+{
     zri_stream_open_task_t *task = (zri_stream_open_task_t *)user;
     stream_t *stream = task->stream;
     zri_pending_t *pending;
@@ -72,8 +77,11 @@ static void stream_open_task_fn(void *user) {
         free(task);
         return;
     }
-    pending = zri_pending_add(stream->node, stream->request_id,
-                               stream->bidi ? NULL : stream_response, stream, stream->timeout_ms);
+    pending = zri_pending_add(stream->node,
+                              stream->request_id,
+                              stream->bidi ? NULL : stream_response,
+                              stream,
+                              stream->timeout_ms);
     if (!pending) {
         stream_response(ERR_NOMEM, NULL, stream);
     } else {
@@ -88,7 +96,8 @@ static void stream_open_task_fn(void *user) {
     free(task);
 }
 
-static uint64_t stream_send_task_fn(void *user) {
+static uint64_t stream_send_task_fn(void *user)
+{
     zri_stream_send_task_t *task = (zri_stream_send_task_t *)user;
     stream_t *stream = task->stream;
     payload_t payload;
@@ -143,7 +152,8 @@ done:
     return 0;
 }
 
-static void stream_cancel_task_fn(void *user) {
+static void stream_cancel_task_fn(void *user)
+{
     stream_t *stream = (stream_t *)user;
     zri_pending_t *pending;
     if (!stream || stream->closed) {
@@ -181,9 +191,14 @@ static void stream_cancel_task_fn(void *user) {
 
 /* ---- 流打开 ---- */
 
-int proxy_stream_open(proxy_t *proxy, const char *service, const char *method,
-                           response_fn cb, void *user, uint64_t timeout_ms,
-                           stream_t **out_stream) {
+int proxy_stream_open(proxy_t *proxy,
+                      const char *service,
+                      const char *method,
+                      response_fn cb,
+                      void *user,
+                      uint64_t timeout_ms,
+                      stream_t **out_stream)
+{
     stream_t *stream;
     zri_stream_open_task_t *task;
     transport_kind_t transport;
@@ -211,8 +226,15 @@ int proxy_stream_open(proxy_t *proxy, const char *service, const char *method,
         stream->request_id = 1;
     }
     stream->stream_id = (uint32_t)stream->request_id;
-    if (zri_proxy_resolve(proxy, service, stream->ip, sizeof(stream->ip), &stream->port,
-                           &transport, stream->scheme, sizeof(stream->scheme), 0) != OK) {
+    if (zri_proxy_resolve(proxy,
+                          service,
+                          stream->ip,
+                          sizeof(stream->ip),
+                          &stream->port,
+                          &transport,
+                          stream->scheme,
+                          sizeof(stream->scheme),
+                          0) != OK) {
         free(stream);
         return ERR_NOTFOUND;
     }
@@ -232,9 +254,15 @@ int proxy_stream_open(proxy_t *proxy, const char *service, const char *method,
     return OK;
 }
 
-int proxy_stream_open_bidi(proxy_t *proxy, const char *service, const char *method,
-                                response_chunk_fn on_chunk, stream_done_fn on_done,
-                                void *user, uint64_t timeout_ms, stream_t **out_stream) {
+int proxy_stream_open_bidi(proxy_t *proxy,
+                           const char *service,
+                           const char *method,
+                           response_chunk_fn on_chunk,
+                           stream_done_fn on_done,
+                           void *user,
+                           uint64_t timeout_ms,
+                           stream_t **out_stream)
+{
     stream_t *stream;
     zri_stream_open_task_t *task;
     transport_kind_t transport;
@@ -264,8 +292,15 @@ int proxy_stream_open_bidi(proxy_t *proxy, const char *service, const char *meth
         stream->request_id = 1;
     }
     stream->stream_id = (uint32_t)stream->request_id;
-    if (zri_proxy_resolve(proxy, service, stream->ip, sizeof(stream->ip), &stream->port,
-                           &transport, stream->scheme, sizeof(stream->scheme), 0) != OK) {
+    if (zri_proxy_resolve(proxy,
+                          service,
+                          stream->ip,
+                          sizeof(stream->ip),
+                          &stream->port,
+                          &transport,
+                          stream->scheme,
+                          sizeof(stream->scheme),
+                          0) != OK) {
         free(stream);
         return ERR_NOTFOUND;
     }
@@ -287,11 +322,12 @@ int proxy_stream_open_bidi(proxy_t *proxy, const char *service, const char *meth
 
 /* ---- 流数据与生命周期 ---- */
 
-int proxy_stream_send(stream_t *stream, const chunk_t *chunk) {
+int proxy_stream_send(stream_t *stream, const chunk_t *chunk)
+{
     zri_stream_send_task_t *task;
     int first;
-    if (!stream || !chunk || (!chunk->data && chunk->len) || stream->closed || stream->send_closed ||
-        (!stream->sent_any && !(chunk->flags & STREAM_FIRST)) ||
+    if (!stream || !chunk || (!chunk->data && chunk->len) || stream->closed ||
+        stream->send_closed || (!stream->sent_any && !(chunk->flags & STREAM_FIRST)) ||
         (stream->sent_any && (chunk->flags & STREAM_FIRST))) {
         return ERR_STATE;
     }
@@ -333,7 +369,8 @@ int proxy_stream_send(stream_t *stream, const chunk_t *chunk) {
     return OK;
 }
 
-int proxy_stream_cancel(stream_t *stream) {
+int proxy_stream_cancel(stream_t *stream)
+{
     if (!stream || stream->closed) {
         return ERR_NOTFOUND;
     }
@@ -347,7 +384,8 @@ int proxy_stream_cancel(stream_t *stream) {
     return OK;
 }
 
-int proxy_stream_destroy(stream_t *stream) {
+int proxy_stream_destroy(stream_t *stream)
+{
     if (!stream) {
         return ERR_INVALID;
     }

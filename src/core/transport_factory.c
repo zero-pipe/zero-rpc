@@ -9,22 +9,26 @@
 #include <stdlib.h>
 #include <string.h>
 
-static zri_transport_t *create_transport(transport_kind_t kind) {
+static zri_transport_t *create_transport(transport_kind_t kind)
+{
     return kind == TRANSPORT_TCP ? zri_tcp_transport_create() : zri_udp_transport_create();
 }
 
 /* 自定义 provider 收到消息后，适配回 node 的统一分发入口。 */
-static void provider_on_receive(void *receiver, void *reply_token, const char *peer_host,
-                                uint16_t peer_port, const transport_message_t *message) {
+static void provider_on_receive(void *receiver,
+                                void *reply_token,
+                                const char *peer_host,
+                                uint16_t peer_port,
+                                const transport_message_t *message)
+{
     zri_transport_t *transport = (zri_transport_t *)receiver;
     zri_message_t msg;
     int has_stream;
     if (!transport || !transport->node || !message) {
         return;
     }
-    has_stream = (message->stream.flags &
-                  (STREAM_FIRST | STREAM_LAST | STREAM_CANCEL)) != 0 ||
-                 message->stream.stream_id != 0;
+    has_stream = (message->stream.flags & (STREAM_FIRST | STREAM_LAST | STREAM_CANCEL)) != 0 ||
+        message->stream.stream_id != 0;
     memset(&msg, 0, sizeof(msg));
     msg.kind = message->kind;
     msg.status = message->status;
@@ -45,16 +49,19 @@ static void provider_on_receive(void *receiver, void *reply_token, const char *p
  * provider 适配层：把外部 provider SPI 适配成统一的 zri_transport_ops_t，
  * 使 node/upper 层只面对单一传输接口（不再有 provider/ops 双分支）。
  */
-static int provider_op_start(zri_transport_t *t) {
+static int provider_op_start(zri_transport_t *t)
+{
     return t->provider->ops->start(t->provider_instance);
 }
 
-static void provider_op_stop(zri_transport_t *t) {
+static void provider_op_stop(zri_transport_t *t)
+{
     t->provider->ops->stop(t->provider_instance);
 }
 
 /* 把统一消息上下文转换成公开 provider SPI 的消息结构。 */
-static void provider_message_from(const zri_message_t *src, transport_message_t *dst) {
+static void provider_message_from(const zri_message_t *src, transport_message_t *dst)
+{
     memset(dst, 0, sizeof(*dst));
     dst->kind = src->kind;
     dst->status = src->status;
@@ -66,28 +73,36 @@ static void provider_message_from(const zri_message_t *src, transport_message_t 
     dst->payload = src->payload;
 }
 
-static int provider_op_send(zri_transport_t *t, const zri_message_t *message) {
+static int provider_op_send(zri_transport_t *t, const zri_message_t *message)
+{
     transport_message_t provider_message;
     if (!t || !t->provider || !message) {
         return ERR_INVALID;
     }
     provider_message_from(message, &provider_message);
-    return t->provider->ops->send(t->provider_instance, message->peer_ip, message->peer_port,
-                                  &provider_message);
+    return t->provider->ops->send(
+        t->provider_instance, message->peer_ip, message->peer_port, &provider_message);
 }
 
-static int provider_op_reply(zri_transport_t *t, const zri_message_t *message) {
+static int provider_op_reply(zri_transport_t *t, const zri_message_t *message)
+{
     transport_message_t provider_message;
     if (!t || !t->provider || !message) {
         return ERR_INVALID;
     }
     provider_message_from(message, &provider_message);
-    return t->provider->ops->reply(t->provider_instance, message->peer_token, message->peer_ip,
-                                   message->peer_port, &provider_message);
+    return t->provider->ops->reply(t->provider_instance,
+                                   message->peer_token,
+                                   message->peer_ip,
+                                   message->peer_port,
+                                   &provider_message);
 }
 
-static int provider_op_peer_stats(zri_transport_t *t, const char *ip, uint16_t port,
-                                  peer_stats_t *out) {
+static int provider_op_peer_stats(zri_transport_t *t,
+                                  const char *ip,
+                                  uint16_t port,
+                                  peer_stats_t *out)
+{
     (void)t;
     (void)ip;
     (void)port;
@@ -96,15 +111,12 @@ static int provider_op_peer_stats(zri_transport_t *t, const char *ip, uint16_t p
 }
 
 static const zri_transport_ops_t g_provider_ops = {
-    provider_op_start,
-    provider_op_stop,
-    provider_op_send,
-    provider_op_reply,
-    provider_op_peer_stats,
+    provider_op_start, provider_op_stop,       provider_op_send,
+    provider_op_reply, provider_op_peer_stats,
 };
 
-int zri_node_transport_add(node_t *node, const char *scheme, const char *host,
-                            uint16_t port) {
+int zri_node_transport_add(node_t *node, const char *scheme, const char *host, uint16_t port)
+{
     zri_transport_t *transport;
     transport_kind_t kind;
     const transport_provider_t *provider;
@@ -117,7 +129,8 @@ int zri_node_transport_add(node_t *node, const char *scheme, const char *host,
     if (kind != TRANSPORT_TCP && kind != TRANSPORT_UDP && !provider) {
         return ERR_NOTFOUND; /* 未注册的 scheme */
     }
-    transport = provider ? (zri_transport_t *)calloc(1, sizeof(*transport)) : create_transport(kind);
+    transport =
+        provider ? (zri_transport_t *)calloc(1, sizeof(*transport)) : create_transport(kind);
     if (!transport) {
         return ERR_NOMEM;
     }

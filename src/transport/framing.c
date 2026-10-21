@@ -4,11 +4,13 @@
 
 #include <string.h>
 
-static int seq_diff16(uint16_t seq, uint16_t base) {
+static int seq_diff16(uint16_t seq, uint16_t base)
+{
     return (int)(int16_t)(uint16_t)(seq - base);
 }
 
-size_t zri_frame_build_frag_header(uint8_t *buf, size_t cap, const zri_frag_t *d) {
+size_t zri_frame_build_frag_header(uint8_t *buf, size_t cap, const zri_frag_t *d)
+{
     uint8_t *p;
     if (!buf || !d || d->frag_off > d->total_len || d->frag_len > d->total_len - d->frag_off) {
         return 0;
@@ -33,7 +35,8 @@ size_t zri_frame_build_frag_header(uint8_t *buf, size_t cap, const zri_frag_t *d
     return (size_t)RTP_HDR_LEN + FRAG_HDR_LEN;
 }
 
-size_t zri_frame_build_data(uint8_t *buf, size_t cap, const zri_frag_t *d) {
+size_t zri_frame_build_data(uint8_t *buf, size_t cap, const zri_frag_t *d)
+{
     size_t hdr;
     size_t need;
 
@@ -54,7 +57,8 @@ size_t zri_frame_build_data(uint8_t *buf, size_t cap, const zri_frag_t *d) {
     return need;
 }
 
-int zri_frame_parse_data(const uint8_t *buf, size_t len, zri_frag_t *v) {
+int zri_frame_parse_data(const uint8_t *buf, size_t len, zri_frag_t *v)
+{
     const uint8_t *p;
     uint8_t pt;
     size_t body;
@@ -91,8 +95,13 @@ int zri_frame_parse_data(const uint8_t *buf, size_t len, zri_frag_t *v) {
     return 1;
 }
 
-size_t zri_frame_build_nack(uint8_t *buf, size_t cap, uint32_t sender_ssrc, uint32_t media_ssrc,
-                            const uint16_t *seqs, size_t count) {
+size_t zri_frame_build_nack(uint8_t *buf,
+                            size_t cap,
+                            uint32_t sender_ssrc,
+                            uint32_t media_ssrc,
+                            const uint16_t *seqs,
+                            size_t count)
+{
     size_t i = 0;
     uint8_t *p;
     size_t total;
@@ -127,8 +136,13 @@ size_t zri_frame_build_nack(uint8_t *buf, size_t cap, uint32_t sender_ssrc, uint
     return total;
 }
 
-int zri_frame_parse_nack(const uint8_t *buf, size_t len, uint32_t *sender_ssrc, uint32_t *media_ssrc,
-                         uint16_t *out_seqs, size_t out_cap) {
+int zri_frame_parse_nack(const uint8_t *buf,
+                         size_t len,
+                         uint32_t *sender_ssrc,
+                         uint32_t *media_ssrc,
+                         uint16_t *out_seqs,
+                         size_t out_cap)
+{
     size_t off;
     size_t n = 0;
     if (!buf || len < 12 || (buf[0] >> 6) != 2 || buf[1] != RTCP_RTPFB ||
@@ -159,7 +173,8 @@ int zri_frame_parse_nack(const uint8_t *buf, size_t len, uint32_t *sender_ssrc, 
 
 /* ---- RTCP SR/RR/SDES ---- */
 
-static void put_report_block(uint8_t *p, const zri_rtcp_report_block_t *rb) {
+static void put_report_block(uint8_t *p, const zri_rtcp_report_block_t *rb)
+{
     zri_put_u32(p, rb->ssrc);
     p[4] = rb->fraction_lost;
     p[5] = (uint8_t)((uint32_t)rb->cumulative_lost >> 16);
@@ -171,7 +186,8 @@ static void put_report_block(uint8_t *p, const zri_rtcp_report_block_t *rb) {
     zri_put_u32(p + 20, rb->dlsr);
 }
 
-static void get_report_block(const uint8_t *p, zri_rtcp_report_block_t *rb) {
+static void get_report_block(const uint8_t *p, zri_rtcp_report_block_t *rb)
+{
     uint32_t raw;
     rb->ssrc = zri_get_u32(p);
     rb->fraction_lost = p[4];
@@ -186,9 +202,17 @@ static void get_report_block(const uint8_t *p, zri_rtcp_report_block_t *rb) {
     rb->dlsr = zri_get_u32(p + 20);
 }
 
-size_t zri_frame_build_sr(uint8_t *buf, size_t cap, uint32_t ssrc, uint32_t ntp_msw,
-                           uint32_t ntp_lsw, uint32_t rtp_ts, uint32_t packet_count,
-                           uint32_t octet_count, const zri_rtcp_report_block_t *rb, int rb_count) {
+size_t zri_frame_build_sr(uint8_t *buf,
+                          size_t cap,
+                          uint32_t ssrc,
+                          uint32_t ntp_msw,
+                          uint32_t ntp_lsw,
+                          uint32_t rtp_ts,
+                          uint32_t packet_count,
+                          uint32_t octet_count,
+                          const zri_rtcp_report_block_t *rb,
+                          int rb_count)
+{
     size_t need;
     int i;
     if (!buf || rb_count < 0 || rb_count > 31 || (rb_count > 0 && !rb)) {
@@ -213,8 +237,9 @@ size_t zri_frame_build_sr(uint8_t *buf, size_t cap, uint32_t ssrc, uint32_t ntp_
     return need;
 }
 
-size_t zri_frame_build_rr(uint8_t *buf, size_t cap, uint32_t ssrc,
-                           const zri_rtcp_report_block_t *rb, int rb_count) {
+size_t zri_frame_build_rr(
+    uint8_t *buf, size_t cap, uint32_t ssrc, const zri_rtcp_report_block_t *rb, int rb_count)
+{
     size_t need;
     int i;
     if (!buf || rb_count < 0 || rb_count > 31 || (rb_count > 0 && !rb)) {
@@ -234,7 +259,8 @@ size_t zri_frame_build_rr(uint8_t *buf, size_t cap, uint32_t ssrc,
     return need;
 }
 
-size_t zri_frame_build_sdes_cname(uint8_t *buf, size_t cap, uint32_t ssrc, const char *cname) {
+size_t zri_frame_build_sdes_cname(uint8_t *buf, size_t cap, uint32_t ssrc, const char *cname)
+{
     size_t clen;
     size_t chunk;
     size_t pad;
@@ -272,7 +298,8 @@ size_t zri_frame_build_sdes_cname(uint8_t *buf, size_t cap, uint32_t ssrc, const
     return need;
 }
 
-size_t zri_frame_build_bye(uint8_t *buf, size_t cap, uint32_t ssrc) {
+size_t zri_frame_build_bye(uint8_t *buf, size_t cap, uint32_t ssrc)
+{
     if (!buf || cap < 8) {
         return 0;
     }
@@ -283,7 +310,8 @@ size_t zri_frame_build_bye(uint8_t *buf, size_t cap, uint32_t ssrc) {
     return 8;
 }
 
-int zri_frame_parse_sr(const uint8_t *buf, size_t len, zri_rtcp_sr_t *out) {
+int zri_frame_parse_sr(const uint8_t *buf, size_t len, zri_rtcp_sr_t *out)
+{
     int cnt;
     int i;
     size_t need;
@@ -317,7 +345,8 @@ int zri_frame_parse_sr(const uint8_t *buf, size_t len, zri_rtcp_sr_t *out) {
     return 1;
 }
 
-int zri_frame_parse_rr(const uint8_t *buf, size_t len, zri_rtcp_rr_t *out) {
+int zri_frame_parse_rr(const uint8_t *buf, size_t len, zri_rtcp_rr_t *out)
+{
     int cnt;
     int i;
     size_t need;
@@ -346,7 +375,8 @@ int zri_frame_parse_rr(const uint8_t *buf, size_t len, zri_rtcp_rr_t *out) {
     return 1;
 }
 
-int zri_frame_parse_bye(const uint8_t *buf, size_t len, uint32_t *ssrc) {
+int zri_frame_parse_bye(const uint8_t *buf, size_t len, uint32_t *ssrc)
+{
     if (!buf || len < 8) {
         return 0;
     }
@@ -359,7 +389,8 @@ int zri_frame_parse_bye(const uint8_t *buf, size_t len, uint32_t *ssrc) {
     return 1;
 }
 
-size_t zri_tcp_frame_size(const uint8_t *buf, size_t len) {
+size_t zri_tcp_frame_size(const uint8_t *buf, size_t len)
+{
     uint32_t body_len;
     if (!buf || len < TCP_HDR_LEN) {
         return 0;
@@ -371,9 +402,9 @@ size_t zri_tcp_frame_size(const uint8_t *buf, size_t len) {
     return (size_t)body_len + TCP_HDR_LEN;
 }
 
-size_t zri_tcp_build(uint8_t *buf, size_t cap, const uint8_t *body, size_t body_len) {
-    if (!buf || !body || body_len == 0 || body_len > 0xffffffffu ||
-        body_len + TCP_HDR_LEN > cap) {
+size_t zri_tcp_build(uint8_t *buf, size_t cap, const uint8_t *body, size_t body_len)
+{
+    if (!buf || !body || body_len == 0 || body_len > 0xffffffffu || body_len + TCP_HDR_LEN > cap) {
         return 0;
     }
     zri_put_u32(buf, (uint32_t)body_len);
@@ -381,7 +412,8 @@ size_t zri_tcp_build(uint8_t *buf, size_t cap, const uint8_t *body, size_t body_
     return body_len + TCP_HDR_LEN;
 }
 
-int zri_tcp_parse(const uint8_t *buf, size_t len, const uint8_t **body, size_t *body_len) {
+int zri_tcp_parse(const uint8_t *buf, size_t len, const uint8_t **body, size_t *body_len)
+{
     size_t frame;
     if (!buf || !body || !body_len || len < TCP_HDR_LEN) {
         return -1;

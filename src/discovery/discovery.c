@@ -19,7 +19,8 @@
 #define DISC_FRAME_MAX 1400
 
 /* 构建 HELLO/BYE 帧。返回长度，0 失败。 */
-static size_t disc_build(node_t *node, int bye, uint8_t *buf, size_t cap) {
+static size_t disc_build(node_t *node, int bye, uint8_t *buf, size_t cap)
+{
     size_t n = 0;
     size_t svc_count = zri_node_service_count(node);
     const char *name = node_name(node);
@@ -82,15 +83,17 @@ static size_t disc_build(node_t *node, int bye, uint8_t *buf, size_t cap) {
     return n;
 }
 
-static void disc_send_to(node_t *node, const char *ip, uint16_t port, const uint8_t *buf,
-                         size_t len) {
+static void disc_send_to(
+    node_t *node, const char *ip, uint16_t port, const uint8_t *buf, size_t len)
+{
     zri_discovery_state_t *st = zri_node_discovery(node);
     if (st && st->sock && ip && port) {
         (void)ntk_socket_sendto(st->sock, buf, len, ip, port);
     }
 }
 
-void zri_discovery_send_hello(node_t *node, int bye) {
+void zri_discovery_send_hello(node_t *node, int bye)
+{
     uint8_t buf[DISC_FRAME_MAX];
     zri_discovery_state_t *st;
     const char *host;
@@ -109,8 +112,8 @@ void zri_discovery_send_hello(node_t *node, int bye) {
         return;
     }
     host = zri_node_discovery_host(node);
-    disc_send_to(node, host && host[0] ? host : "255.255.255.255",
-                 node_discovery_port(node), buf, n);
+    disc_send_to(
+        node, host && host[0] ? host : "255.255.255.255", node_discovery_port(node), buf, n);
     for (i = 0; i < DISC_TARGET_MAX; i++) {
         if (st->targets[i].used) {
             disc_send_to(node, st->targets[i].ip, st->targets[i].port, buf, n);
@@ -118,9 +121,17 @@ void zri_discovery_send_hello(node_t *node, int bye) {
     }
 }
 
-static void peer_store(node_t *node, const char *ip, uint32_t node_id,
-                       const char *remote_name, const uint8_t *binding_blob, size_t binding_len,
-                       const uint8_t *svc_blob, int svc_count, size_t svc_len, uint64_t now_ms) {
+static void peer_store(node_t *node,
+                       const char *ip,
+                       uint32_t node_id,
+                       const char *remote_name,
+                       const uint8_t *binding_blob,
+                       size_t binding_len,
+                       const uint8_t *svc_blob,
+                       int svc_count,
+                       size_t svc_len,
+                       uint64_t now_ms)
+{
     zri_discovery_state_t *st = zri_node_discovery(node);
     zri_peer_t *p = NULL;
     int i;
@@ -192,7 +203,9 @@ static void peer_store(node_t *node, const char *ip, uint32_t node_id,
     }
     {
         char instance_id[NAME_MAX];
-        int n = snprintf(instance_id, sizeof(instance_id), "%s-%08x",
+        int n = snprintf(instance_id,
+                         sizeof(instance_id),
+                         "%s-%08x",
                          remote_name && remote_name[0] ? remote_name : "node",
                          (unsigned)node_id);
         if (n > 0 && (size_t)n < sizeof(instance_id) && p->endpoint_count > 0) {
@@ -200,15 +213,21 @@ static void peer_store(node_t *node, const char *ip, uint32_t node_id,
             for (i = 0; i < p->service_count; i++) {
                 services[i] = p->services[i];
             }
-            (void)zri_registry_replace_node(zri_node_registry(node), node_id, instance_id, services,
-                                             (size_t)p->service_count, p->endpoints,
-                                             p->endpoint_count, now_ms);
+            (void)zri_registry_replace_node(zri_node_registry(node),
+                                            node_id,
+                                            instance_id,
+                                            services,
+                                            (size_t)p->service_count,
+                                            p->endpoints,
+                                            p->endpoint_count,
+                                            now_ms);
         }
     }
     (void)svc_count;
 }
 
-static void disc_handle_frame(node_t *node, const char *ip, const uint8_t *buf, size_t len) {
+static void disc_handle_frame(node_t *node, const char *ip, const uint8_t *buf, size_t len)
+{
     zri_discovery_state_t *st = zri_node_discovery(node);
     uint32_t magic;
     uint32_t node_id;
@@ -283,12 +302,21 @@ static void disc_handle_frame(node_t *node, const char *ip, const uint8_t *buf, 
         return;
     }
     if (flags & DISC_FLAG_HELLO) {
-        peer_store(node, ip, node_id, remote_name, buf + binding_start, binding_len, buf + off,
-                   svc_count, svc_len, now);
+        peer_store(node,
+                   ip,
+                   node_id,
+                   remote_name,
+                   buf + binding_start,
+                   binding_len,
+                   buf + off,
+                   svc_count,
+                   svc_len,
+                   now);
     }
 }
 
-static void disc_recv_cb(ntk_socket *sock, void *user) {
+static void disc_recv_cb(ntk_socket *sock, void *user)
+{
     node_t *node = (node_t *)user;
     zri_discovery_state_t *st = zri_node_discovery(node);
     uint8_t buf[DISC_FRAME_MAX];
@@ -307,7 +335,8 @@ static void disc_recv_cb(ntk_socket *sock, void *user) {
     }
 }
 
-int zri_discovery_init(node_t *node) {
+int zri_discovery_init(node_t *node)
+{
     zri_discovery_state_t *st = zri_node_discovery(node);
     ntk_socket_callbacks_t cbs;
     uint16_t actual = 0;
@@ -340,7 +369,8 @@ int zri_discovery_init(node_t *node) {
     return OK;
 }
 
-void zri_discovery_shutdown(node_t *node) {
+void zri_discovery_shutdown(node_t *node)
+{
     zri_discovery_state_t *st = zri_node_discovery(node);
     if (st && st->sock) {
         ntk_socket_detach_poller(st->sock);
@@ -349,14 +379,16 @@ void zri_discovery_shutdown(node_t *node) {
     }
 }
 
-void zri_discovery_on_readable(node_t *node) {
+void zri_discovery_on_readable(node_t *node)
+{
     zri_discovery_state_t *st = zri_node_discovery(node);
     if (st && st->sock) {
         disc_recv_cb(st->sock, node);
     }
 }
 
-void zri_discovery_tick(node_t *node, uint64_t now_ms) {
+void zri_discovery_tick(node_t *node, uint64_t now_ms)
+{
     zri_discovery_state_t *st = zri_node_discovery(node);
     uint32_t ttl;
     int i;
@@ -373,8 +405,13 @@ void zri_discovery_tick(node_t *node, uint64_t now_ms) {
     zri_registry_expire(zri_node_registry(node), now_ms, ttl);
 }
 
-int zri_discovery_find(node_t *node, const char *service, char *ip_out, size_t ip_cap,
-                        uint16_t *port_out, transport_kind_t *transport_out) {
+int zri_discovery_find(node_t *node,
+                       const char *service,
+                       char *ip_out,
+                       size_t ip_cap,
+                       uint16_t *port_out,
+                       transport_kind_t *transport_out)
+{
     endpoint_t endpoint;
     if (!node || !service || !ip_out || !port_out) {
         return ERR_INVALID;
@@ -407,22 +444,27 @@ static const zri_registry_backend_t g_mesh_backend = {
     &g_mesh_ops,
 };
 
-const zri_registry_backend_t *zri_registry_backend_mesh(void) {
+const zri_registry_backend_t *zri_registry_backend_mesh(void)
+{
     return &g_mesh_backend;
 }
 
-static int mesh_backend_start(node_t *node) {
+static int mesh_backend_start(node_t *node)
+{
     return zri_discovery_init(node);
 }
 
-static void mesh_backend_stop(node_t *node) {
+static void mesh_backend_stop(node_t *node)
+{
     zri_discovery_shutdown(node);
 }
 
-static void mesh_backend_tick(node_t *node, uint64_t now_ms) {
+static void mesh_backend_tick(node_t *node, uint64_t now_ms)
+{
     zri_discovery_tick(node, now_ms);
 }
 
-static void mesh_backend_announce(node_t *node, int bye) {
+static void mesh_backend_announce(node_t *node, int bye)
+{
     zri_discovery_send_hello(node, bye);
 }

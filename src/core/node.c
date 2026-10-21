@@ -12,11 +12,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-uint64_t zri_now_ms(void) {
+uint64_t zri_now_ms(void)
+{
     return ntk_monotonic_ms();
 }
 
-static uint32_t zri_rand(void) {
+static uint32_t zri_rand(void)
+{
     static uint32_t st;
     if (st == 0) {
         st = (uint32_t)ntk_monotonic_ms() ^ 0x9e3779b9u;
@@ -29,7 +31,8 @@ static uint32_t zri_rand(void) {
 
 /* ---- 定长对象复用池 ---- */
 
-int zri_obj_pool_init(zri_obj_pool_t *pool, unsigned limit) {
+int zri_obj_pool_init(zri_obj_pool_t *pool, unsigned limit)
+{
     if (!pool) {
         return ERR_INVALID;
     }
@@ -39,7 +42,8 @@ int zri_obj_pool_init(zri_obj_pool_t *pool, unsigned limit) {
     return pool->lock ? OK : ERR_NOMEM;
 }
 
-void zri_obj_pool_destroy(zri_obj_pool_t *pool) {
+void zri_obj_pool_destroy(zri_obj_pool_t *pool)
+{
     void *obj;
     if (!pool) {
         return;
@@ -58,7 +62,8 @@ void zri_obj_pool_destroy(zri_obj_pool_t *pool) {
     }
 }
 
-void *zri_obj_pool_alloc(zri_obj_pool_t *pool, size_t size) {
+void *zri_obj_pool_alloc(zri_obj_pool_t *pool, size_t size)
+{
     void *obj = NULL;
     if (!pool || !pool->lock) {
         return malloc(size);
@@ -76,7 +81,8 @@ void *zri_obj_pool_alloc(zri_obj_pool_t *pool, size_t size) {
     return obj ? obj : malloc(size);
 }
 
-void zri_obj_pool_free(zri_obj_pool_t *pool, void *obj) {
+void zri_obj_pool_free(zri_obj_pool_t *pool, void *obj)
+{
     if (!obj) {
         return;
     }
@@ -96,14 +102,16 @@ void zri_obj_pool_free(zri_obj_pool_t *pool, void *obj) {
 
 /* ---- 定时器 ---- */
 
-static void hello_timer_cb(void *user) {
+static void hello_timer_cb(void *user)
+{
     node_t *node = (node_t *)user;
     if (node && node->registry_backend && node->registry_backend->ops->announce) {
         node->registry_backend->ops->announce(node, 0);
     }
 }
 
-static void node_timer_cb(void *user) {
+static void node_timer_cb(void *user)
+{
     node_t *node = (node_t *)user;
     uint64_t now = zri_now_ms();
     if (node->registry_backend && node->registry_backend->ops->tick) {
@@ -116,7 +124,8 @@ static void node_timer_cb(void *user) {
 
 /* ---- 公共 API ---- */
 
-int node_create(const node_config_t *cfg, node_t **out) {
+int node_create(const node_config_t *cfg, node_t **out)
+{
     node_t *node;
     ntk_poller_pool_opts_t popts;
     static int platform_inited = 0;
@@ -136,8 +145,8 @@ int node_create(const node_config_t *cfg, node_t **out) {
     node->cfg = *cfg;
     zri_copy_str(node->name, sizeof(node->name), cfg->name, "rpc");
     zri_copy_str(node->bind_host, sizeof(node->bind_host), cfg->bind_host, "0.0.0.0");
-    zri_copy_str(node->discovery_host, sizeof(node->discovery_host), cfg->discovery_host,
-                  "255.255.255.255");
+    zri_copy_str(
+        node->discovery_host, sizeof(node->discovery_host), cfg->discovery_host, "255.255.255.255");
     node->discovery_port = cfg->discovery_port ? cfg->discovery_port : DISCOVERY_PORT;
     node->io_threads = cfg->io_threads ? cfg->io_threads : ntk_thread_hardware_concurrency();
     if (node->io_threads > IO_MAX) {
@@ -163,8 +172,7 @@ int node_create(const node_config_t *cfg, node_t **out) {
     if (node->max_msg_bytes < node->frag_bytes) {
         node->max_msg_bytes = node->frag_bytes;
     }
-    node->bp_high_water = cfg->backpressure_bytes ? cfg->backpressure_bytes
-                                                  : BACKPRESSURE_DEFAULT;
+    node->bp_high_water = cfg->backpressure_bytes ? cfg->backpressure_bytes : BACKPRESSURE_DEFAULT;
     node->rtcp_interval_ms = cfg->rtcp_interval_ms ? cfg->rtcp_interval_ms : RTCP_INTERVAL_MS;
     node->rtcp_disabled = cfg->rtcp_disabled;
     node->handler_max_concurrency = cfg->handler_max_concurrency;
@@ -264,8 +272,7 @@ int node_create(const node_config_t *cfg, node_t **out) {
                 node_destroy(node);
                 return ERR_INVALID;
             }
-            if (zri_node_transport_add(node, endpoint.scheme, endpoint.host, endpoint.port) !=
-                OK) {
+            if (zri_node_transport_add(node, endpoint.scheme, endpoint.host, endpoint.port) != OK) {
                 node_destroy(node);
                 return ERR_IO;
             }
@@ -300,7 +307,8 @@ int node_create(const node_config_t *cfg, node_t **out) {
     return OK;
 }
 
-void node_destroy(node_t *node) {
+void node_destroy(node_t *node)
+{
     if (!node) {
         return;
     }
@@ -436,38 +444,43 @@ void node_destroy(node_t *node) {
 
 /* ---- 节点状态与端点 ---- */
 
-const char *node_name(const node_t *node) {
+const char *node_name(const node_t *node)
+{
     return node ? node->name : NULL;
 }
 
-transport_kind_t node_transport(const node_t *node) {
-    return (node && node->transport_count > 0 && node->transports[0])
-               ? node->transports[0]->kind
-               : TRANSPORT_UDP;
+transport_kind_t node_transport(const node_t *node)
+{
+    return (node && node->transport_count > 0 && node->transports[0]) ? node->transports[0]->kind :
+                                                                        TRANSPORT_UDP;
 }
 
-uint16_t node_discovery_port(const node_t *node) {
+uint16_t node_discovery_port(const node_t *node)
+{
     return node ? node->discovery_port : 0;
 }
 
-uint16_t node_data_port(const node_t *node) {
-    return (node && node->transport_count > 0 && node->transports[0])
-               ? node->transports[0]->port
-               : 0;
+uint16_t node_data_port(const node_t *node)
+{
+    return (node && node->transport_count > 0 && node->transports[0]) ? node->transports[0]->port :
+                                                                        0;
 }
 
-size_t node_binding_count(const node_t *node) {
+size_t node_binding_count(const node_t *node)
+{
     return node ? node->transport_count : 0;
 }
 
-int node_binding_endpoint(const node_t *node, size_t index, char *out, size_t cap) {
+int node_binding_endpoint(const node_t *node, size_t index, char *out, size_t cap)
+{
     endpoint_t endpoint;
     if (!node || index >= node->transport_count || !node->transports[index]) {
         return ERR_NOTFOUND;
     }
     memset(&endpoint, 0, sizeof(endpoint));
     zri_copy_str(endpoint.scheme, sizeof(endpoint.scheme), node->transports[index]->scheme, "udp");
-    zri_copy_str(endpoint.host, sizeof(endpoint.host), node->transports[index]->bind_host, "0.0.0.0");
+    zri_copy_str(
+        endpoint.host, sizeof(endpoint.host), node->transports[index]->bind_host, "0.0.0.0");
     endpoint.port = node->transports[index]->port;
     endpoint.transport = node->transports[index]->kind;
     return endpoint_format(&endpoint, out, cap);
@@ -475,7 +488,8 @@ int node_binding_endpoint(const node_t *node, size_t index, char *out, size_t ca
 
 /* ---- 指标与对端质量 ---- */
 
-void node_metrics(const node_t *node, metrics_t *out) {
+void node_metrics(const node_t *node, metrics_t *out)
+{
     if (!out) {
         return;
     }
@@ -486,8 +500,8 @@ void node_metrics(const node_t *node, metrics_t *out) {
     *out = node->metrics;
 }
 
-int node_peer_stats(const node_t *node, const char *ip, uint16_t port,
-                         peer_stats_t *out) {
+int node_peer_stats(const node_t *node, const char *ip, uint16_t port, peer_stats_t *out)
+{
     size_t i;
     if (!node || !ip || !out) {
         return ERR_INVALID;
@@ -505,7 +519,8 @@ int node_peer_stats(const node_t *node, const char *ip, uint16_t port,
 
 /* ---- 发现与路由 ---- */
 
-int node_add_discovery_peer(node_t *node, const char *ip, uint16_t discovery_port) {
+int node_add_discovery_peer(node_t *node, const char *ip, uint16_t discovery_port)
+{
     int i;
     if (!node || !ip || !discovery_port) {
         return ERR_INVALID;
@@ -513,8 +528,10 @@ int node_add_discovery_peer(node_t *node, const char *ip, uint16_t discovery_por
     for (i = 0; i < DISC_TARGET_MAX; i++) {
         if (!node->discovery.targets[i].used) {
             node->discovery.targets[i].used = 1;
-            zri_copy_str(node->discovery.targets[i].ip, sizeof(node->discovery.targets[i].ip), ip,
-                          "127.0.0.1");
+            zri_copy_str(node->discovery.targets[i].ip,
+                         sizeof(node->discovery.targets[i].ip),
+                         ip,
+                         "127.0.0.1");
             node->discovery.targets[i].port = discovery_port;
             if (node->registry_backend && node->registry_backend->ops->announce) {
                 node->registry_backend->ops->announce(node, 0);
@@ -525,18 +542,21 @@ int node_add_discovery_peer(node_t *node, const char *ip, uint16_t discovery_por
     return ERR_NOMEM;
 }
 
-int node_add_static_route(node_t *node, const char *service, const char *ip,
-                               uint16_t port, transport_kind_t transport) {
+int node_add_static_route(
+    node_t *node, const char *service, const char *ip, uint16_t port, transport_kind_t transport)
+{
     return zri_route_set(&node->routes, service, ip, port, transport);
 }
 
-int node_add_static_endpoint(node_t *node, const char *service, const char *endpoint) {
+int node_add_static_endpoint(node_t *node, const char *service, const char *endpoint)
+{
     return zri_route_add_endpoint(&node->routes, service, endpoint, 1);
 }
 
 /* ---- 服务等待与调度 ---- */
 
-int node_wait_for_service(node_t *node, const char *service, uint64_t timeout_ms) {
+int node_wait_for_service(node_t *node, const char *service, uint64_t timeout_ms)
+{
     uint64_t deadline;
     char ip[ENDPOINT_MAX];
     uint16_t port = 0;
@@ -548,8 +568,7 @@ int node_wait_for_service(node_t *node, const char *service, uint64_t timeout_ms
     }
     deadline = zri_now_ms() + (timeout_ms ? timeout_ms : DEFAULT_TIMEOUT_MS);
     for (;;) {
-        if (zri_route_lookup(&node->routes, service, ip, sizeof(ip), &port, NULL, NULL, 0) ==
-            OK) {
+        if (zri_route_lookup(&node->routes, service, ip, sizeof(ip), &port, NULL, NULL, 0) == OK) {
             return OK;
         }
         {
@@ -572,13 +591,15 @@ typedef struct zri_post_task {
     void *user;
 } zri_post_task_t;
 
-static void post_trampoline(void *user) {
+static void post_trampoline(void *user)
+{
     zri_post_task_t *t = (zri_post_task_t *)user;
     t->fn(t->user);
     zri_mem_free(t);
 }
 
-int node_post(node_t *node, void (*fn)(void *user), void *user) {
+int node_post(node_t *node, void (*fn)(void *user), void *user)
+{
     zri_post_task_t *t;
     if (!node || !fn) {
         return ERR_INVALID;
@@ -597,14 +618,16 @@ int node_post(node_t *node, void (*fn)(void *user), void *user) {
     return OK;
 }
 
-static uint64_t post_delay_cb(void *user) {
+static uint64_t post_delay_cb(void *user)
+{
     zri_post_task_t *t = (zri_post_task_t *)user;
     t->fn(t->user);
     zri_mem_free(t);
     return 0; /* 单次 */
 }
 
-int node_post_delay(node_t *node, uint64_t delay_ms, void (*fn)(void *user), void *user) {
+int node_post_delay(node_t *node, uint64_t delay_ms, void (*fn)(void *user), void *user)
+{
     zri_post_task_t *t;
     if (!node || !fn) {
         return ERR_INVALID;
@@ -627,12 +650,14 @@ int node_post_delay(node_t *node, uint64_t delay_ms, void (*fn)(void *user), voi
 
 static volatile sig_atomic_t g_signal;
 
-static void zri_signal_handler(int signo) {
+static void zri_signal_handler(int signo)
+{
     (void)signo;
     g_signal = 1;
 }
 
-int node_spin_once(node_t *node, uint64_t timeout_ms) {
+int node_spin_once(node_t *node, uint64_t timeout_ms)
+{
     uint64_t deadline;
     int installed = 0;
     if (!node) {
@@ -653,6 +678,7 @@ int node_spin_once(node_t *node, uint64_t timeout_ms) {
     return OK;
 }
 
-int node_spin(node_t *node) {
+int node_spin(node_t *node)
+{
     return node_spin_once(node, 0);
 }

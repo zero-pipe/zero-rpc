@@ -18,27 +18,27 @@ void rpc_log_init(void);
 #define RPC_LOG_TAG "rpc"
 #endif
 
-#define rpc_log_debug(...) \
-    do {                   \
-        rpc_log_init();    \
+#define rpc_log_debug(...)                    \
+    do {                                      \
+        rpc_log_init();                       \
         elog_debug(RPC_LOG_TAG, __VA_ARGS__); \
     } while (0)
 
-#define rpc_log_info(...) \
-    do {                  \
-        rpc_log_init();   \
+#define rpc_log_info(...)                    \
+    do {                                     \
+        rpc_log_init();                      \
         elog_info(RPC_LOG_TAG, __VA_ARGS__); \
     } while (0)
 
-#define rpc_log_warn(...) \
-    do {                  \
-        rpc_log_init();   \
+#define rpc_log_warn(...)                    \
+    do {                                     \
+        rpc_log_init();                      \
         elog_warn(RPC_LOG_TAG, __VA_ARGS__); \
     } while (0)
 
-#define rpc_log_error(...) \
-    do {                   \
-        rpc_log_init();    \
+#define rpc_log_error(...)                    \
+    do {                                      \
+        rpc_log_init();                       \
         elog_error(RPC_LOG_TAG, __VA_ARGS__); \
     } while (0)
 

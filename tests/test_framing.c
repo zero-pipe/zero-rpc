@@ -17,10 +17,11 @@ static int g_fail;
         }                                                               \
     } while (0)
 
-static void test_envelope_roundtrip(void) {
+static void test_envelope_roundtrip(void)
+{
     uint8_t buf[256];
     const char *route = "echo.ping";
-    const uint8_t payload[5] = {1, 2, 3, 4, 5};
+    const uint8_t payload[5] = { 1, 2, 3, 4, 5 };
     zri_envelope_t envelope;
     zri_envelope_t view;
     size_t n;
@@ -54,9 +55,10 @@ static void test_envelope_roundtrip(void) {
     CHECK(memcmp(view.payload, payload, sizeof(payload)) == 0);
 }
 
-static void test_udp_fragment_roundtrip(void) {
+static void test_udp_fragment_roundtrip(void)
+{
     uint8_t buf[256];
-    const uint8_t chunk[5] = {1, 2, 3, 4, 5};
+    const uint8_t chunk[5] = { 1, 2, 3, 4, 5 };
     zri_frag_t desc;
     zri_frag_t view;
     size_t n;
@@ -85,9 +87,10 @@ static void test_udp_fragment_roundtrip(void) {
     CHECK(memcmp(view.chunk, chunk, sizeof(chunk)) == 0);
 }
 
-static void test_tcp_opaque_frame(void) {
+static void test_tcp_opaque_frame(void)
+{
     uint8_t buf[64];
-    const uint8_t body[4] = {9, 8, 7, 6};
+    const uint8_t body[4] = { 9, 8, 7, 6 };
     const uint8_t *parsed = NULL;
     size_t parsed_len = 0;
     size_t n;
@@ -99,9 +102,10 @@ static void test_tcp_opaque_frame(void) {
     CHECK(memcmp(parsed, body, sizeof(body)) == 0);
 }
 
-static void test_nack_roundtrip(void) {
+static void test_nack_roundtrip(void)
+{
     uint8_t buf[128];
-    uint16_t seqs[4] = {100, 101, 103, 200};
+    uint16_t seqs[4] = { 100, 101, 103, 200 };
     uint16_t out[64];
     size_t n;
     int c;
@@ -116,7 +120,8 @@ static void test_nack_roundtrip(void) {
     CHECK(out[3] == 200);
 }
 
-static void test_parse_rejects_rtcp(void) {
+static void test_parse_rejects_rtcp(void)
+{
     uint8_t rtcp[12];
     zri_frag_t view;
     memset(rtcp, 0, sizeof(rtcp));
@@ -125,7 +130,8 @@ static void test_parse_rejects_rtcp(void) {
     CHECK(zri_frame_parse_data(rtcp, sizeof(rtcp), &view) == 0);
 }
 
-static void test_rtcp_sr_roundtrip(void) {
+static void test_rtcp_sr_roundtrip(void)
+{
     uint8_t buf[256];
     zri_rtcp_report_block_t rb;
     zri_rtcp_sr_t sr;
@@ -140,8 +146,8 @@ static void test_rtcp_sr_roundtrip(void) {
     rb.lsr = 0x11223344u;
     rb.dlsr = 0x55667788u;
 
-    n = zri_frame_build_sr(buf, sizeof(buf), 0xdeadbeefu, 0x11111111u, 0x22222222u, 0x33333333u,
-                            100, 2000, &rb, 1);
+    n = zri_frame_build_sr(
+        buf, sizeof(buf), 0xdeadbeefu, 0x11111111u, 0x22222222u, 0x33333333u, 100, 2000, &rb, 1);
     CHECK(n == 52);
     memset(&sr, 0, sizeof(sr));
     CHECK(zri_frame_parse_sr(buf, n, &sr) == 1);
@@ -159,7 +165,8 @@ static void test_rtcp_sr_roundtrip(void) {
     CHECK(sr.rb[0].dlsr == 0x55667788u);
 }
 
-static void test_rtcp_rr_roundtrip(void) {
+static void test_rtcp_rr_roundtrip(void)
+{
     uint8_t buf[128];
     zri_rtcp_report_block_t rb;
     zri_rtcp_rr_t rr;
@@ -178,13 +185,14 @@ static void test_rtcp_rr_roundtrip(void) {
     CHECK(rr.rb[0].cumulative_lost == 5);
 }
 
-static void test_rtcp_sdes_and_dispatch(void) {
+static void test_rtcp_sdes_and_dispatch(void)
+{
     uint8_t buf[128];
     zri_frag_t view;
     size_t n;
 
     n = zri_frame_build_sdes_cname(buf, sizeof(buf), 0xabcdef01u, "rpc");
-    CHECK(n == 16); /* 4 头 + 4 ssrc + 2 项头 + 4 名 + 2 填充 */
+    CHECK(n == 16);                                  /* 4 头 + 4 ssrc + 2 项头 + 4 名 + 2 填充 */
     CHECK(zri_frame_parse_data(buf, n, &view) == 0); /* SDES 不是数据包 */
 
     memset(buf, 0, sizeof(buf));
@@ -193,7 +201,8 @@ static void test_rtcp_sdes_and_dispatch(void) {
     CHECK(zri_frame_parse_sr(buf, 3, NULL) == 0);
 }
 
-static void test_rtcp_bye_roundtrip(void) {
+static void test_rtcp_bye_roundtrip(void)
+{
     uint8_t buf[16];
     uint32_t ssrc = 0;
     size_t n;
@@ -205,7 +214,8 @@ static void test_rtcp_bye_roundtrip(void) {
     CHECK(zri_frame_parse_bye(buf, 4, NULL) == 0);
 }
 
-int main(void) {
+int main(void)
+{
     test_envelope_roundtrip();
     test_udp_fragment_roundtrip();
     test_tcp_opaque_frame();

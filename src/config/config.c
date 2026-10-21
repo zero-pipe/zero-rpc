@@ -7,7 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void cfg_str(char *dst, size_t cap, const cJSON *obj, const char *key, const char *def) {
+static void cfg_str(char *dst, size_t cap, const cJSON *obj, const char *key, const char *def)
+{
     const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
     if (cJSON_IsString(item) && item->valuestring && item->valuestring[0]) {
         snprintf(dst, cap, "%s", item->valuestring);
@@ -18,7 +19,8 @@ static void cfg_str(char *dst, size_t cap, const cJSON *obj, const char *key, co
     }
 }
 
-static unsigned cfg_u32(const cJSON *obj, const char *key, unsigned def) {
+static unsigned cfg_u32(const cJSON *obj, const char *key, unsigned def)
+{
     const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
     if (cJSON_IsNumber(item) && item->valuedouble >= 0) {
         return (unsigned)item->valuedouble;
@@ -26,8 +28,8 @@ static unsigned cfg_u32(const cJSON *obj, const char *key, unsigned def) {
     return def;
 }
 
-static transport_kind_t cfg_transport(const cJSON *obj, const char *key,
-                                      transport_kind_t def) {
+static transport_kind_t cfg_transport(const cJSON *obj, const char *key, transport_kind_t def)
+{
     const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
     if (cJSON_IsString(item) && item->valuestring) {
         if (strcmp(item->valuestring, "tcp") == 0 || strcmp(item->valuestring, "TCP") == 0) {
@@ -40,7 +42,8 @@ static transport_kind_t cfg_transport(const cJSON *obj, const char *key,
     return def;
 }
 
-static node_mode_t cfg_mode(const cJSON *obj, const char *key, node_mode_t def) {
+static node_mode_t cfg_mode(const cJSON *obj, const char *key, node_mode_t def)
+{
     const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
     if (cJSON_IsString(item) && item->valuestring) {
         if (strcmp(item->valuestring, "static") == 0 || strcmp(item->valuestring, "STATIC") == 0) {
@@ -54,7 +57,8 @@ static node_mode_t cfg_mode(const cJSON *obj, const char *key, node_mode_t def) 
 }
 
 /* 解析 "host:port"（含 [ipv6]:port）；成功返回 OK。 */
-static int cfg_host_port(const char *text, char *host, size_t host_cap, uint16_t *port) {
+static int cfg_host_port(const char *text, char *host, size_t host_cap, uint16_t *port)
+{
     endpoint_t endpoint;
     char uri[ENDPOINT_MAX * 2];
     int n;
@@ -71,7 +75,8 @@ static int cfg_host_port(const char *text, char *host, size_t host_cap, uint16_t
 }
 
 /* 配置一个 binding：接受 "scheme://host:port" 字符串或 {name,endpoint} 对象。 */
-static void cfg_binding(config_t *out, const cJSON *item) {
+static void cfg_binding(config_t *out, const cJSON *item)
+{
     binding_endpoint_t *binding;
     if (!out || !item || out->binding_count >= CONFIG_MAX_BINDINGS) {
         return;
@@ -105,7 +110,8 @@ static void cfg_binding(config_t *out, const cJSON *item) {
 
 /* ---- 配置加载 ---- */
 
-int config_load(const char *json, config_t *out) {
+int config_load(const char *json, config_t *out)
+{
     cJSON *root;
     const cJSON *bindings;
     const cJSON *disc;
@@ -146,7 +152,8 @@ int config_load(const char *json, config_t *out) {
     /* bindings 使用顶层数组，元素为 URI 字符串或 {name, endpoint} 对象。 */
     bindings = cJSON_GetObjectItemCaseSensitive(root, "bindings");
     if (cJSON_IsArray(bindings)) {
-        cJSON_ArrayForEach(item, bindings) {
+        cJSON_ArrayForEach(item, bindings)
+        {
             cfg_binding(out, item);
         }
     }
@@ -158,13 +165,13 @@ int config_load(const char *json, config_t *out) {
         uint16_t broadcast_port = 0;
         char broadcast_host[ENDPOINT_MAX];
         if (cJSON_IsString(broadcast) && broadcast->valuestring &&
-            cfg_host_port(broadcast->valuestring, broadcast_host, sizeof(broadcast_host),
-                          &broadcast_port) == OK) {
+            cfg_host_port(
+                broadcast->valuestring, broadcast_host, sizeof(broadcast_host), &broadcast_port) ==
+                OK) {
             snprintf(out->discovery_host, sizeof(out->discovery_host), "%s", broadcast_host);
             out->node.discovery_port = broadcast_port;
         } else {
-            snprintf(out->discovery_host, sizeof(out->discovery_host), "%s",
-                     "255.255.255.255");
+            snprintf(out->discovery_host, sizeof(out->discovery_host), "%s", "255.255.255.255");
             out->node.discovery_port = 0;
         }
     }
@@ -179,7 +186,8 @@ int config_load(const char *json, config_t *out) {
     /* discovery.peers：支持 "ip:port" 字符串和 {ip,port} 对象。 */
     peers = cJSON_GetObjectItemCaseSensitive(disc, "peers");
     if (cJSON_IsArray(peers)) {
-        cJSON_ArrayForEach(item, peers) {
+        cJSON_ArrayForEach(item, peers)
+        {
             peer_endpoint_t *peer;
             if (out->peer_count >= CONFIG_MAX_PEERS) {
                 break;
@@ -198,7 +206,8 @@ int config_load(const char *json, config_t *out) {
     /* routes */
     routes = cJSON_GetObjectItemCaseSensitive(root, "routes");
     if (cJSON_IsArray(routes)) {
-        cJSON_ArrayForEach(item, routes) {
+        cJSON_ArrayForEach(item, routes)
+        {
             static_route_t *r;
             if (out->route_count >= CONFIG_MAX_ROUTES) {
                 break;
@@ -215,7 +224,8 @@ int config_load(const char *json, config_t *out) {
     return OK;
 }
 
-int config_load_file(const char *path, config_t *out) {
+int config_load_file(const char *path, config_t *out)
+{
     FILE *f;
     long size;
     char *buf;
@@ -257,7 +267,8 @@ int config_load_file(const char *path, config_t *out) {
 
 /* ---- 节点创建 ---- */
 
-int node_create_from_config(const config_t *cfg, node_t **out) {
+int node_create_from_config(const config_t *cfg, node_t **out)
+{
     int rc;
     size_t i;
     if (!cfg || !out) {
@@ -271,8 +282,7 @@ int node_create_from_config(const config_t *cfg, node_t **out) {
         (void)node_add_discovery_peer(*out, cfg->peers[i].ip, cfg->peers[i].port);
     }
     for (i = 0; i < cfg->route_count; i++) {
-        (void)node_add_static_endpoint(*out, cfg->routes[i].service,
-                                            cfg->routes[i].endpoint);
+        (void)node_add_static_endpoint(*out, cfg->routes[i].service, cfg->routes[i].endpoint);
     }
     return OK;
 }

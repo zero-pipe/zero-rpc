@@ -13,14 +13,16 @@
 #include <stdlib.h>
 #include <string.h>
 
-static int health_check(const request_t *req, message_view_t *resp, void *user) {
+static int health_check(const request_t *req, message_view_t *resp, void *user)
+{
     (void)user;
     /* req->payload 对框架透明：这里原样回显。 */
     (void)message_view_set_data(resp, req->payload.data, req->payload.len);
     return 0;
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char **argv)
+{
     node_config_t cfg;
     node_t *node = NULL;
     service_t *svc = NULL;

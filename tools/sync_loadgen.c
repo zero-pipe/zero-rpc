@@ -17,7 +17,8 @@
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-static uint64_t now_ns(void) {
+static uint64_t now_ns(void)
+{
     static LARGE_INTEGER freq;
     LARGE_INTEGER counter;
     if (freq.QuadPart == 0) {
@@ -28,7 +29,8 @@ static uint64_t now_ns(void) {
 }
 #else
 #include <time.h>
-static uint64_t now_ns(void) {
+static uint64_t now_ns(void)
+{
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
@@ -54,7 +56,8 @@ typedef struct options {
     transport_kind_t transport;
 } options_t;
 
-static int parse_u64(const char *value, uint64_t *out) {
+static int parse_u64(const char *value, uint64_t *out)
+{
     char *end = NULL;
     unsigned long long parsed;
     if (!value || !value[0]) {
@@ -68,7 +71,8 @@ static int parse_u64(const char *value, uint64_t *out) {
     return 1;
 }
 
-static int parse_size(const char *value, size_t *out) {
+static int parse_size(const char *value, size_t *out)
+{
     uint64_t parsed;
     if (!parse_u64(value, &parsed)) {
         return 0;
@@ -77,7 +81,8 @@ static int parse_size(const char *value, size_t *out) {
     return 1;
 }
 
-static int lat_hist_index(uint64_t us) {
+static int lat_hist_index(uint64_t us)
+{
     int bucket = 0;
     if (us < LAT_LINEAR_MAX) {
         return (int)us;
@@ -92,7 +97,8 @@ static int lat_hist_index(uint64_t us) {
     return LAT_LINEAR_MAX + bucket;
 }
 
-static uint64_t lat_hist_key(int index) {
+static uint64_t lat_hist_key(int index)
+{
     uint64_t lower;
     uint64_t upper;
     if (index < LAT_LINEAR_MAX) {
@@ -103,7 +109,8 @@ static uint64_t lat_hist_key(int index) {
     return lower + (upper - lower) / 2;
 }
 
-static uint64_t histogram_percentile(const uint64_t *hist, uint64_t count, double p) {
+static uint64_t histogram_percentile(const uint64_t *hist, uint64_t count, double p)
+{
     uint64_t rank;
     uint64_t seen = 0;
     int i;
@@ -120,16 +127,17 @@ static uint64_t histogram_percentile(const uint64_t *hist, uint64_t count, doubl
     return lat_hist_key(LAT_HIST_SIZE - 1);
 }
 
-static void usage(const char *argv0) {
-    rpc_log_error(
-        "usage: %s --target host:port [--transport tcp|udp] [--service s] [--method m]\n"
-        "          [--duration-seconds n] [--max-requests n] [--payload-bytes n]\n"
-        "          [--expect-response-bytes n] [--timeout-ms n] [--verify-response]\n"
-        "          [--worker-id id] [--output path|-]",
-        argv0);
+static void usage(const char *argv0)
+{
+    rpc_log_error("usage: %s --target host:port [--transport tcp|udp] [--service s] [--method m]\n"
+                  "          [--duration-seconds n] [--max-requests n] [--payload-bytes n]\n"
+                  "          [--expect-response-bytes n] [--timeout-ms n] [--verify-response]\n"
+                  "          [--worker-id id] [--output path|-]",
+                  argv0);
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char **argv)
+{
     options_t opt;
     node_config_t cfg;
     node_t *node = NULL;
@@ -173,9 +181,9 @@ int main(int argc, char **argv) {
             opt.target = argv[++i];
         } else if (strcmp(arg, "--transport") == 0 && i + 1 < argc) {
             const char *transport = argv[++i];
-            opt.transport = (strcmp(transport, "udp") == 0 || strcmp(transport, "UDP") == 0)
-                                ? TRANSPORT_UDP
-                                : TRANSPORT_TCP;
+            opt.transport = (strcmp(transport, "udp") == 0 || strcmp(transport, "UDP") == 0) ?
+                TRANSPORT_UDP :
+                TRANSPORT_TCP;
         } else if (strcmp(arg, "--service") == 0 && i + 1 < argc) {
             opt.service = argv[++i];
         } else if (strcmp(arg, "--method") == 0 && i + 1 < argc) {
@@ -225,8 +233,11 @@ int main(int argc, char **argv) {
     }
     if (rc == OK) {
         char endpoint[128];
-        snprintf(endpoint, sizeof(endpoint), "%s://%s",
-                 opt.transport == TRANSPORT_TCP ? "tcp" : "udp", opt.target);
+        snprintf(endpoint,
+                 sizeof(endpoint),
+                 "%s://%s",
+                 opt.transport == TRANSPORT_TCP ? "tcp" : "udp",
+                 opt.target);
         rc = proxy_set_endpoint_uri(proxy, endpoint);
     }
     if (rc != OK) {
@@ -245,8 +256,8 @@ int main(int argc, char **argv) {
     {
         response_t warm_response;
         memset(&warm_response, 0, sizeof(warm_response));
-        rc = proxy_call_sync(proxy, opt.service, opt.method, &request,
-                                  &warm_response, opt.timeout_ms, NULL);
+        rc = proxy_call_sync(
+            proxy, opt.service, opt.method, &request, &warm_response, opt.timeout_ms, NULL);
         response_release(&warm_response);
         if (rc != OK) {
             rpc_log_error("warmup call failed: %d", rc);
@@ -259,8 +270,7 @@ int main(int argc, char **argv) {
 
     start_ns = now_ns();
     deadline_ns = start_ns + opt.duration_seconds * 1000000000ull;
-    while (now_ns() < deadline_ns &&
-           (opt.max_requests == 0 || attempted < opt.max_requests)) {
+    while (now_ns() < deadline_ns && (opt.max_requests == 0 || attempted < opt.max_requests)) {
         response_t response;
         uint64_t call_start = now_ns();
         uint64_t latency;
@@ -268,18 +278,18 @@ int main(int argc, char **argv) {
         int call_ok;
 
         memset(&response, 0, sizeof(response));
-        rc = proxy_call_sync(proxy, opt.service, opt.method, &request,
-                                  &response, opt.timeout_ms, NULL);
+        rc = proxy_call_sync(
+            proxy, opt.service, opt.method, &request, &response, opt.timeout_ms, NULL);
         latency = now_ns() - call_start;
         attempted++;
         us = (latency + 999ull) / 1000ull;
         hist[lat_hist_index(us)]++;
-        call_ok = (rc == OK &&
-                   (opt.expect_response_bytes == 0 ||
-                    response.payload.len == opt.expect_response_bytes));
+        call_ok =
+            (rc == OK &&
+             (opt.expect_response_bytes == 0 || response.payload.len == opt.expect_response_bytes));
         if (call_ok && opt.verify_response) {
             call_ok = response.payload.len == opt.payload_bytes &&
-                      memcmp(response.payload.data, payload, opt.payload_bytes) == 0;
+                memcmp(response.payload.data, payload, opt.payload_bytes) == 0;
         }
         if (call_ok) {
             succeeded++;
@@ -323,21 +333,27 @@ int main(int argc, char **argv) {
     }
     {
         double duration = (double)(end_ns - start_ns) / 1000000000.0;
-        fprintf(out, "{\"status\":\"%s\",\"worker_id\":\"%s\","
-                     "\"attempted\":%llu,\"succeeded\":%llu,\"failed\":%llu,"
-                     "\"response_bytes\":%llu,\"duration_seconds\":%.6f,\"qps\":%.3f,",
-                failed == 0 ? "ok" : "error", opt.worker_id ? opt.worker_id : "",
-                (unsigned long long)attempted, (unsigned long long)succeeded,
-                (unsigned long long)failed, (unsigned long long)response_bytes,
-                duration, duration > 0.0 ? (double)succeeded / duration : 0.0);
+        fprintf(out,
+                "{\"status\":\"%s\",\"worker_id\":\"%s\","
+                "\"attempted\":%llu,\"succeeded\":%llu,\"failed\":%llu,"
+                "\"response_bytes\":%llu,\"duration_seconds\":%.6f,\"qps\":%.3f,",
+                failed == 0 ? "ok" : "error",
+                opt.worker_id ? opt.worker_id : "",
+                (unsigned long long)attempted,
+                (unsigned long long)succeeded,
+                (unsigned long long)failed,
+                (unsigned long long)response_bytes,
+                duration,
+                duration > 0.0 ? (double)succeeded / duration : 0.0);
         fprintf(out, "\"errors\":{");
         for (i = 0; i < error_count; i++) {
-            fprintf(out, "%s\"%d\":%llu", i ? "," : "", errors[i],
-                    (unsigned long long)error_counts[i]);
+            fprintf(
+                out, "%s\"%d\":%llu", i ? "," : "", errors[i], (unsigned long long)error_counts[i]);
         }
-        fprintf(out, "},\"latency_us\":{\"min\":%.1f,\"mean\":%.1f,"
-                     "\"p50\":%llu.0,\"p95\":%llu.0,\"p99\":%llu.0,\"max\":%.1f},"
-                     "\"latency_histogram_us\":{",
+        fprintf(out,
+                "},\"latency_us\":{\"min\":%.1f,\"mean\":%.1f,"
+                "\"p50\":%llu.0,\"p95\":%llu.0,\"p99\":%llu.0,\"max\":%.1f},"
+                "\"latency_histogram_us\":{",
                 succeeded ? (double)min_ns / 1000.0 : 0.0,
                 succeeded ? (double)sum_ns / (double)succeeded / 1000.0 : 0.0,
                 (unsigned long long)histogram_percentile(hist, succeeded, 0.50),
@@ -348,7 +364,9 @@ int main(int argc, char **argv) {
             int first = 1;
             for (i = 0; i < LAT_HIST_SIZE; i++) {
                 if (hist[i]) {
-                    fprintf(out, "%s\"%llu\":%llu", first ? "" : ",",
+                    fprintf(out,
+                            "%s\"%llu\":%llu",
+                            first ? "" : ",",
                             (unsigned long long)lat_hist_key(i),
                             (unsigned long long)hist[i]);
                     first = 0;

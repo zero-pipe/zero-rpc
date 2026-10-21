@@ -8,7 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-void zri_route_init(zri_route_table_t *table) {
+void zri_route_init(zri_route_table_t *table)
+{
     if (!table) {
         return;
     }
@@ -18,7 +19,8 @@ void zri_route_init(zri_route_table_t *table) {
     }
 }
 
-void zri_route_cleanup(zri_route_table_t *table) {
+void zri_route_cleanup(zri_route_table_t *table)
+{
     zri_route_t *r;
     zri_route_t *tmp;
     if (!table) {
@@ -27,7 +29,8 @@ void zri_route_cleanup(zri_route_table_t *table) {
     if (table->lock) {
         ntk_mutex_lock((ntk_mutex *)table->lock);
     }
-    HASH_ITER(hh, table->routes, r, tmp) {
+    HASH_ITER(hh, table->routes, r, tmp)
+    {
         HASH_DEL(table->routes, r);
         free(r);
     }
@@ -39,7 +42,8 @@ void zri_route_cleanup(zri_route_table_t *table) {
     }
 }
 
-static zri_route_t *route_upsert(zri_route_table_t *table, const char *service) {
+static zri_route_t *route_upsert(zri_route_table_t *table, const char *service)
+{
     zri_route_t *r;
     HASH_FIND_STR(table->routes, service, r);
     if (!r) {
@@ -53,8 +57,12 @@ static zri_route_t *route_upsert(zri_route_table_t *table, const char *service) 
     return r;
 }
 
-int zri_route_set(zri_route_table_t *table, const char *service, const char *ip, uint16_t port,
-                   transport_kind_t transport) {
+int zri_route_set(zri_route_table_t *table,
+                  const char *service,
+                  const char *ip,
+                  uint16_t port,
+                  transport_kind_t transport)
+{
     zri_route_t *r;
     if (!table || !service || !ip || !port) {
         return ERR_INVALID;
@@ -71,8 +79,10 @@ int zri_route_set(zri_route_table_t *table, const char *service, const char *ip,
     }
     r->endpoint_count = 1;
     r->next_endpoint = 0;
-    zri_copy_str(r->endpoints[0].scheme, sizeof(r->endpoints[0].scheme),
-                  transport == TRANSPORT_TCP ? "tcp" : "udp", "udp");
+    zri_copy_str(r->endpoints[0].scheme,
+                 sizeof(r->endpoints[0].scheme),
+                 transport == TRANSPORT_TCP ? "tcp" : "udp",
+                 "udp");
     zri_copy_str(r->endpoints[0].host, sizeof(r->endpoints[0].host), ip, "0.0.0.0");
     r->endpoints[0].port = port;
     r->endpoints[0].transport = transport;
@@ -83,8 +93,11 @@ int zri_route_set(zri_route_table_t *table, const char *service, const char *ip,
     return OK;
 }
 
-int zri_route_add_endpoint(zri_route_table_t *table, const char *service, const char *uri,
-                            int is_static) {
+int zri_route_add_endpoint(zri_route_table_t *table,
+                           const char *service,
+                           const char *uri,
+                           int is_static)
+{
     endpoint_t endpoint;
     zri_route_t *r;
     size_t i;
@@ -131,17 +144,29 @@ int zri_route_add_endpoint(zri_route_table_t *table, const char *service, const 
     return OK;
 }
 
-int zri_route_lookup(zri_route_table_t *table, const char *service, char *ip_out, size_t ip_cap,
-                      uint16_t *port_out, transport_kind_t *transport_out, char *scheme_out,
-                      size_t scheme_cap) {
-    return zri_route_lookup_prefer(table, service, 0, ip_out, ip_cap, port_out, transport_out,
-                                    scheme_out, scheme_cap);
+int zri_route_lookup(zri_route_table_t *table,
+                     const char *service,
+                     char *ip_out,
+                     size_t ip_cap,
+                     uint16_t *port_out,
+                     transport_kind_t *transport_out,
+                     char *scheme_out,
+                     size_t scheme_cap)
+{
+    return zri_route_lookup_prefer(
+        table, service, 0, ip_out, ip_cap, port_out, transport_out, scheme_out, scheme_cap);
 }
 
-int zri_route_lookup_prefer(zri_route_table_t *table, const char *service, int prefer_stream,
-                             char *ip_out, size_t ip_cap, uint16_t *port_out,
-                             transport_kind_t *transport_out, char *scheme_out,
-                             size_t scheme_cap) {
+int zri_route_lookup_prefer(zri_route_table_t *table,
+                            const char *service,
+                            int prefer_stream,
+                            char *ip_out,
+                            size_t ip_cap,
+                            uint16_t *port_out,
+                            transport_kind_t *transport_out,
+                            char *scheme_out,
+                            size_t scheme_cap)
+{
     zri_route_t *r;
     int found = 0;
     if (!table || !service || !ip_out || !port_out) {

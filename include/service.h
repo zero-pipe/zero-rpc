@@ -33,22 +33,23 @@ typedef void (*handler_fn)(call_t *call, const request_t *req, void *user);
  * 同步风格 handler：返回值即应用状态码；把响应写进 resp view，框架在返回后
  * 自动回复（回复本身仍是异步发送）。resp 拥有自己的缓冲，调用方无需管理。
  */
-typedef int (*sync_handler_fn)(const request_t *req, message_view_t *resp,
-                                    void *user);
+typedef int (*sync_handler_fn)(const request_t *req, message_view_t *resp, void *user);
 
 /*
  * 流式请求回调。框架按到达顺序逐个 chunk 调用；chunk 仅在本次回调内有效。
  * flags 含 STREAM_FIRST / STREAM_LAST。
  */
-typedef void (*chunk_handler_fn)(call_t *call, const request_t *req,
-                                      const chunk_t *chunk, void *user);
+typedef void (*chunk_handler_fn)(call_t *call,
+                                 const request_t *req,
+                                 const chunk_t *chunk,
+                                 void *user);
 
 /* ---- 方法执行模式 ---- */
 
 typedef enum service_exec_mode {
-    SERVICE_EXEC_INLINE = 0,   /* 请求到达的 poller 线程内联执行（默认） */
-    SERVICE_EXEC_WORKER = 1,   /* 节点 handler 线程池执行，回复回投原 poller */
-    SERVICE_EXEC_EXECUTOR = 2  /* 调用者提供的 service_executor_t */
+    SERVICE_EXEC_INLINE = 0,  /* 请求到达的 poller 线程内联执行（默认） */
+    SERVICE_EXEC_WORKER = 1,  /* 节点 handler 线程池执行，回复回投原 poller */
+    SERVICE_EXEC_EXECUTOR = 2 /* 调用者提供的 service_executor_t */
 } service_exec_mode_t;
 
 /*
@@ -83,19 +84,24 @@ void service_destroy(service_t *svc);
  * WORKER 模式需 node_config_t.handler_threads > 0。
  */
 int service_add_method(service_t *svc, const char *method, handler_fn fn, void *user);
-int service_add_method_ex(service_t *svc, const char *method, handler_fn fn, void *user,
+int service_add_method_ex(service_t *svc,
+                          const char *method,
+                          handler_fn fn,
+                          void *user,
                           const service_method_options_t *options);
 /* 注册同步风格方法（handler 返回后框架自动回复）。 */
-int service_add_sync_method(service_t *svc, const char *method,
-                                 sync_handler_fn fn, void *user);
-int service_add_sync_method_ex(service_t *svc, const char *method,
-                               sync_handler_fn fn, void *user,
+int service_add_sync_method(service_t *svc, const char *method, sync_handler_fn fn, void *user);
+int service_add_sync_method_ex(service_t *svc,
+                               const char *method,
+                               sync_handler_fn fn,
+                               void *user,
                                const service_method_options_t *options);
 /* 流式方法支持 INLINE / WORKER / EXECUTOR；worker 模式下每个 stream 串行派发。 */
-int service_add_stream_method(service_t *svc, const char *method,
-                                    chunk_handler_fn fn, void *user);
-int service_add_stream_method_ex(service_t *svc, const char *method,
-                                 chunk_handler_fn fn, void *user,
+int service_add_stream_method(service_t *svc, const char *method, chunk_handler_fn fn, void *user);
+int service_add_stream_method_ex(service_t *svc,
+                                 const char *method,
+                                 chunk_handler_fn fn,
+                                 void *user,
                                  const service_method_options_t *options);
 
 /*
@@ -104,8 +110,10 @@ int service_add_stream_method_ex(service_t *svc, const char *method,
  * 框架拷贝，worker 中可安全读取。
  */
 int service_add_method_worker(service_t *svc, const char *method, handler_fn fn, void *user);
-int service_add_sync_method_worker(service_t *svc, const char *method,
-                                        sync_handler_fn fn, void *user);
+int service_add_sync_method_worker(service_t *svc,
+                                   const char *method,
+                                   sync_handler_fn fn,
+                                   void *user);
 
 /* ---- 回复 ---- */
 /* 一次性、异步回复。status 由应用定义；EVENT 请求上的回复会被静默忽略。 */
@@ -114,7 +122,10 @@ void reply(call_t *call, int status, const payload_t *payload);
  * 带状态消息与 metadata 的回复（对齐 gRPC status message / response metadata）。
  * message / metadata 可为 NULL；框架会在发送前复制，返回后即可释放。
  */
-void reply_ex(call_t *call, int status, const char *message, const payload_t *payload,
+void reply_ex(call_t *call,
+              int status,
+              const char *message,
+              const payload_t *payload,
               const metadata_t *metadata);
 /* 便捷版本：直接回复裸字节（encoding = 0）。 */
 void reply_bytes(call_t *call, int status, const void *data, size_t len);

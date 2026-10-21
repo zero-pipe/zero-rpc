@@ -11,7 +11,8 @@
 
 #include <string.h>
 
-int main(void) {
+int main(void)
+{
     node_config_t cfg;
     node_t *node = NULL;
     int rc;
@@ -28,9 +29,11 @@ int main(void) {
         rpc_log_error("node_create failed: %d", rc);
         return 1;
     }
-    rpc_log_info("node=%s transport=%s data_port=%u bindings=%zu", node_name(node),
+    rpc_log_info("node=%s transport=%s data_port=%u bindings=%zu",
+                 node_name(node),
                  node_transport(node) == TRANSPORT_TCP ? "tcp" : "udp",
-                 (unsigned)node_data_port(node), node_binding_count(node));
+                 (unsigned)node_data_port(node),
+                 node_binding_count(node));
     node_destroy(node);
     return 0;
 }

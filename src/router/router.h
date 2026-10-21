@@ -38,19 +38,34 @@ void zri_route_init(zri_route_table_t *table);
 void zri_route_cleanup(zri_route_table_t *table);
 
 /* 显式设置一条静态路由（覆盖已有项）。 */
-int zri_route_set(zri_route_table_t *table, const char *service, const char *ip, uint16_t port,
-                   transport_kind_t transport);
-int zri_route_add_endpoint(zri_route_table_t *table, const char *service, const char *endpoint,
-                            int is_static);
+int zri_route_set(zri_route_table_t *table,
+                  const char *service,
+                  const char *ip,
+                  uint16_t port,
+                  transport_kind_t transport);
+int zri_route_add_endpoint(zri_route_table_t *table,
+                           const char *service,
+                           const char *endpoint,
+                           int is_static);
 
-int zri_route_lookup(zri_route_table_t *table, const char *service, char *ip_out, size_t ip_cap,
-                      uint16_t *port_out, transport_kind_t *transport_out,
-                      char *scheme_out, size_t scheme_cap);
+int zri_route_lookup(zri_route_table_t *table,
+                     const char *service,
+                     char *ip_out,
+                     size_t ip_cap,
+                     uint16_t *port_out,
+                     transport_kind_t *transport_out,
+                     char *scheme_out,
+                     size_t scheme_cap);
 /* Prefer a TCP endpoint when prefer_stream is set (large payload policy). */
-int zri_route_lookup_prefer(zri_route_table_t *table, const char *service, int prefer_stream,
-                             char *ip_out, size_t ip_cap, uint16_t *port_out,
-                             transport_kind_t *transport_out, char *scheme_out,
-                             size_t scheme_cap);
+int zri_route_lookup_prefer(zri_route_table_t *table,
+                            const char *service,
+                            int prefer_stream,
+                            char *ip_out,
+                            size_t ip_cap,
+                            uint16_t *port_out,
+                            transport_kind_t *transport_out,
+                            char *scheme_out,
+                            size_t scheme_cap);
 
 #ifdef __cplusplus
 }

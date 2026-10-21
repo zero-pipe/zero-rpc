@@ -23,9 +23,11 @@ typedef struct transport_message {
     payload_t payload;
 } transport_message_t;
 
-typedef void (*transport_receive_fn)(void *receiver, void *reply_token, const char *peer_host,
-                                          uint16_t peer_port,
-                                          const transport_message_t *message);
+typedef void (*transport_receive_fn)(void *receiver,
+                                     void *reply_token,
+                                     const char *peer_host,
+                                     uint16_t peer_port,
+                                     const transport_message_t *message);
 
 /* ---- Provider 生命周期与操作 ---- */
 typedef struct transport_provider_options {
@@ -37,15 +39,19 @@ typedef struct transport_provider_options {
 
 /* send() returning OK means the provider accepted the message for delivery. */
 typedef struct transport_provider_ops {
-    int (*create)(const transport_provider_options_t *options,
-                  transport_instance_t **out);
+    int (*create)(const transport_provider_options_t *options, transport_instance_t **out);
     int (*start)(transport_instance_t *instance);
     void (*stop)(transport_instance_t *instance);
     void (*destroy)(transport_instance_t *instance);
-    int (*send)(transport_instance_t *instance, const char *host, uint16_t port,
+    int (*send)(transport_instance_t *instance,
+                const char *host,
+                uint16_t port,
                 const transport_message_t *message);
-    int (*reply)(transport_instance_t *instance, void *reply_token, const char *host,
-                 uint16_t port, const transport_message_t *message);
+    int (*reply)(transport_instance_t *instance,
+                 void *reply_token,
+                 const char *host,
+                 uint16_t port,
+                 const transport_message_t *message);
 } transport_provider_ops_t;
 
 struct transport_provider {

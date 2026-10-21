@@ -5,7 +5,8 @@
 
 /* ---- Codec 注册与查询 ---- */
 
-int node_register_codec(node_t *node, const codec_t *codec) {
+int node_register_codec(node_t *node, const codec_t *codec)
+{
     zri_codec_entry_t *e;
     if (!node || !codec) {
         return ERR_INVALID;
@@ -23,7 +24,8 @@ int node_register_codec(node_t *node, const codec_t *codec) {
     return OK;
 }
 
-const codec_t *node_find_codec(const node_t *node, uint8_t encoding) {
+const codec_t *node_find_codec(const node_t *node, uint8_t encoding)
+{
     zri_codec_entry_t *e;
     if (!node) {
         return NULL;

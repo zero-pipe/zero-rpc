@@ -8,15 +8,16 @@
 
 static int g_fail;
 
-#define CHECK(cond)                                                        \
-    do {                                                                   \
-        if (!(cond)) {                                                     \
-            rpc_log_error("FAIL %s:%d: %s", __FILE__, __LINE__, #cond);  \
-            g_fail = 1;                                                    \
-        }                                                                  \
+#define CHECK(cond)                                                     \
+    do {                                                                \
+        if (!(cond)) {                                                  \
+            rpc_log_error("FAIL %s:%d: %s", __FILE__, __LINE__, #cond); \
+            g_fail = 1;                                                 \
+        }                                                               \
     } while (0)
 
-static void test_copy_peek_consume(void) {
+static void test_copy_peek_consume(void)
+{
     zri_iobuf_t b;
     const char a[] = "hello";
     const char c[] = " world";
@@ -42,7 +43,8 @@ static void test_copy_peek_consume(void) {
     zri_iobuf_reset(&b);
 }
 
-static void test_ref_and_borrow(void) {
+static void test_ref_and_borrow(void)
+{
     zri_iobuf_t b;
     ntk_buf *owner;
     const char borrowed[] = "borrowed";
@@ -67,7 +69,8 @@ static void test_ref_and_borrow(void) {
     zri_iobuf_reset(&b);
 }
 
-static void test_view(void) {
+static void test_view(void)
+{
     zri_iobuf_t b;
     ntk_buf *scratch = NULL;
     const uint8_t *view;
@@ -91,7 +94,8 @@ static void test_view(void) {
     zri_iobuf_reset(&b);
 }
 
-int main(void) {
+int main(void)
+{
     test_copy_peek_consume();
     test_ref_and_borrow();
     test_view();

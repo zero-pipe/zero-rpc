@@ -11,11 +11,11 @@
 #include <string.h>
 
 /* ---- 两端共享的声明表 ---- */
-SERVICE_DEFINE(g_order_table, 7u, "OrderService",
-                    SERVICE_METHOD(1u, "get"),
-                    SERVICE_METHOD(2u, "put"));
+SERVICE_DEFINE(
+    g_order_table, 7u, "OrderService", SERVICE_METHOD(1u, "get"), SERVICE_METHOD(2u, "put"));
 
-static int test_service_table(void) {
+static int test_service_table(void)
+{
     uint16_t id = 0;
     int failed = 0;
     reset_service_table();
@@ -48,7 +48,8 @@ static int test_service_table(void) {
     return failed;
 }
 
-static int test_message_view(void) {
+static int test_message_view(void)
+{
     message_view_t view;
     payload_t pl;
     int failed = 0;
@@ -85,7 +86,8 @@ static int test_message_view(void) {
     return failed;
 }
 
-static int echo_sync(const request_t *req, message_view_t *resp, void *user) {
+static int echo_sync(const request_t *req, message_view_t *resp, void *user)
+{
     int *calls = (int *)user;
     if (calls) {
         (*calls)++;
@@ -94,7 +96,8 @@ static int echo_sync(const request_t *req, message_view_t *resp, void *user) {
     return 0;
 }
 
-static int test_stub_and_sync(void) {
+static int test_stub_and_sync(void)
+{
     node_config_t scfg;
     node_config_t ccfg;
     node_t *server = NULL;
@@ -191,8 +194,8 @@ static int test_stub_and_sync(void) {
         failed = 1;
     } else if (response.status != 0 || response.payload.len != 4 ||
                memcmp(response.payload.data, "ping", 4) != 0) {
-        rpc_log_error("call_sync bad response: status=%d len=%zu", response.status,
-                      response.payload.len);
+        rpc_log_error(
+            "call_sync bad response: status=%d len=%zu", response.status, response.payload.len);
         failed = 1;
     }
     response_release(&response);
@@ -230,7 +233,8 @@ cleanup:
     return failed;
 }
 
-int main(void) {
+int main(void)
+{
     int failed = 0;
     failed += test_service_table();
     failed += test_message_view();

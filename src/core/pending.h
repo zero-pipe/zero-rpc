@@ -38,7 +38,7 @@ typedef struct zri_pending {
     uint8_t *data;
     size_t len;
     uint8_t encoding;
-    uint8_t *metadata;             /* 请求 metadata 的 TLV 副本，用于重传 */
+    uint8_t *metadata; /* 请求 metadata 的 TLV 副本，用于重传 */
     uint16_t metadata_len;
     metadata_t *response_metadata; /* 响应 metadata（按需分配） */
     char *response_message;        /* 响应状态消息（按需分配） */
@@ -47,8 +47,8 @@ typedef struct zri_pending {
     struct zri_pending *free_next; /* 空闲槽位复用链表 */
 } zri_pending_t;
 
-zri_pending_t *zri_pending_add(node_t *node, uint64_t id, response_fn cb, void *user,
-                                 uint64_t timeout_ms);
+zri_pending_t *zri_pending_add(
+    node_t *node, uint64_t id, response_fn cb, void *user, uint64_t timeout_ms);
 zri_pending_t *zri_pending_find(node_t *node, uint64_t id);
 void zri_pending_invoke(zri_pending_t *p, int status, const response_t *resp);
 void zri_pending_release(zri_pending_t *p);

@@ -41,8 +41,7 @@ typedef struct zri_transport_ops {
     int (*reply)(zri_transport_t *t, const zri_message_t *message);
 
     /* 查询某对端的链路统计（可选）：1 = 找到，0 = 无此对端，负数 = 出错。 */
-    int (*peer_stats)(zri_transport_t *t, const char *ip, uint16_t port,
-                      peer_stats_t *out);
+    int (*peer_stats)(zri_transport_t *t, const char *ip, uint16_t port, peer_stats_t *out);
 } zri_transport_ops_t;
 
 struct zri_transport {
@@ -72,8 +71,7 @@ struct zri_transport {
 };
 
 /* 传输层把收到的完整消息上抛给 core（实现在 dispatch.c）。 */
-void zri_node_on_message(node_t *node, zri_transport_t *transport,
-                         const zri_message_t *message);
+void zri_node_on_message(node_t *node, zri_transport_t *transport, const zri_message_t *message);
 
 /* 具体驱动工厂（返回已初始化 ops/kind 的对象，未 start）。 */
 zri_transport_t *zri_udp_transport_create(void);

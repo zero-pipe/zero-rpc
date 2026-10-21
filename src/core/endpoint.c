@@ -4,7 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-static int copy_part(char *out, size_t cap, const char *begin, size_t len) {
+static int copy_part(char *out, size_t cap, const char *begin, size_t len)
+{
     if (!out || cap == 0 || len == 0 || len >= cap) {
         return ERR_INVALID;
     }
@@ -15,7 +16,8 @@ static int copy_part(char *out, size_t cap, const char *begin, size_t len) {
 
 /* ---- Scheme 与传输映射 ---- */
 
-transport_kind_t transport_kind_from_scheme(const char *scheme) {
+transport_kind_t transport_kind_from_scheme(const char *scheme)
+{
     if (!scheme) {
         return (transport_kind_t)-1;
     }
@@ -30,7 +32,8 @@ transport_kind_t transport_kind_from_scheme(const char *scheme) {
 
 /* ---- 解析与格式化 ---- */
 
-int endpoint_parse(const char *uri, endpoint_t *out) {
+int endpoint_parse(const char *uri, endpoint_t *out)
+{
     const char *scheme_end;
     const char *authority;
     const char *port_sep;
@@ -91,18 +94,19 @@ int endpoint_parse(const char *uri, endpoint_t *out) {
     return OK;
 }
 
-int endpoint_format(const endpoint_t *endpoint, char *out, size_t cap) {
+int endpoint_format(const endpoint_t *endpoint, char *out, size_t cap)
+{
     int n;
     if (!endpoint || !out || cap == 0 || !endpoint->scheme[0] || !endpoint->host[0] ||
         !endpoint->port) {
         return ERR_INVALID;
     }
     if (strchr(endpoint->host, ':')) {
-        n = snprintf(out, cap, "%s://[%s]:%u", endpoint->scheme, endpoint->host,
-                     (unsigned)endpoint->port);
+        n = snprintf(
+            out, cap, "%s://[%s]:%u", endpoint->scheme, endpoint->host, (unsigned)endpoint->port);
     } else {
-        n = snprintf(out, cap, "%s://%s:%u", endpoint->scheme, endpoint->host,
-                     (unsigned)endpoint->port);
+        n = snprintf(
+            out, cap, "%s://%s:%u", endpoint->scheme, endpoint->host, (unsigned)endpoint->port);
     }
     return n >= 0 && (size_t)n < cap ? OK : ERR_TOOBIG;
 }

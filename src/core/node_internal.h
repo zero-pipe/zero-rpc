@@ -62,10 +62,10 @@ struct node {
     int rtcp_disabled;
 
     ntk_poller_pool *pool;
-    ntk_poller *poller; /* io 0，用于发现/客户端调用 */
-    ntk_thread_pool *handler_pool; /* 可选：业务 handler 线程池（0 = 关闭） */
-    int worker_fallback_warned; /* handler_threads=0 时只告警一次 */
-    ntk_mutex *handler_limit_mutex; /* 保护 handler_inflight / external_inflight */
+    ntk_poller *poller;               /* io 0，用于发现/客户端调用 */
+    ntk_thread_pool *handler_pool;    /* 可选：业务 handler 线程池（0 = 关闭） */
+    int worker_fallback_warned;       /* handler_threads=0 时只告警一次 */
+    ntk_mutex *handler_limit_mutex;   /* 保护 handler_inflight / external_inflight */
     unsigned handler_max_concurrency; /* 0 = 不限制 */
     unsigned handler_inflight;        /* worker 排队 + 执行中的任务数 */
     unsigned external_inflight;       /* 自定义 executor 未完成任务数（诊断用） */
@@ -100,18 +100,24 @@ struct node {
 
 /* node.c */
 uint64_t zri_now_ms(void);
-void zri_node_on_message(node_t *node, zri_transport_t *transport,
-                         const zri_message_t *message);
-int zri_node_send(node_t *node, transport_kind_t transport_kind, const char *scheme,
+void zri_node_on_message(node_t *node, zri_transport_t *transport, const zri_message_t *message);
+int zri_node_send(node_t *node,
+                  transport_kind_t transport_kind,
+                  const char *scheme,
                   const zri_message_t *message);
 /* 组装 "service.method" 路由并发送一次调用（stub/proxy/重传共用）。 */
-int zri_node_send_call(node_t *node, const stub_target_t *target, const char *service,
-                       const char *method, const payload_t *payload, uint8_t kind,
-                       uint64_t request_id, uint64_t timeout_ms, const void *metadata,
+int zri_node_send_call(node_t *node,
+                       const stub_target_t *target,
+                       const char *service,
+                       const char *method,
+                       const payload_t *payload,
+                       uint8_t kind,
+                       uint64_t request_id,
+                       uint64_t timeout_ms,
+                       const void *metadata,
                        uint16_t metadata_len);
 /* 默认解析：静态路由表 / 服务发现（不含 proxy 的端点覆盖）。 */
-int zri_node_resolve(node_t *node, const char *service, int prefer_stream,
-                      stub_target_t *out);
+int zri_node_resolve(node_t *node, const char *service, int prefer_stream, stub_target_t *out);
 
 /* 定长对象复用池：trylock 失败即回退 malloc/free，不阻塞。 */
 int zri_obj_pool_init(zri_obj_pool_t *pool, unsigned limit);

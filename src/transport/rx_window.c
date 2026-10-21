@@ -2,24 +2,28 @@
 
 #include <string.h>
 
-static int seq_diff16(uint16_t seq, uint16_t base) {
+static int seq_diff16(uint16_t seq, uint16_t base)
+{
     return (int)(int16_t)(uint16_t)(seq - base);
 }
 
-static int bit_test(const zri_rx_window_t *window, int index) {
+static int bit_test(const zri_rx_window_t *window, int index)
+{
     if (index < 0 || index >= WINDOW_BITS) {
         return 0;
     }
     return (int)((window->bits[index >> 6] >> (index & 63)) & 1u);
 }
 
-static void bit_set(zri_rx_window_t *window, int index) {
+static void bit_set(zri_rx_window_t *window, int index)
+{
     if (index >= 0 && index < WINDOW_BITS) {
         window->bits[index >> 6] |= (1ull << (index & 63));
     }
 }
 
-static void window_shift(zri_rx_window_t *window) {
+static void window_shift(zri_rx_window_t *window)
+{
     int i;
     for (i = 0; i < WINDOW_WORDS - 1; i++) {
         window->bits[i] = (window->bits[i] >> 1) | (window->bits[i + 1] << 63);
@@ -27,13 +31,15 @@ static void window_shift(zri_rx_window_t *window) {
     window->bits[WINDOW_WORDS - 1] >>= 1;
 }
 
-void zri_rx_window_reset(zri_rx_window_t *window) {
+void zri_rx_window_reset(zri_rx_window_t *window)
+{
     if (window) {
         memset(window, 0, sizeof(*window));
     }
 }
 
-int zri_rx_window_accept(zri_rx_window_t *window, uint16_t seq) {
+int zri_rx_window_accept(zri_rx_window_t *window, uint16_t seq)
+{
     int diff;
     if (!window) {
         return 0;
@@ -64,7 +70,8 @@ int zri_rx_window_accept(zri_rx_window_t *window, uint16_t seq) {
     return 1;
 }
 
-size_t zri_rx_window_missing(const zri_rx_window_t *window, uint16_t *out, size_t cap) {
+size_t zri_rx_window_missing(const zri_rx_window_t *window, uint16_t *out, size_t cap)
+{
     int span;
     int limit;
     int i;

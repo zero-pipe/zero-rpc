@@ -14,7 +14,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-int main(int argc, char **argv) {
+int main(int argc, char **argv)
+{
     node_config_t cfg;
     node_t *node = NULL;
     proxy_t *proxy = NULL;
@@ -55,8 +56,8 @@ int main(int argc, char **argv) {
     memset(&response, 0, sizeof(response));
     rc = proxy_call_sync(proxy, "HealthService", "check", &request, &response, 3000, NULL);
     if (rc == OK) {
-        rpc_log_info("response: %.*s", (int)response.payload.len,
-                     (const char *)response.payload.data);
+        rpc_log_info(
+            "response: %.*s", (int)response.payload.len, (const char *)response.payload.data);
     } else {
         rpc_log_error("call failed: %d (server running?)", rc);
     }

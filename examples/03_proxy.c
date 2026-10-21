@@ -9,7 +9,8 @@
 
 #include <string.h>
 
-int main(void) {
+int main(void)
+{
     node_config_t cfg;
     proxy_options_t options;
     node_t *node = NULL;

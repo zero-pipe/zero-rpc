@@ -15,7 +15,8 @@ static ntk_sem *g_sem;
 static int g_task_ok;
 static void *g_remote_obj;
 
-static void pending_probe(void *user) {
+static void pending_probe(void *user)
+{
     node_t *node = (node_t *)user;
     zri_pending_t *pending[1024];
     unsigned i;
@@ -36,16 +37,17 @@ static void pending_probe(void *user) {
     ntk_sem_post(g_sem, 1);
 }
 
-#define CHECK(cond)                                                \
-    do {                                                           \
-        if (!(cond)) {                                             \
+#define CHECK(cond)                                                     \
+    do {                                                                \
+        if (!(cond)) {                                                  \
             rpc_log_error("FAIL %s:%d: %s", __FILE__, __LINE__, #cond); \
-            g_fail = 1;                                            \
-        }                                                          \
+            g_fail = 1;                                                 \
+        }                                                               \
     } while (0)
 
 /* 在 poller 线程内验证：当前 poller 正确，且池释放后可复用同一块。 */
-static void pool_probe(void *user) {
+static void pool_probe(void *user)
+{
     node_t *node = (node_t *)user;
     ntk_poller *cur = ntk_poller_current();
     ntk_buf_pool *pool;
@@ -99,7 +101,8 @@ done:
     ntk_sem_post(g_sem, 1);
 }
 
-int main(void) {
+int main(void)
+{
     node_config_t cfg;
     node_t *node = NULL;
     unsigned i;

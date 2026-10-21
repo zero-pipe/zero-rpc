@@ -9,13 +9,15 @@
 
 #include <string.h>
 
-static int order_get(const request_t *req, message_view_t *resp, void *user) {
+static int order_get(const request_t *req, message_view_t *resp, void *user)
+{
     (void)user;
     (void)req;
     return message_view_set_string(resp, "direct endpoint: ok");
 }
 
-int main(void) {
+int main(void)
+{
     node_config_t cfg;
     node_t *node = NULL;
     service_t *svc = NULL;

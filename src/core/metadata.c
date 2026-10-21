@@ -3,7 +3,8 @@
 
 #include <string.h>
 
-static metadata_entry_t *metadata_find(metadata_t *metadata, const char *key) {
+static metadata_entry_t *metadata_find(metadata_t *metadata, const char *key)
+{
     uint16_t i;
     if (!metadata || !key) {
         return NULL;
@@ -16,13 +17,15 @@ static metadata_entry_t *metadata_find(metadata_t *metadata, const char *key) {
     return NULL;
 }
 
-void metadata_init(metadata_t *metadata) {
+void metadata_init(metadata_t *metadata)
+{
     if (metadata) {
         metadata->count = 0;
     }
 }
 
-int metadata_set(metadata_t *metadata, const char *key, const void *value, size_t len) {
+int metadata_set(metadata_t *metadata, const char *key, const void *value, size_t len)
+{
     metadata_entry_t *entry;
     size_t key_len;
 
@@ -49,7 +52,8 @@ int metadata_set(metadata_t *metadata, const char *key, const void *value, size_
     return OK;
 }
 
-int metadata_set_string(metadata_t *metadata, const char *key, const char *value) {
+int metadata_set_string(metadata_t *metadata, const char *key, const char *value)
+{
     if (!value) {
         return ERR_INVALID;
     }
@@ -57,7 +61,8 @@ int metadata_set_string(metadata_t *metadata, const char *key, const char *value
     return metadata_set(metadata, key, value, strlen(value) + 1);
 }
 
-const void *metadata_get(const metadata_t *metadata, const char *key, size_t *len) {
+const void *metadata_get(const metadata_t *metadata, const char *key, size_t *len)
+{
     metadata_entry_t *entry = metadata_find((metadata_t *)metadata, key);
     if (!entry) {
         return NULL;
@@ -68,7 +73,8 @@ const void *metadata_get(const metadata_t *metadata, const char *key, size_t *le
     return entry->value;
 }
 
-const char *metadata_get_string(const metadata_t *metadata, const char *key) {
+const char *metadata_get_string(const metadata_t *metadata, const char *key)
+{
     metadata_entry_t *entry = metadata_find((metadata_t *)metadata, key);
     if (!entry || entry->value_len == 0) {
         return NULL;
@@ -76,7 +82,8 @@ const char *metadata_get_string(const metadata_t *metadata, const char *key) {
     return (const char *)entry->value;
 }
 
-int metadata_remove(metadata_t *metadata, const char *key) {
+int metadata_remove(metadata_t *metadata, const char *key)
+{
     uint16_t i;
     if (!metadata || !key) {
         return ERR_INVALID;
@@ -84,7 +91,8 @@ int metadata_remove(metadata_t *metadata, const char *key) {
     for (i = 0; i < metadata->count; i++) {
         if (strcmp(metadata->entries[i].key, key) == 0) {
             if (i + 1 < metadata->count) {
-                memmove(&metadata->entries[i], &metadata->entries[i + 1],
+                memmove(&metadata->entries[i],
+                        &metadata->entries[i + 1],
                         (size_t)(metadata->count - i - 1) * sizeof(metadata->entries[0]));
             }
             metadata->count--;
@@ -94,16 +102,19 @@ int metadata_remove(metadata_t *metadata, const char *key) {
     return ERR_NOTFOUND;
 }
 
-static void put_u16(uint8_t *p, uint16_t v) {
+static void put_u16(uint8_t *p, uint16_t v)
+{
     p[0] = (uint8_t)(v >> 8);
     p[1] = (uint8_t)v;
 }
 
-static uint16_t get_u16(const uint8_t *p) {
+static uint16_t get_u16(const uint8_t *p)
+{
     return (uint16_t)(((uint16_t)p[0] << 8) | p[1]);
 }
 
-int metadata_encode(const metadata_t *metadata, void *buf, size_t cap, size_t *out_len) {
+int metadata_encode(const metadata_t *metadata, void *buf, size_t cap, size_t *out_len)
+{
     uint8_t *p = (uint8_t *)buf;
     size_t off = 0;
     uint16_t i;
@@ -133,7 +144,8 @@ int metadata_encode(const metadata_t *metadata, void *buf, size_t cap, size_t *o
     return OK;
 }
 
-int metadata_decode(metadata_t *metadata, const void *buf, size_t len) {
+int metadata_decode(metadata_t *metadata, const void *buf, size_t len)
+{
     const uint8_t *p = (const uint8_t *)buf;
     size_t off = 0;
     if (!metadata || (len > 0 && !buf)) {

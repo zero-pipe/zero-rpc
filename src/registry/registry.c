@@ -19,7 +19,8 @@ struct zri_registry_instance {
     uint64_t last_seen_ms;
 };
 
-static void registry_remove_node_locked(zri_registry_t *registry, uint32_t node_id) {
+static void registry_remove_node_locked(zri_registry_t *registry, uint32_t node_id)
+{
     zri_registry_instance_t *instance = registry->instances;
     zri_registry_instance_t *previous = NULL;
     zri_registry_instance_t *next;
@@ -40,11 +41,13 @@ static void registry_remove_node_locked(zri_registry_t *registry, uint32_t node_
     }
 }
 
-static ntk_mutex *registry_lock(const zri_registry_t *registry) {
+static ntk_mutex *registry_lock(const zri_registry_t *registry)
+{
     return registry && registry->lock ? (ntk_mutex *)registry->lock : NULL;
 }
 
-void zri_registry_init(zri_registry_t *registry) {
+void zri_registry_init(zri_registry_t *registry)
+{
     if (!registry) {
         return;
     }
@@ -54,7 +57,8 @@ void zri_registry_init(zri_registry_t *registry) {
     registry->lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
 }
 
-void zri_registry_cleanup(zri_registry_t *registry) {
+void zri_registry_cleanup(zri_registry_t *registry)
+{
     zri_registry_instance_t *instance;
     zri_registry_instance_t *next;
     ntk_mutex *lock;
@@ -80,8 +84,10 @@ void zri_registry_cleanup(zri_registry_t *registry) {
     registry->lock = NULL;
 }
 
-static zri_registry_instance_t *find_instance(zri_registry_t *registry, const char *service,
-                                               const char *instance_id) {
+static zri_registry_instance_t *find_instance(zri_registry_t *registry,
+                                              const char *service,
+                                              const char *instance_id)
+{
     zri_registry_instance_t *instance;
     for (instance = registry->instances; instance; instance = instance->next) {
         if (strcmp(instance->service, service) == 0 &&
@@ -92,9 +98,14 @@ static zri_registry_instance_t *find_instance(zri_registry_t *registry, const ch
     return NULL;
 }
 
-int zri_registry_upsert(zri_registry_t *registry, const char *service, const char *instance_id,
-                         const endpoint_t *endpoints, size_t endpoint_count, uint32_t node_id,
-                         uint64_t last_seen_ms) {
+int zri_registry_upsert(zri_registry_t *registry,
+                        const char *service,
+                        const char *instance_id,
+                        const endpoint_t *endpoints,
+                        size_t endpoint_count,
+                        uint32_t node_id,
+                        uint64_t last_seen_ms)
+{
     zri_registry_instance_t *instance;
     ntk_mutex *lock;
     if (!registry || !service || !service[0] || !instance_id || !instance_id[0] || !endpoints ||
@@ -132,7 +143,8 @@ int zri_registry_upsert(zri_registry_t *registry, const char *service, const cha
     return OK;
 }
 
-void zri_registry_remove_node(zri_registry_t *registry, uint32_t node_id) {
+void zri_registry_remove_node(zri_registry_t *registry, uint32_t node_id)
+{
     ntk_mutex *lock;
     if (!registry) {
         return;
@@ -147,7 +159,8 @@ void zri_registry_remove_node(zri_registry_t *registry, uint32_t node_id) {
     }
 }
 
-void zri_registry_expire(zri_registry_t *registry, uint64_t now_ms, uint64_t ttl_ms) {
+void zri_registry_expire(zri_registry_t *registry, uint64_t now_ms, uint64_t ttl_ms)
+{
     zri_registry_instance_t *instance;
     zri_registry_instance_t *previous = NULL;
     zri_registry_instance_t *next;
@@ -180,7 +193,8 @@ void zri_registry_expire(zri_registry_t *registry, uint64_t now_ms, uint64_t ttl
     }
 }
 
-static int instance_has_tcp(const zri_registry_instance_t *instance) {
+static int instance_has_tcp(const zri_registry_instance_t *instance)
+{
     size_t i;
     for (i = 0; i < instance->endpoint_count; i++) {
         if (instance->endpoints[i].transport == TRANSPORT_TCP) {
@@ -190,12 +204,16 @@ static int instance_has_tcp(const zri_registry_instance_t *instance) {
     return 0;
 }
 
-int zri_registry_select(zri_registry_t *registry, const char *service, endpoint_t *out) {
+int zri_registry_select(zri_registry_t *registry, const char *service, endpoint_t *out)
+{
     return zri_registry_select_prefer(registry, service, 0, out);
 }
 
-int zri_registry_select_prefer(zri_registry_t *registry, const char *service, int prefer_stream,
-                                endpoint_t *out) {
+int zri_registry_select_prefer(zri_registry_t *registry,
+                               const char *service,
+                               int prefer_stream,
+                               endpoint_t *out)
+{
     zri_registry_instance_t *instance;
     zri_registry_instance_t *selected = NULL;
     size_t count = 0;
@@ -264,10 +282,15 @@ int zri_registry_select_prefer(zri_registry_t *registry, const char *service, in
     return OK;
 }
 
-int zri_registry_replace_node(zri_registry_t *registry, uint32_t node_id, const char *instance_id,
-                               const char *const *services, size_t service_count,
-                               const endpoint_t *endpoints, size_t endpoint_count,
-                               uint64_t last_seen_ms) {
+int zri_registry_replace_node(zri_registry_t *registry,
+                              uint32_t node_id,
+                              const char *instance_id,
+                              const char *const *services,
+                              size_t service_count,
+                              const endpoint_t *endpoints,
+                              size_t endpoint_count,
+                              uint64_t last_seen_ms)
+{
     size_t i;
     int rc = OK;
     ntk_mutex *lock;

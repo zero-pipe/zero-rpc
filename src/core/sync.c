@@ -19,7 +19,8 @@ typedef struct zri_sync_ctx {
     char *message;
 } zri_sync_ctx_t;
 
-static void sync_ctx_put(zri_sync_ctx_t *c) {
+static void sync_ctx_put(zri_sync_ctx_t *c)
+{
     int last;
     ntk_mutex_lock(c->lock);
     last = (--c->refs == 0);
@@ -40,7 +41,8 @@ static void sync_ctx_put(zri_sync_ctx_t *c) {
     }
 }
 
-static void sync_response_cb(int status, const response_t *resp, void *user) {
+static void sync_response_cb(int status, const response_t *resp, void *user)
+{
     zri_sync_ctx_t *c = (zri_sync_ctx_t *)user;
     ntk_mutex_lock(c->lock);
     if (c->done) {
@@ -81,9 +83,15 @@ static void sync_response_cb(int status, const response_t *resp, void *user) {
 
 /* ---- 同步调用 ---- */
 
-int proxy_call_sync_ex(proxy_t *proxy, const char *service, const char *method,
-                       const payload_t *request, const metadata_t *metadata,
-                       response_t *response, uint64_t timeout_ms, uint64_t *out_request_id) {
+int proxy_call_sync_ex(proxy_t *proxy,
+                       const char *service,
+                       const char *method,
+                       const payload_t *request,
+                       const metadata_t *metadata,
+                       response_t *response,
+                       uint64_t timeout_ms,
+                       uint64_t *out_request_id)
+{
     zri_sync_ctx_t *c;
     uint64_t id = 0;
     int rc;
@@ -110,8 +118,8 @@ int proxy_call_sync_ex(proxy_t *proxy, const char *service, const char *method,
     }
     c->refs = 2;
 
-    rc = proxy_call_async_ex(proxy, service, method, request, metadata, sync_response_cb, c,
-                             timeout_ms, &id);
+    rc = proxy_call_async_ex(
+        proxy, service, method, request, metadata, sync_response_cb, c, timeout_ms, &id);
     if (rc != OK) {
         sync_ctx_put(c);
         sync_ctx_put(c);
@@ -120,8 +128,8 @@ int proxy_call_sync_ex(proxy_t *proxy, const char *service, const char *method,
     if (out_request_id) {
         *out_request_id = id;
     }
-    if (ntk_sem_timedwait(c->sem,
-                          (unsigned)(timeout_ms ? timeout_ms : DEFAULT_TIMEOUT_MS)) != NTK_OK) {
+    if (ntk_sem_timedwait(c->sem, (unsigned)(timeout_ms ? timeout_ms : DEFAULT_TIMEOUT_MS)) !=
+        NTK_OK) {
         /* 取消未完成调用；回调（若仍会到达）会释放它的引用。 */
         (void)proxy_cancel(proxy, id);
         sync_ctx_put(c);
@@ -145,14 +153,20 @@ int proxy_call_sync_ex(proxy_t *proxy, const char *service, const char *method,
     return rc;
 }
 
-int proxy_call_sync(proxy_t *proxy, const char *service, const char *method,
-                         const payload_t *request, response_t *response,
-                         uint64_t timeout_ms, uint64_t *out_request_id) {
-    return proxy_call_sync_ex(proxy, service, method, request, NULL, response, timeout_ms,
-                              out_request_id);
+int proxy_call_sync(proxy_t *proxy,
+                    const char *service,
+                    const char *method,
+                    const payload_t *request,
+                    response_t *response,
+                    uint64_t timeout_ms,
+                    uint64_t *out_request_id)
+{
+    return proxy_call_sync_ex(
+        proxy, service, method, request, NULL, response, timeout_ms, out_request_id);
 }
 
-void response_release(response_t *response) {
+void response_release(response_t *response)
+{
     if (!response) {
         return;
     }

@@ -21,7 +21,8 @@ typedef struct zri_mem_hdr {
     size_t cap;
 } zri_mem_hdr_t;
 
-void *zri_mem_alloc(size_t size) {
+void *zri_mem_alloc(size_t size)
+{
     zri_mem_hdr_t *h;
     ntk_poller *owner = ntk_poller_current();
     ntk_buf_pool *pool = owner ? ntk_poller_buf_pool(owner) : NULL;
@@ -50,7 +51,8 @@ void *zri_mem_alloc(size_t size) {
     return (void *)(h + 1);
 }
 
-void zri_mem_free(void *ptr) {
+void zri_mem_free(void *ptr)
+{
     zri_mem_hdr_t *h;
 
     if (!ptr) {

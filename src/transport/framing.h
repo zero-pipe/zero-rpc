@@ -83,17 +83,32 @@ size_t zri_frame_build_data(uint8_t *buf, size_t cap, const zri_frag_t *desc);
 size_t zri_frame_build_frag_header(uint8_t *buf, size_t cap, const zri_frag_t *desc);
 int zri_frame_parse_data(const uint8_t *buf, size_t len, zri_frag_t *view);
 
-size_t zri_frame_build_nack(uint8_t *buf, size_t cap, uint32_t sender_ssrc, uint32_t media_ssrc,
-                            const uint16_t *seqs, size_t count);
-int zri_frame_parse_nack(const uint8_t *buf, size_t len, uint32_t *sender_ssrc, uint32_t *media_ssrc,
-                         uint16_t *out_seqs, size_t out_cap);
+size_t zri_frame_build_nack(uint8_t *buf,
+                            size_t cap,
+                            uint32_t sender_ssrc,
+                            uint32_t media_ssrc,
+                            const uint16_t *seqs,
+                            size_t count);
+int zri_frame_parse_nack(const uint8_t *buf,
+                         size_t len,
+                         uint32_t *sender_ssrc,
+                         uint32_t *media_ssrc,
+                         uint16_t *out_seqs,
+                         size_t out_cap);
 
 /* RTCP 报告编解码：build 返回写入字节数（0 失败）；parse 返回 1 成功、0 非本类型、-1 非法。 */
-size_t zri_frame_build_sr(uint8_t *buf, size_t cap, uint32_t ssrc, uint32_t ntp_msw,
-                           uint32_t ntp_lsw, uint32_t rtp_ts, uint32_t packet_count,
-                           uint32_t octet_count, const zri_rtcp_report_block_t *rb, int rb_count);
-size_t zri_frame_build_rr(uint8_t *buf, size_t cap, uint32_t ssrc,
-                           const zri_rtcp_report_block_t *rb, int rb_count);
+size_t zri_frame_build_sr(uint8_t *buf,
+                          size_t cap,
+                          uint32_t ssrc,
+                          uint32_t ntp_msw,
+                          uint32_t ntp_lsw,
+                          uint32_t rtp_ts,
+                          uint32_t packet_count,
+                          uint32_t octet_count,
+                          const zri_rtcp_report_block_t *rb,
+                          int rb_count);
+size_t zri_frame_build_rr(
+    uint8_t *buf, size_t cap, uint32_t ssrc, const zri_rtcp_report_block_t *rb, int rb_count);
 size_t zri_frame_build_sdes_cname(uint8_t *buf, size_t cap, uint32_t ssrc, const char *cname);
 size_t zri_frame_build_bye(uint8_t *buf, size_t cap, uint32_t ssrc);
 int zri_frame_parse_sr(const uint8_t *buf, size_t len, zri_rtcp_sr_t *out);

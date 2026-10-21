@@ -17,7 +17,8 @@ typedef struct zri_sync_bridge {
     void *user;
 } zri_sync_bridge_t;
 
-static void sync_method_bridge(call_t *call, const request_t *req, void *user) {
+static void sync_method_bridge(call_t *call, const request_t *req, void *user)
+{
     zri_sync_bridge_t *bridge = (zri_sync_bridge_t *)user;
     message_view_t view;
     payload_t pl;
@@ -35,7 +36,8 @@ typedef struct zri_svc_task {
     zri_method_t *method;
 } zri_svc_task_t;
 
-static void svc_link_task(void *user) {
+static void svc_link_task(void *user)
+{
     zri_svc_task_t *t = (zri_svc_task_t *)user;
     t->svc->next = t->node->services;
     t->node->services = t->svc;
@@ -45,7 +47,8 @@ static void svc_link_task(void *user) {
     free(t);
 }
 
-static void svc_method_task(void *user) {
+static void svc_method_task(void *user)
+{
     zri_svc_task_t *t = (zri_svc_task_t *)user;
     t->method->next = t->svc->methods;
     t->svc->methods = t->method;
@@ -79,13 +82,14 @@ typedef struct zri_handler_task {
     uint8_t encoding;
     uint64_t deadline_ms; /* 请求 deadline（绝对单调 ms，0 = 无） */
     metadata_t *metadata; /* 请求 metadata 解码副本，按需分配；无则为 NULL */
-    int external; /* 1 = 自定义 executor 任务 */
+    int external;         /* 1 = 自定义 executor 任务 */
 } zri_handler_task_t;
 
 static void handler_inflight_release(node_t *node);
 static void handler_external_release(node_t *node);
 
-static void handler_task_release(zri_handler_task_t *t) {
+static void handler_task_release(zri_handler_task_t *t)
+{
     if (t->external) {
         handler_inflight_release(t->node);
         handler_external_release(t->node);
@@ -94,7 +98,8 @@ static void handler_task_release(zri_handler_task_t *t) {
     }
 }
 
-static void handler_task_destroy(zri_handler_task_t *t) {
+static void handler_task_destroy(zri_handler_task_t *t)
+{
     if (!t) {
         return;
     }
@@ -110,7 +115,8 @@ static void handler_task_destroy(zri_handler_task_t *t) {
 }
 
 /* worker 路径的 call：优先取节点复用池，抢不到锁/池空则回退 malloc。 */
-call_t *zri_worker_call_alloc(node_t *node) {
+call_t *zri_worker_call_alloc(node_t *node)
+{
     call_t *call;
     if (!node) {
         return NULL;
@@ -124,7 +130,8 @@ call_t *zri_worker_call_alloc(node_t *node) {
     return call;
 }
 
-void zri_worker_call_free(node_t *node, call_t *call) {
+void zri_worker_call_free(node_t *node, call_t *call)
+{
     if (!call) {
         return;
     }
@@ -139,7 +146,8 @@ void zri_worker_call_free(node_t *node, call_t *call) {
     zri_mem_free(call);
 }
 
-static void handler_task_run(void *user) {
+static void handler_task_run(void *user)
+{
     zri_handler_task_t *t = (zri_handler_task_t *)user;
     call_t *call;
     request_t req;
@@ -204,8 +212,11 @@ static void handler_task_run(void *user) {
             return;
         }
     }
-    rpc_log_debug("worker request %s.%s id=%llu len=%zu", t->service, t->method,
-                  (unsigned long long)t->msg_id, t->payload_len);
+    rpc_log_debug("worker request %s.%s id=%llu len=%zu",
+                  t->service,
+                  t->method,
+                  (unsigned long long)t->msg_id,
+                  t->payload_len);
 
     t->fn(call, &req, t->user);
     handler_task_release(t);
@@ -220,7 +231,8 @@ static void handler_task_run(void *user) {
  * worker 未完成任务（排队 + 执行中）限流。0 表示不限制；超限返回 ERR_AGAIN，
  * 由调用方在 poller 上直接回错误状态，避免无界排队。
  */
-static int handler_inflight_acquire(node_t *node) {
+static int handler_inflight_acquire(node_t *node)
+{
     int ok;
     if (node->handler_max_concurrency == 0 || !node->handler_limit_mutex) {
         return OK;
@@ -234,7 +246,8 @@ static int handler_inflight_acquire(node_t *node) {
     return ok ? OK : ERR_AGAIN;
 }
 
-static void handler_inflight_release(node_t *node) {
+static void handler_inflight_release(node_t *node)
+{
     if (node->handler_max_concurrency == 0 || !node->handler_limit_mutex) {
         return;
     }
@@ -245,7 +258,8 @@ static void handler_inflight_release(node_t *node) {
     ntk_mutex_unlock(node->handler_limit_mutex);
 }
 
-static void handler_external_acquire(node_t *node) {
+static void handler_external_acquire(node_t *node)
+{
     if (!node->handler_limit_mutex) {
         return;
     }
@@ -254,7 +268,8 @@ static void handler_external_acquire(node_t *node) {
     ntk_mutex_unlock(node->handler_limit_mutex);
 }
 
-static void handler_external_release(node_t *node) {
+static void handler_external_release(node_t *node)
+{
     if (!node->handler_limit_mutex) {
         return;
     }
@@ -267,8 +282,11 @@ static void handler_external_release(node_t *node) {
 
 /* ---- 在途调用取消登记（best-effort） ---- */
 
-void zri_node_cancel_record(node_t *node, uint32_t request_id, const char *peer_ip,
-                            uint16_t peer_port) {
+void zri_node_cancel_record(node_t *node,
+                            uint32_t request_id,
+                            const char *peer_ip,
+                            uint16_t peer_port)
+{
     int i;
     int free_slot = -1;
     uint64_t now;
@@ -311,8 +329,11 @@ void zri_node_cancel_record(node_t *node, uint32_t request_id, const char *peer_
     ntk_mutex_unlock(node->handler_limit_mutex);
 }
 
-int zri_node_is_canceled(const node_t *node, uint32_t request_id, const char *peer_ip,
-                         uint16_t peer_port) {
+int zri_node_is_canceled(const node_t *node,
+                         uint32_t request_id,
+                         const char *peer_ip,
+                         uint16_t peer_port)
+{
     int found = 0;
     int i;
     uint64_t now;
@@ -324,8 +345,7 @@ int zri_node_is_canceled(const node_t *node, uint32_t request_id, const char *pe
     for (i = 0; i < CANCEL_SLOTS; i++) {
         const zri_cancel_slot_t *s = &node->cancels[i];
         if (s->used && s->expires_ms > now && s->request_id == request_id &&
-            s->peer_port == peer_port &&
-            strcmp(s->peer_ip, peer_ip ? peer_ip : "") == 0) {
+            s->peer_port == peer_port && strcmp(s->peer_ip, peer_ip ? peer_ip : "") == 0) {
             found = 1;
             break;
         }
@@ -334,7 +354,8 @@ int zri_node_is_canceled(const node_t *node, uint32_t request_id, const char *pe
     return found;
 }
 
-void zri_node_expire_cancels(node_t *node, uint64_t now_ms) {
+void zri_node_expire_cancels(node_t *node, uint64_t now_ms)
+{
     int i;
     if (!node || !node->handler_limit_mutex) {
         return;
@@ -353,16 +374,24 @@ void zri_node_expire_cancels(node_t *node, uint64_t now_ms) {
 }
 
 /* 由客户端 timeout_ms 换算成绝对 deadline（接收时刻起算）。 */
-static uint64_t deadline_from_timeout(uint32_t timeout_ms) {
+static uint64_t deadline_from_timeout(uint32_t timeout_ms)
+{
     return timeout_ms ? zri_now_ms() + timeout_ms : 0;
 }
 
 /* 把已解析好的请求深拷贝成可跨线程执行的任务。 */
-static int handler_task_create(node_t *node, zri_transport_t *transport,
-                               const zri_message_t *msg, const char *service,
-                               const char *method, handler_fn fn, void *user,
-                               service_interceptor_fn interceptor, void *interceptor_user,
-                               int external, zri_handler_task_t **out) {
+static int handler_task_create(node_t *node,
+                               zri_transport_t *transport,
+                               const zri_message_t *msg,
+                               const char *service,
+                               const char *method,
+                               handler_fn fn,
+                               void *user,
+                               service_interceptor_fn interceptor,
+                               void *interceptor_user,
+                               int external,
+                               zri_handler_task_t **out)
+{
     zri_handler_task_t *t;
     size_t payload_len = msg->payload.len;
 
@@ -404,9 +433,8 @@ static int handler_task_create(node_t *node, zri_transport_t *transport,
     }
     t->payload_len = payload_len;
     if (payload_len > 0) {
-        t->payload = payload_len <= sizeof(t->inline_payload)
-                         ? t->inline_payload
-                         : (uint8_t *)malloc(payload_len);
+        t->payload = payload_len <= sizeof(t->inline_payload) ? t->inline_payload :
+                                                                (uint8_t *)malloc(payload_len);
         if (!t->payload) {
             handler_task_destroy(t);
             return ERR_NOMEM;
@@ -418,10 +446,16 @@ static int handler_task_create(node_t *node, zri_transport_t *transport,
 }
 
 /* 投递到节点内置 handler 线程池。 */
-static int service_dispatch_worker(node_t *node, zri_transport_t *transport,
-                                   const zri_message_t *msg, const char *service,
-                                   const char *method, handler_fn fn, void *user,
-                                   service_interceptor_fn interceptor, void *interceptor_user) {
+static int service_dispatch_worker(node_t *node,
+                                   zri_transport_t *transport,
+                                   const zri_message_t *msg,
+                                   const char *service,
+                                   const char *method,
+                                   handler_fn fn,
+                                   void *user,
+                                   service_interceptor_fn interceptor,
+                                   void *interceptor_user)
+{
     zri_handler_task_t *t = NULL;
     int rc;
 
@@ -429,8 +463,8 @@ static int service_dispatch_worker(node_t *node, zri_transport_t *transport,
     if (rc != OK) {
         return rc;
     }
-    rc = handler_task_create(node, transport, msg, service, method, fn, user, interceptor,
-                             interceptor_user, 0, &t);
+    rc = handler_task_create(
+        node, transport, msg, service, method, fn, user, interceptor, interceptor_user, 0, &t);
     if (rc != OK) {
         handler_inflight_release(node);
         return rc;
@@ -444,11 +478,17 @@ static int service_dispatch_worker(node_t *node, zri_transport_t *transport,
 }
 
 /* 投递到调用者提供的 executor（借用语义）。 */
-static int service_dispatch_external(node_t *node, zri_transport_t *transport,
-                                     const zri_message_t *msg, const char *service,
-                                     const char *method, handler_fn fn, void *user,
+static int service_dispatch_external(node_t *node,
+                                     zri_transport_t *transport,
+                                     const zri_message_t *msg,
+                                     const char *service,
+                                     const char *method,
+                                     handler_fn fn,
+                                     void *user,
                                      const service_executor_t *executor,
-                                     service_interceptor_fn interceptor, void *interceptor_user) {
+                                     service_interceptor_fn interceptor,
+                                     void *interceptor_user)
+{
     zri_handler_task_t *t = NULL;
     int rc;
 
@@ -457,8 +497,8 @@ static int service_dispatch_external(node_t *node, zri_transport_t *transport,
     if (rc != OK) {
         return rc;
     }
-    rc = handler_task_create(node, transport, msg, service, method, fn, user, interceptor,
-                             interceptor_user, 1, &t);
+    rc = handler_task_create(
+        node, transport, msg, service, method, fn, user, interceptor, interceptor_user, 1, &t);
     if (rc != OK) {
         handler_inflight_release(node);
         return rc;
@@ -474,8 +514,8 @@ static int service_dispatch_external(node_t *node, zri_transport_t *transport,
     return OK;
 }
 
-void zri_service_handle_request(node_t *node, zri_transport_t *transport,
-                                const zri_message_t *msg) {
+void zri_service_handle_request(node_t *node, zri_transport_t *transport, const zri_message_t *msg)
+{
     char tmp[MAX_ROUTE];
     char *dot;
     service_t *svc;
@@ -515,42 +555,59 @@ void zri_service_handle_request(node_t *node, zri_transport_t *transport,
      * 回错误状态，避免慢 handler 在池异常时阻塞 poller。
      */
     if (m->executor) {
-        int rc = service_dispatch_external(node, transport, msg, tmp, dot + 1, fn, user,
-                                           m->executor, svc->interceptor,
+        int rc = service_dispatch_external(node,
+                                           transport,
+                                           msg,
+                                           tmp,
+                                           dot + 1,
+                                           fn,
+                                           user,
+                                           m->executor,
+                                           svc->interceptor,
                                            svc->interceptor_user);
         if (rc == OK) {
             return;
         }
-        rpc_log_error("executor dispatch failed: service=%s method=%s rc=%d", tmp, dot + 1,
-                      rc);
+        rpc_log_error("executor dispatch failed: service=%s method=%s rc=%d", tmp, dot + 1, rc);
         zri_service_send_status(transport, msg, rc);
         return;
     }
     if (m->run_in_worker) {
         if (node->handler_pool) {
-            int rc = service_dispatch_worker(node, transport, msg, tmp, dot + 1, fn, user,
-                                             svc->interceptor, svc->interceptor_user);
+            int rc = service_dispatch_worker(node,
+                                             transport,
+                                             msg,
+                                             tmp,
+                                             dot + 1,
+                                             fn,
+                                             user,
+                                             svc->interceptor,
+                                             svc->interceptor_user);
             if (rc == OK) {
                 return;
             }
             if (rc == ERR_AGAIN) {
                 rpc_log_warn("worker overloaded: service=%s method=%s", tmp, dot + 1);
             } else {
-                rpc_log_error("worker dispatch failed: service=%s method=%s rc=%d",
-                              tmp, dot + 1, rc);
+                rpc_log_error(
+                    "worker dispatch failed: service=%s method=%s rc=%d", tmp, dot + 1, rc);
             }
             zri_service_send_status(transport, msg, rc);
             return;
         }
         if (!node->worker_fallback_warned) {
             node->worker_fallback_warned = 1;
-            rpc_log_warn("handler_threads=0: worker method %s.%s runs inline on poller",
-                         tmp, dot + 1);
+            rpc_log_warn(
+                "handler_threads=0: worker method %s.%s runs inline on poller", tmp, dot + 1);
         }
     }
-    rpc_log_debug("request %s.%s id=%llu len=%zu peer=%s:%u", tmp, dot + 1,
-                  (unsigned long long)msg->request_id, msg->payload.len,
-                  msg->peer_ip ? msg->peer_ip : "?", (unsigned)msg->peer_port);
+    rpc_log_debug("request %s.%s id=%llu len=%zu peer=%s:%u",
+                  tmp,
+                  dot + 1,
+                  (unsigned long long)msg->request_id,
+                  msg->payload.len,
+                  msg->peer_ip ? msg->peer_ip : "?",
+                  (unsigned)msg->peer_port);
     {
         call_t *call = (call_t *)zri_mem_alloc(sizeof(*call));
         request_t req;
@@ -601,8 +658,8 @@ void zri_service_handle_request(node_t *node, zri_transport_t *transport,
  * 客户端取消：按 request_id + 对端登记。worker 任务启动前会查表跳过；
  * 已运行的 handler 可通过 call_canceled() 观测（无法抢占）。
  */
-void zri_service_handle_cancel(node_t *node, zri_transport_t *transport,
-                               const zri_message_t *msg) {
+void zri_service_handle_cancel(node_t *node, zri_transport_t *transport, const zri_message_t *msg)
+{
     (void)transport;
     if (!node || !msg || msg->kind != KIND_CANCEL) {
         return;
@@ -610,18 +667,21 @@ void zri_service_handle_cancel(node_t *node, zri_transport_t *transport,
     zri_node_cancel_record(node, msg->request_id, msg->peer_ip, msg->peer_port);
 }
 
-uint64_t call_deadline_ms(const call_t *call) {
+uint64_t call_deadline_ms(const call_t *call)
+{
     return call ? call->deadline_ms : 0;
 }
 
-int call_canceled(const call_t *call) {
+int call_canceled(const call_t *call)
+{
     if (!call) {
         return 0;
     }
     return zri_node_is_canceled(call->node, call->msg_id, call->peer_ip, call->peer_port);
 }
 
-static zri_recv_stream_t *find_recv_stream(node_t *node, const zri_message_t *msg) {
+static zri_recv_stream_t *find_recv_stream(node_t *node, const zri_message_t *msg)
+{
     int i;
     for (i = 0; i < MAX_RECV_STREAMS; i++) {
         zri_recv_stream_t *stream = &node->recv_streams[i];
@@ -634,8 +694,10 @@ static zri_recv_stream_t *find_recv_stream(node_t *node, const zri_message_t *ms
     return NULL;
 }
 
-static zri_recv_stream_t *alloc_recv_stream(node_t *node, zri_transport_t *transport,
-                                             const zri_message_t *msg) {
+static zri_recv_stream_t *alloc_recv_stream(node_t *node,
+                                            zri_transport_t *transport,
+                                            const zri_message_t *msg)
+{
     int i;
     for (i = 0; i < MAX_RECV_STREAMS; i++) {
         zri_recv_stream_t *stream = &node->recv_streams[i];
@@ -691,7 +753,8 @@ typedef struct zri_stream_task {
 static void stream_task_run(void *user);
 static void stream_task_complete(void *user);
 
-static void stream_task_free(zri_stream_task_t *t) {
+static void stream_task_free(zri_stream_task_t *t)
+{
     if (!t) {
         return;
     }
@@ -699,7 +762,8 @@ static void stream_task_free(zri_stream_task_t *t) {
     free(t);
 }
 
-static void stream_clear_pending(zri_recv_stream_t *state) {
+static void stream_clear_pending(zri_recv_stream_t *state)
+{
     zri_stream_task_t *t = state->pending_head;
     while (t) {
         zri_stream_task_t *next = t->next;
@@ -710,7 +774,8 @@ static void stream_clear_pending(zri_recv_stream_t *state) {
     state->pending_tail = NULL;
 }
 
-static void stream_close(zri_recv_stream_t *state) {
+static void stream_close(zri_recv_stream_t *state)
+{
     call_t *call = state->call;
     stream_clear_pending(state);
     free(state->metadata);
@@ -720,7 +785,8 @@ static void stream_close(zri_recv_stream_t *state) {
     }
 }
 
-static int stream_submit(zri_recv_stream_t *state, zri_stream_task_t *task) {
+static int stream_submit(zri_recv_stream_t *state, zri_stream_task_t *task)
+{
     zri_method_t *m = state->method;
     node_t *node = state->call ? state->call->node : NULL;
     if (!m) {
@@ -745,7 +811,8 @@ static int stream_submit(zri_recv_stream_t *state, zri_stream_task_t *task) {
     return ERR_STATE;
 }
 
-static void stream_dispatch_next(zri_recv_stream_t *state) {
+static void stream_dispatch_next(zri_recv_stream_t *state)
+{
     zri_stream_task_t *task;
     if (!state || state->in_flight) {
         return;
@@ -766,7 +833,8 @@ static void stream_dispatch_next(zri_recv_stream_t *state) {
     }
 }
 
-static void stream_task_run(void *user) {
+static void stream_task_run(void *user)
+{
     zri_stream_task_t *task = (zri_stream_task_t *)user;
     zri_recv_stream_t *state = task->state;
     call_t *call = task->call;
@@ -810,7 +878,8 @@ static void stream_task_run(void *user) {
     }
 }
 
-static void stream_task_complete(void *user) {
+static void stream_task_complete(void *user)
+{
     zri_stream_task_t *task = (zri_stream_task_t *)user;
     zri_recv_stream_t *state = task->state;
     int rejected = task->rejected;
@@ -831,8 +900,10 @@ static void stream_task_complete(void *user) {
     stream_dispatch_next(state);
 }
 
-void zri_service_handle_stream_chunk(node_t *node, zri_transport_t *transport,
-                                     const zri_message_t *msg) {
+void zri_service_handle_stream_chunk(node_t *node,
+                                     zri_transport_t *transport,
+                                     const zri_message_t *msg)
+{
     char tmp[MAX_ROUTE];
     char *dot;
     service_t *svc = NULL;
@@ -973,7 +1044,8 @@ void zri_service_handle_stream_chunk(node_t *node, zri_transport_t *transport,
     if (state->run_in_worker && !node->handler_pool && !node->worker_fallback_warned) {
         node->worker_fallback_warned = 1;
         rpc_log_warn("handler_threads=0: worker stream %s.%s runs inline on poller",
-                     state->service, state->method_name);
+                     state->service,
+                     state->method_name);
     }
     state->last_ms = zri_now_ms();
     state->bytes += msg->payload.len;
@@ -1009,7 +1081,8 @@ void zri_service_handle_stream_chunk(node_t *node, zri_transport_t *transport,
     }
 }
 
-void zri_service_expire_streams(node_t *node, uint64_t now_ms) {
+void zri_service_expire_streams(node_t *node, uint64_t now_ms)
+{
     int i;
     if (!node) {
         return;
@@ -1033,7 +1106,8 @@ void zri_service_expire_streams(node_t *node, uint64_t now_ms) {
 
 /* ---- 服务生命周期 ---- */
 
-int service_create(node_t *node, const char *service_name, service_t **out) {
+int service_create(node_t *node, const char *service_name, service_t **out)
+{
     service_t *svc;
     zri_svc_task_t *t;
 
@@ -1063,12 +1137,14 @@ int service_create(node_t *node, const char *service_name, service_t **out) {
     return OK;
 }
 
-void service_destroy(service_t *svc) {
+void service_destroy(service_t *svc)
+{
     /* v1：不在运行期注销；节点销毁时统一释放。 */
     (void)svc;
 }
 
-int service_set_interceptor(service_t *svc, service_interceptor_fn fn, void *user) {
+int service_set_interceptor(service_t *svc, service_interceptor_fn fn, void *user)
+{
     if (!svc) {
         return ERR_INVALID;
     }
@@ -1083,8 +1159,11 @@ int service_set_interceptor(service_t *svc, service_interceptor_fn fn, void *use
  * 解析调用者选择的执行模式。allow_worker 为 0 时只允许 INLINE（流式方法）。
  * 输出 run_in_worker / executor 二选一。
  */
-static int service_parse_exec(const service_method_options_t *options, int allow_worker,
-                              int *out_worker, const service_executor_t **out_executor) {
+static int service_parse_exec(const service_method_options_t *options,
+                              int allow_worker,
+                              int *out_worker,
+                              const service_executor_t **out_executor)
+{
     service_exec_mode_t exec = options ? options->exec : SERVICE_EXEC_INLINE;
     const service_executor_t *executor = options ? options->executor : NULL;
 
@@ -1111,9 +1190,15 @@ static int service_parse_exec(const service_method_options_t *options, int allow
     return ERR_INVALID;
 }
 
-static int service_method_register(service_t *svc, const char *method, handler_fn fn,
-                                   chunk_handler_fn stream_fn, void *user, int owns_user,
-                                   int run_in_worker, const service_executor_t *executor) {
+static int service_method_register(service_t *svc,
+                                   const char *method,
+                                   handler_fn fn,
+                                   chunk_handler_fn stream_fn,
+                                   void *user,
+                                   int owns_user,
+                                   int run_in_worker,
+                                   const service_executor_t *executor)
+{
     zri_method_t *m = NULL;
     zri_svc_task_t *t;
 
@@ -1147,12 +1232,17 @@ static int service_method_register(service_t *svc, const char *method, handler_f
     return OK;
 }
 
-int service_add_method(service_t *svc, const char *method, handler_fn fn, void *user) {
+int service_add_method(service_t *svc, const char *method, handler_fn fn, void *user)
+{
     return service_method_register(svc, method, fn, NULL, user, 0, 0, NULL);
 }
 
-int service_add_method_ex(service_t *svc, const char *method, handler_fn fn, void *user,
-                          const service_method_options_t *options) {
+int service_add_method_ex(service_t *svc,
+                          const char *method,
+                          handler_fn fn,
+                          void *user,
+                          const service_method_options_t *options)
+{
     int run_in_worker;
     const service_executor_t *executor;
     int rc = service_parse_exec(options, 1, &run_in_worker, &executor);
@@ -1162,12 +1252,17 @@ int service_add_method_ex(service_t *svc, const char *method, handler_fn fn, voi
     return service_method_register(svc, method, fn, NULL, user, 0, run_in_worker, executor);
 }
 
-int service_add_method_worker(service_t *svc, const char *method, handler_fn fn, void *user) {
+int service_add_method_worker(service_t *svc, const char *method, handler_fn fn, void *user)
+{
     return service_method_register(svc, method, fn, NULL, user, 0, 1, NULL);
 }
 
-static int service_add_sync_ex(service_t *svc, const char *method, sync_handler_fn fn,
-                               void *user, const service_method_options_t *options) {
+static int service_add_sync_ex(service_t *svc,
+                               const char *method,
+                               sync_handler_fn fn,
+                               void *user,
+                               const service_method_options_t *options)
+{
     zri_sync_bridge_t *bridge;
     int run_in_worker;
     const service_executor_t *executor;
@@ -1185,38 +1280,49 @@ static int service_add_sync_ex(service_t *svc, const char *method, sync_handler_
     }
     bridge->fn = fn;
     bridge->user = user;
-    rc = service_method_register(svc, method, sync_method_bridge, NULL, bridge, 1,
-                                 run_in_worker, executor);
+    rc = service_method_register(
+        svc, method, sync_method_bridge, NULL, bridge, 1, run_in_worker, executor);
     if (rc != OK) {
         free(bridge);
     }
     return rc;
 }
 
-int service_add_sync_method(service_t *svc, const char *method, sync_handler_fn fn,
-                            void *user) {
+int service_add_sync_method(service_t *svc, const char *method, sync_handler_fn fn, void *user)
+{
     return service_add_sync_ex(svc, method, fn, user, NULL);
 }
 
-int service_add_sync_method_ex(service_t *svc, const char *method, sync_handler_fn fn,
-                               void *user, const service_method_options_t *options) {
+int service_add_sync_method_ex(service_t *svc,
+                               const char *method,
+                               sync_handler_fn fn,
+                               void *user,
+                               const service_method_options_t *options)
+{
     return service_add_sync_ex(svc, method, fn, user, options);
 }
 
-int service_add_sync_method_worker(service_t *svc, const char *method, sync_handler_fn fn,
-                                   void *user) {
+int service_add_sync_method_worker(service_t *svc,
+                                   const char *method,
+                                   sync_handler_fn fn,
+                                   void *user)
+{
     service_method_options_t options = SERVICE_METHOD_OPTIONS_INIT;
     options.exec = SERVICE_EXEC_WORKER;
     return service_add_sync_ex(svc, method, fn, user, &options);
 }
 
-int service_add_stream_method(service_t *svc, const char *method,
-                              chunk_handler_fn fn, void *user) {
+int service_add_stream_method(service_t *svc, const char *method, chunk_handler_fn fn, void *user)
+{
     return service_method_register(svc, method, NULL, fn, user, 0, 0, NULL);
 }
 
-int service_add_stream_method_ex(service_t *svc, const char *method, chunk_handler_fn fn,
-                                 void *user, const service_method_options_t *options) {
+int service_add_stream_method_ex(service_t *svc,
+                                 const char *method,
+                                 chunk_handler_fn fn,
+                                 void *user,
+                                 const service_method_options_t *options)
+{
     int run_in_worker;
     const service_executor_t *executor;
     int rc = service_parse_exec(options, 1, &run_in_worker, &executor);

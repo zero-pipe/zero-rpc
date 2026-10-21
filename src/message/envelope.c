@@ -4,12 +4,16 @@
 
 #include <string.h>
 
-size_t zri_envelope_size(size_t route_len, size_t metadata_len, size_t status_msg_len,
-                         size_t payload_len) {
+size_t zri_envelope_size(size_t route_len,
+                         size_t metadata_len,
+                         size_t status_msg_len,
+                         size_t payload_len)
+{
     return (size_t)ENVELOPE_HDR_LEN + route_len + metadata_len + status_msg_len + payload_len;
 }
 
-size_t zri_envelope_encode(uint8_t *buf, size_t cap, const zri_envelope_t *envelope) {
+size_t zri_envelope_encode(uint8_t *buf, size_t cap, const zri_envelope_t *envelope)
+{
     size_t route_len;
     size_t need;
     uint8_t *p;
@@ -24,8 +28,8 @@ size_t zri_envelope_encode(uint8_t *buf, size_t cap, const zri_envelope_t *envel
         (envelope->status_msg_len > 0 && !envelope->status_msg)) {
         return 0;
     }
-    need = zri_envelope_size(route_len, envelope->metadata_len, envelope->status_msg_len,
-                             envelope->payload_len);
+    need = zri_envelope_size(
+        route_len, envelope->metadata_len, envelope->status_msg_len, envelope->payload_len);
     if (need > cap) {
         return 0;
     }
@@ -63,7 +67,8 @@ size_t zri_envelope_encode(uint8_t *buf, size_t cap, const zri_envelope_t *envel
     return need;
 }
 
-int zri_envelope_decode(const uint8_t *buf, size_t len, zri_envelope_t *view) {
+int zri_envelope_decode(const uint8_t *buf, size_t len, zri_envelope_t *view)
+{
     uint16_t route_len;
     uint16_t metadata_len;
     uint16_t status_msg_len;
@@ -96,8 +101,11 @@ int zri_envelope_decode(const uint8_t *buf, size_t len, zri_envelope_t *view) {
     return OK;
 }
 
-void zri_envelope_to_message(const zri_envelope_t *envelope, char *route_buf, size_t route_cap,
-                             zri_message_t *out) {
+void zri_envelope_to_message(const zri_envelope_t *envelope,
+                             char *route_buf,
+                             size_t route_cap,
+                             zri_message_t *out)
+{
     size_t route_len;
 
     if (!envelope || !route_buf || route_cap == 0 || !out) {
@@ -129,8 +137,7 @@ void zri_envelope_to_message(const zri_envelope_t *envelope, char *route_buf, si
     out->payload.encoding = envelope->encoding;
     if (envelope->stream_flags & STREAM_FLAG_STREAM) {
         out->has_stream = 1;
-        out->stream.flags =
-            envelope->stream_flags & (STREAM_FIRST | STREAM_LAST | STREAM_CANCEL);
+        out->stream.flags = envelope->stream_flags & (STREAM_FIRST | STREAM_LAST | STREAM_CANCEL);
         out->stream.stream_id = envelope->stream_id;
         out->stream.offset = envelope->stream_offset;
         out->stream.total_size = envelope->stream_total_size;

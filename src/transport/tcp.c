@@ -27,8 +27,8 @@
 typedef struct zri_rx_acc {
     uint8_t *buf;
     size_t cap;
-    size_t rpos; /* 已消费 */
-    size_t wpos; /* 已写入 */
+    size_t rpos;        /* 已消费 */
+    size_t wpos;        /* 已写入 */
     ntk_buf_pool *pool; /* buf 所属池；跨线程释放不能从 current poller 推断 */
 } zri_rx_acc_t;
 
@@ -61,7 +61,8 @@ static void tcp_tick_cb(void *user);
 
 /* ---- 接收累积 ---- */
 
-static void rx_acc_init(zri_rx_acc_t *a) {
+static void rx_acc_init(zri_rx_acc_t *a)
+{
     a->buf = NULL;
     a->cap = 0;
     a->rpos = 0;
@@ -69,7 +70,8 @@ static void rx_acc_init(zri_rx_acc_t *a) {
     a->pool = NULL;
 }
 
-static void rx_acc_free(zri_rx_acc_t *a) {
+static void rx_acc_free(zri_rx_acc_t *a)
+{
     if (!a || !a->buf) {
         return;
     }
@@ -81,7 +83,8 @@ static void rx_acc_free(zri_rx_acc_t *a) {
     rx_acc_init(a);
 }
 
-static int rx_acc_reserve(zri_rx_acc_t *a, size_t extra) {
+static int rx_acc_reserve(zri_rx_acc_t *a, size_t extra)
+{
     ntk_poller *poller;
     ntk_buf_pool *pool;
     size_t used = a->wpos - a->rpos;
@@ -142,8 +145,11 @@ static int rx_acc_reserve(zri_rx_acc_t *a, size_t extra) {
 
 /* ---- 解析并投递完整帧 ---- */
 
-static void tcp_link_dispatch(zri_tcp_transport_t *t, zri_tcp_link_t *link, const uint8_t *body,
-                              size_t body_len) {
+static void tcp_link_dispatch(zri_tcp_transport_t *t,
+                              zri_tcp_link_t *link,
+                              const uint8_t *body,
+                              size_t body_len)
+{
     zri_envelope_t env;
     zri_message_t msg;
     char route[MAX_ROUTE];
@@ -158,7 +164,8 @@ static void tcp_link_dispatch(zri_tcp_transport_t *t, zri_tcp_link_t *link, cons
     zri_node_on_message(t->base.node, &t->base, &msg);
 }
 
-static void tcp_link_consume(zri_tcp_transport_t *t, zri_tcp_link_t *link) {
+static void tcp_link_consume(zri_tcp_transport_t *t, zri_tcp_link_t *link)
+{
     size_t max_frame = (size_t)t->base.max_msg_bytes + MAX_ROUTE + 64;
     zri_rx_acc_t *a = &link->rx;
 
@@ -190,8 +197,11 @@ static void tcp_link_consume(zri_tcp_transport_t *t, zri_tcp_link_t *link) {
     }
 }
 
-static void tcp_link_on_bytes(zri_tcp_transport_t *t, zri_tcp_link_t *link, const void *data,
-                              size_t len) {
+static void tcp_link_on_bytes(zri_tcp_transport_t *t,
+                              zri_tcp_link_t *link,
+                              const void *data,
+                              size_t len)
+{
     if (!link || !data || len == 0) {
         return;
     }
@@ -205,7 +215,8 @@ static void tcp_link_on_bytes(zri_tcp_transport_t *t, zri_tcp_link_t *link, cons
 
 /* ---- 出站发送 ---- */
 
-static void tcp_link_flush_tx(zri_tcp_transport_t *t, zri_tcp_link_t *link) {
+static void tcp_link_flush_tx(zri_tcp_transport_t *t, zri_tcp_link_t *link)
+{
     (void)t;
     if (link->server_side || !link->connected || !link->client) {
         return;
@@ -236,8 +247,13 @@ static void tcp_link_flush_tx(zri_tcp_transport_t *t, zri_tcp_link_t *link) {
  * 发送一帧。快路径直接 sendv(header, payload)，零用户态拷贝；
  * 半写/积压时只把未写后缀拷进待写队列（一次拷贝），随后尽力冲刷。
  */
-static int tcp_link_emit(zri_tcp_transport_t *t, zri_tcp_link_t *link, const uint8_t *header,
-                         size_t header_len, const void *payload, size_t payload_len) {
+static int tcp_link_emit(zri_tcp_transport_t *t,
+                         zri_tcp_link_t *link,
+                         const uint8_t *header,
+                         size_t header_len,
+                         const void *payload,
+                         size_t payload_len)
+{
     ntk_poller *poller = ntk_poller_current();
     size_t total = header_len + payload_len;
 
@@ -330,8 +346,8 @@ static int tcp_link_emit(zri_tcp_transport_t *t, zri_tcp_link_t *link, const uin
             }
         } else if (payload_len) {
             size_t off = (size_t)sent - header_len;
-            if (zri_iobuf_append_copy(&link->tx, poller, (const uint8_t *)payload + off,
-                                       payload_len - off) != 0) {
+            if (zri_iobuf_append_copy(
+                    &link->tx, poller, (const uint8_t *)payload + off, payload_len - off) != 0) {
                 return ERR_NOMEM;
             }
         }
@@ -343,7 +359,8 @@ static int tcp_link_emit(zri_tcp_transport_t *t, zri_tcp_link_t *link, const uin
 
 /* ---- 连接查找（各自 poller 独占一行，无锁） ---- */
 
-static int io_of_poller(zri_tcp_transport_t *t, ntk_poller *poller) {
+static int io_of_poller(zri_tcp_transport_t *t, ntk_poller *poller)
+{
     int i;
     if (!poller) {
         return -1;
@@ -356,8 +373,11 @@ static int io_of_poller(zri_tcp_transport_t *t, ntk_poller *poller) {
     return -1;
 }
 
-static zri_tcp_link_t *link_find_out(zri_tcp_transport_t *t, const char *ip, uint16_t port,
-                                      int create) {
+static zri_tcp_link_t *link_find_out(zri_tcp_transport_t *t,
+                                     const char *ip,
+                                     uint16_t port,
+                                     int create)
+{
     zri_tcp_link_t *row = t->links[0]; /* 出站固定 io0 */
     int i;
     int free_slot = -1;
@@ -408,8 +428,10 @@ static zri_tcp_link_t *link_find_out(zri_tcp_transport_t *t, const char *ip, uin
     }
 }
 
-static zri_tcp_link_t *link_for_session(zri_tcp_transport_t *t, ntk_tcp_session *session,
-                                         int create) {
+static zri_tcp_link_t *link_for_session(zri_tcp_transport_t *t,
+                                        ntk_tcp_session *session,
+                                        int create)
+{
     int io = io_of_poller(t, ntk_tcp_session_poller(session));
     zri_tcp_link_t *row;
     int i;
@@ -453,7 +475,8 @@ static zri_tcp_link_t *link_for_session(zri_tcp_transport_t *t, ntk_tcp_session 
     }
 }
 
-static zri_tcp_link_t *link_for_client(zri_tcp_transport_t *t, ntk_tcp_client *client) {
+static zri_tcp_link_t *link_for_client(zri_tcp_transport_t *t, ntk_tcp_client *client)
+{
     zri_tcp_link_t *row = t->links[0];
     int i;
     for (i = 0; i < TCP_LINKS_PER_IO; i++) {
@@ -466,7 +489,8 @@ static zri_tcp_link_t *link_for_client(zri_tcp_transport_t *t, ntk_tcp_client *c
 
 /* ---- 服务端会话回调 ---- */
 
-static void tcp_srv_on_recv(ntk_tcp_session *session, const void *data, size_t len, void *user) {
+static void tcp_srv_on_recv(ntk_tcp_session *session, const void *data, size_t len, void *user)
+{
     zri_tcp_transport_t *t = (zri_tcp_transport_t *)user;
     zri_tcp_link_t *link;
     if (!t) {
@@ -478,7 +502,8 @@ static void tcp_srv_on_recv(ntk_tcp_session *session, const void *data, size_t l
     }
 }
 
-static void tcp_srv_on_error(ntk_tcp_session *session, void *user) {
+static void tcp_srv_on_error(ntk_tcp_session *session, void *user)
+{
     zri_tcp_transport_t *t = (zri_tcp_transport_t *)user;
     zri_tcp_link_t *link;
     if (!t) {
@@ -495,7 +520,8 @@ static void tcp_srv_on_error(ntk_tcp_session *session, void *user) {
 
 /* ---- 客户端回调 ---- */
 
-static void tcp_client_on_connect(ntk_tcp_client *client, void *user) {
+static void tcp_client_on_connect(ntk_tcp_client *client, void *user)
+{
     zri_tcp_transport_t *t = (zri_tcp_transport_t *)user;
     zri_tcp_link_t *link;
     if (!t) {
@@ -508,7 +534,8 @@ static void tcp_client_on_connect(ntk_tcp_client *client, void *user) {
     }
 }
 
-static void tcp_client_on_recv(ntk_tcp_client *client, const void *data, size_t len, void *user) {
+static void tcp_client_on_recv(ntk_tcp_client *client, const void *data, size_t len, void *user)
+{
     zri_tcp_transport_t *t = (zri_tcp_transport_t *)user;
     zri_tcp_link_t *link;
     if (!t) {
@@ -520,7 +547,8 @@ static void tcp_client_on_recv(ntk_tcp_client *client, const void *data, size_t 
     }
 }
 
-static void tcp_client_on_error(ntk_tcp_client *client, void *user) {
+static void tcp_client_on_error(ntk_tcp_client *client, void *user)
+{
     zri_tcp_transport_t *t = (zri_tcp_transport_t *)user;
     zri_tcp_link_t *link;
     if (!t) {
@@ -539,7 +567,8 @@ static void tcp_client_on_error(ntk_tcp_client *client, void *user) {
 
 /* ---- 传输接口 ---- */
 
-static int tcp_start(zri_transport_t *base) {
+static int tcp_start(zri_transport_t *base)
+{
     zri_tcp_transport_t *t = (zri_tcp_transport_t *)base;
     ntk_tcp_server_opts_t opts;
     ntk_tcp_session_ops_t sops;
@@ -581,7 +610,8 @@ static int tcp_start(zri_transport_t *base) {
     return OK;
 }
 
-static void tcp_free_link(zri_tcp_link_t *link) {
+static void tcp_free_link(zri_tcp_link_t *link)
+{
     if (!link || !link->used) {
         return;
     }
@@ -594,7 +624,8 @@ static void tcp_free_link(zri_tcp_link_t *link) {
     link->used = 0;
 }
 
-static void tcp_stop(zri_transport_t *base) {
+static void tcp_stop(zri_transport_t *base)
+{
     zri_tcp_transport_t *t = (zri_tcp_transport_t *)base;
     int i, j;
     if (t->tick_timer) {
@@ -614,8 +645,8 @@ static void tcp_stop(zri_transport_t *base) {
     }
 }
 
-static int tcp_send_common(zri_tcp_transport_t *t, zri_tcp_link_t *link,
-                           const zri_message_t *msg) {
+static int tcp_send_common(zri_tcp_transport_t *t, zri_tcp_link_t *link, const zri_message_t *msg)
+{
     size_t route_len = (msg && msg->route) ? strlen(msg->route) : 0;
     size_t metadata_len = msg ? msg->metadata_len : 0;
     size_t status_len = msg ? msg->status_msg_len : 0;
@@ -627,10 +658,10 @@ static int tcp_send_common(zri_tcp_transport_t *t, zri_tcp_link_t *link,
     if (!t || !msg) {
         return ERR_INVALID;
     }
-    if (body_len > (size_t)t->base.max_msg_bytes + MAX_ROUTE + METADATA_WIRE_MAX +
-                       STATUS_MSG_MAX + ENVELOPE_HDR_LEN ||
-        need > (size_t)t->base.max_msg_bytes + MAX_ROUTE + METADATA_WIRE_MAX + STATUS_MSG_MAX +
-                    64) {
+    if (body_len > (size_t)t->base.max_msg_bytes + MAX_ROUTE + METADATA_WIRE_MAX + STATUS_MSG_MAX +
+                ENVELOPE_HDR_LEN ||
+        need >
+            (size_t)t->base.max_msg_bytes + MAX_ROUTE + METADATA_WIRE_MAX + STATUS_MSG_MAX + 64) {
         return ERR_TOOBIG;
     }
     if (!link) {
@@ -666,12 +697,12 @@ static int tcp_send_common(zri_tcp_transport_t *t, zri_tcp_link_t *link,
     header_envelope.payload_len = 0;
 
     if (route_len < MAX_ROUTE) {
-        uint8_t header[TCP_HDR_LEN + ENVELOPE_HDR_LEN + MAX_ROUTE + METADATA_WIRE_MAX +
-                       STATUS_MSG_MAX];
+        uint8_t
+            header[TCP_HDR_LEN + ENVELOPE_HDR_LEN + MAX_ROUTE + METADATA_WIRE_MAX + STATUS_MSG_MAX];
         size_t header_len = TCP_HDR_LEN + ENVELOPE_HDR_LEN + route_len + metadata_len + status_len;
         zri_put_u32(header, (uint32_t)body_len);
-        if (zri_envelope_encode(header + TCP_HDR_LEN, sizeof(header) - TCP_HDR_LEN,
-                                 &header_envelope) !=
+        if (zri_envelope_encode(
+                header + TCP_HDR_LEN, sizeof(header) - TCP_HDR_LEN, &header_envelope) !=
             ENVELOPE_HDR_LEN + route_len + metadata_len + status_len) {
             return ERR_INVALID;
         }
@@ -686,8 +717,7 @@ static int tcp_send_common(zri_tcp_transport_t *t, zri_tcp_link_t *link,
             return ERR_NOMEM;
         }
         zri_put_u32(header, (uint32_t)body_len);
-        if (zri_envelope_encode(header + TCP_HDR_LEN, header_len - TCP_HDR_LEN,
-                                 &header_envelope) !=
+        if (zri_envelope_encode(header + TCP_HDR_LEN, header_len - TCP_HDR_LEN, &header_envelope) !=
             ENVELOPE_HDR_LEN + route_len + metadata_len + status_len) {
             free(header);
             return ERR_INVALID;
@@ -698,7 +728,8 @@ static int tcp_send_common(zri_tcp_transport_t *t, zri_tcp_link_t *link,
     }
 }
 
-static int tcp_send(zri_transport_t *base, const zri_message_t *msg) {
+static int tcp_send(zri_transport_t *base, const zri_message_t *msg)
+{
     zri_tcp_transport_t *t = (zri_tcp_transport_t *)base;
     if (!msg || !msg->peer_ip || !msg->peer_port) {
         return ERR_INVALID;
@@ -706,7 +737,8 @@ static int tcp_send(zri_transport_t *base, const zri_message_t *msg) {
     return tcp_send_common(t, NULL, msg);
 }
 
-static int tcp_reply(zri_transport_t *base, const zri_message_t *msg) {
+static int tcp_reply(zri_transport_t *base, const zri_message_t *msg)
+{
     zri_tcp_transport_t *t = (zri_tcp_transport_t *)base;
     zri_tcp_link_t *link;
     if (!msg) {
@@ -719,7 +751,8 @@ static int tcp_reply(zri_transport_t *base, const zri_message_t *msg) {
     return tcp_send_common(t, link, msg);
 }
 
-static void tcp_tick_cb(void *user) {
+static void tcp_tick_cb(void *user)
+{
     zri_tcp_transport_t *t = (zri_tcp_transport_t *)user;
     zri_tcp_link_t *row = t->links[0]; /* 只有 io0 上的出站连接需要冲刷 */
     int i;
@@ -732,14 +765,11 @@ static void tcp_tick_cb(void *user) {
 }
 
 static const zri_transport_ops_t g_tcp_ops = {
-    tcp_start,
-    tcp_stop,
-    tcp_send,
-    tcp_reply,
-    NULL, /* TCP 不使用 RTP/RTCP，无按对端 RTCP 统计 */
+    tcp_start, tcp_stop, tcp_send, tcp_reply, NULL, /* TCP 不使用 RTP/RTCP，无按对端 RTCP 统计 */
 };
 
-zri_transport_t *zri_tcp_transport_create(void) {
+zri_transport_t *zri_tcp_transport_create(void)
+{
     zri_tcp_transport_t *t = (zri_tcp_transport_t *)calloc(1, sizeof(*t));
     if (!t) {
         return NULL;

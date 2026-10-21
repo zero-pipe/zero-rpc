@@ -62,15 +62,17 @@ int service_table_find_id(const char *service, const char *method, uint16_t *out
 
 /* ---- 声明宏 ---- */
 /* 声明一行方法，只在 SERVICE_DEFINE() 内使用。 */
-#define SERVICE_METHOD(id, name) {(uint16_t)(id), (name)}
+#define SERVICE_METHOD(id, name) { (uint16_t)(id), (name) }
 
 /* 声明单服务表；展开出 <table>_methods / <table>_service / <table> 三个静态对象。 */
-#define SERVICE_DEFINE(table, service_id, service_name, ...)                         \
-    static const method_descriptor_t table##_methods[] = {__VA_ARGS__};              \
-    static const service_descriptor_t table##_service = {                            \
-        (uint16_t)(service_id), (service_name), table##_methods,                          \
-        sizeof(table##_methods) / sizeof(table##_methods[0])};                            \
-    static const service_table_t table = {&table##_service, 1u}
+#define SERVICE_DEFINE(table, service_id, service_name, ...)                                \
+    static const method_descriptor_t table##_methods[] = { __VA_ARGS__ };                   \
+    static const service_descriptor_t table##_service = { (uint16_t)(service_id),           \
+                                                          (service_name),                   \
+                                                          table##_methods,                  \
+                                                          sizeof(table##_methods) /         \
+                                                              sizeof(table##_methods[0]) }; \
+    static const service_table_t table = { &table##_service, 1u }
 
 #ifdef __cplusplus
 }

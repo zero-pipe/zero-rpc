@@ -82,7 +82,7 @@ typedef struct chunk {
 
 /* 传输层透传的 stream 元数据；unary 消息为 NULL。 */
 typedef struct stream_meta {
-    unsigned flags;      /* STREAM_FIRST / STREAM_LAST */
+    unsigned flags; /* STREAM_FIRST / STREAM_LAST */
     uint32_t stream_id;
     uint64_t offset;
     uint64_t total_size;
@@ -146,8 +146,8 @@ typedef struct request {
 } request_t;
 
 typedef struct response {
-    int status;             /* 应用定义，0 建议表示成功 */
-    const char *message;    /* 状态消息，可为 NULL；仅回调内有效 */
+    int status;          /* 应用定义，0 建议表示成功 */
+    const char *message; /* 状态消息，可为 NULL；仅回调内有效 */
     payload_t payload;
     const metadata_t *metadata; /* 响应 metadata，可为 NULL；仅回调内有效 */
 } response_t;

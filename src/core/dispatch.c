@@ -15,7 +15,8 @@
 #include <string.h>
 
 /* 把响应帧上的 metadata / status message 解析到 pending（按需分配）。 */
-static void pending_attach_response(zri_pending_t *p, const zri_message_t *msg) {
+static void pending_attach_response(zri_pending_t *p, const zri_message_t *msg)
+{
     if (!p) {
         return;
     }
@@ -46,8 +47,8 @@ static void pending_attach_response(zri_pending_t *p, const zri_message_t *msg) 
     }
 }
 
-int zri_node_resolve(node_t *node, const char *service, int prefer_stream,
-                      stub_target_t *out) {
+int zri_node_resolve(node_t *node, const char *service, int prefer_stream, stub_target_t *out)
+{
     transport_kind_t kind;
     endpoint_t endpoint;
 
@@ -55,13 +56,19 @@ int zri_node_resolve(node_t *node, const char *service, int prefer_stream,
         return ERR_INVALID;
     }
     memset(out, 0, sizeof(*out));
-    if (zri_route_lookup_prefer(&node->routes, service, prefer_stream, out->ip, sizeof(out->ip),
-                                 &out->port, &kind, out->scheme, sizeof(out->scheme)) == OK) {
+    if (zri_route_lookup_prefer(&node->routes,
+                                service,
+                                prefer_stream,
+                                out->ip,
+                                sizeof(out->ip),
+                                &out->port,
+                                &kind,
+                                out->scheme,
+                                sizeof(out->scheme)) == OK) {
         out->transport = kind;
         return OK;
     }
-    if (zri_registry_select_prefer(&node->registry, service, prefer_stream, &endpoint) !=
-        OK) {
+    if (zri_registry_select_prefer(&node->registry, service, prefer_stream, &endpoint) != OK) {
         return ERR_NOTFOUND;
     }
     zri_copy_str(out->ip, sizeof(out->ip), endpoint.host, "0.0.0.0");
@@ -71,8 +78,8 @@ int zri_node_resolve(node_t *node, const char *service, int prefer_stream,
     return OK;
 }
 
-static void node_dispatch(node_t *node, zri_transport_t *transport,
-                          const zri_message_t *msg) {
+static void node_dispatch(node_t *node, zri_transport_t *transport, const zri_message_t *msg)
+{
     if (msg->kind == KIND_CANCEL) {
         zri_service_handle_cancel(node, transport, msg);
         return;
@@ -130,16 +137,19 @@ static void node_dispatch(node_t *node, zri_transport_t *transport,
     /* EVENT: 预留，忽略 */
 }
 
-void zri_node_on_message(node_t *node, zri_transport_t *transport,
-                         const zri_message_t *msg) {
+void zri_node_on_message(node_t *node, zri_transport_t *transport, const zri_message_t *msg)
+{
     if (!node || !transport || !msg) {
         return;
     }
     node_dispatch(node, transport, msg);
 }
 
-int zri_node_send(node_t *node, transport_kind_t transport_kind, const char *scheme,
-                   const zri_message_t *msg) {
+int zri_node_send(node_t *node,
+                  transport_kind_t transport_kind,
+                  const char *scheme,
+                  const zri_message_t *msg)
+{
     size_t i;
     if (!node || !msg || !msg->peer_ip || !msg->peer_port) {
         return ERR_INVALID;
@@ -160,10 +170,17 @@ int zri_node_send(node_t *node, transport_kind_t transport_kind, const char *sch
     return ERR_NOTFOUND;
 }
 
-int zri_node_send_call(node_t *node, const stub_target_t *target, const char *service,
-                       const char *method, const payload_t *payload, uint8_t kind,
-                       uint64_t request_id, uint64_t timeout_ms, const void *metadata,
-                       uint16_t metadata_len) {
+int zri_node_send_call(node_t *node,
+                       const stub_target_t *target,
+                       const char *service,
+                       const char *method,
+                       const payload_t *payload,
+                       uint8_t kind,
+                       uint64_t request_id,
+                       uint64_t timeout_ms,
+                       const void *metadata,
+                       uint16_t metadata_len)
+{
     zri_message_t message;
     char route[ROUTE_MAX];
 
@@ -181,7 +198,7 @@ int zri_node_send_call(node_t *node, const stub_target_t *target, const char *se
     message.metadata = metadata;
     message.metadata_len = metadata_len;
     message.route = route;
-    message.payload = payload ? *payload : (payload_t){0};
+    message.payload = payload ? *payload : (payload_t){ 0 };
     message.peer_ip = target->ip;
     message.peer_port = target->port;
     return zri_node_send(node, target->transport, target->scheme, &message);

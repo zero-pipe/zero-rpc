@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 typedef struct proxy_options {
-    uint8_t payload_encoding; /* 写入请求的默认编码标识，0 = 裸字节 */
+    uint8_t payload_encoding;         /* 写入请求的默认编码标识，0 = 裸字节 */
     uint32_t prefer_stream_threshold; /* 0=disabled; larger payloads prefer TCP */
 } proxy_options_t;
 
@@ -32,7 +32,10 @@ typedef struct proxy_options {
  */
 typedef struct proxy_interceptor {
     void *ctx;
-    int (*before)(void *ctx, const char *service, const char *method, metadata_t *metadata,
+    int (*before)(void *ctx,
+                  const char *service,
+                  const char *method,
+                  metadata_t *metadata,
                   uint64_t *timeout_ms);
     void (*after)(void *ctx, int status, const response_t *resp);
 } proxy_interceptor_t;
@@ -49,8 +52,7 @@ void proxy_destroy(proxy_t *proxy);
  * 直接指定目标数据端点（ip:port + 传输种类），调用跳过服务发现。
  * 适合已知对端地址的高性能场景。
  */
-int proxy_set_endpoint(proxy_t *proxy, const char *ip, uint16_t port,
-                            transport_kind_t transport);
+int proxy_set_endpoint(proxy_t *proxy, const char *ip, uint16_t port, transport_kind_t transport);
 /* 直接指定目标端点 URI（如 tcp://127.0.0.1:8080、dds://...），跳过服务发现。 */
 int proxy_set_endpoint_uri(proxy_t *proxy, const char *endpoint);
 
@@ -63,35 +65,61 @@ int proxy_set_endpoint_uri(proxy_t *proxy, const char *endpoint);
  * payload 所有权：框架在返回前复制 payload（包括跨线程调用）；调用方可在
  * 本函数返回后立即释放 payload->data，无需等回调。框架不会接管或释放它。
  */
-int proxy_call_async(proxy_t *proxy, const char *service, const char *method,
-                          const payload_t *payload, response_fn cb, void *user,
-                          uint64_t timeout_ms, uint64_t *out_request_id);
+int proxy_call_async(proxy_t *proxy,
+                     const char *service,
+                     const char *method,
+                     const payload_t *payload,
+                     response_fn cb,
+                     void *user,
+                     uint64_t timeout_ms,
+                     uint64_t *out_request_id);
 /* 带 metadata 的异步请求。 */
-int proxy_call_async_ex(proxy_t *proxy, const char *service, const char *method,
-                        const payload_t *payload, const metadata_t *metadata, response_fn cb,
-                        void *user, uint64_t timeout_ms, uint64_t *out_request_id);
+int proxy_call_async_ex(proxy_t *proxy,
+                        const char *service,
+                        const char *method,
+                        const payload_t *payload,
+                        const metadata_t *metadata,
+                        response_fn cb,
+                        void *user,
+                        uint64_t timeout_ms,
+                        uint64_t *out_request_id);
 
 /*
  * 单向事件：只发送、不等待响应（EVENT）。发送在 poller 线程完成。
  * out_request_id 可空；非空时回填本次事件的关联 ID。
  * 与 proxy_call_async 相同，payload 在返回前已复制，调用方可立即释放。
  */
-int proxy_call_event(proxy_t *proxy, const char *service, const char *method,
-                          const payload_t *payload, uint64_t *out_request_id);
-int proxy_call_event_ex(proxy_t *proxy, const char *service, const char *method,
-                        const payload_t *payload, const metadata_t *metadata,
+int proxy_call_event(proxy_t *proxy,
+                     const char *service,
+                     const char *method,
+                     const payload_t *payload,
+                     uint64_t *out_request_id);
+int proxy_call_event_ex(proxy_t *proxy,
+                        const char *service,
+                        const char *method,
+                        const payload_t *payload,
+                        const metadata_t *metadata,
                         uint64_t *out_request_id);
 
 /*
  * 同步请求：阻塞直到响应、错误或超时。成功时 response->payload 由内部缓冲持有，
  * 用完调用 response_release()。禁止在 poller 线程回调里调用。
  */
-int proxy_call_sync(proxy_t *proxy, const char *service, const char *method,
-                         const payload_t *request, response_t *response,
-                         uint64_t timeout_ms, uint64_t *out_request_id);
-int proxy_call_sync_ex(proxy_t *proxy, const char *service, const char *method,
-                       const payload_t *request, const metadata_t *metadata,
-                       response_t *response, uint64_t timeout_ms, uint64_t *out_request_id);
+int proxy_call_sync(proxy_t *proxy,
+                    const char *service,
+                    const char *method,
+                    const payload_t *request,
+                    response_t *response,
+                    uint64_t timeout_ms,
+                    uint64_t *out_request_id);
+int proxy_call_sync_ex(proxy_t *proxy,
+                       const char *service,
+                       const char *method,
+                       const payload_t *request,
+                       const metadata_t *metadata,
+                       response_t *response,
+                       uint64_t timeout_ms,
+                       uint64_t *out_request_id);
 
 /* 释放 proxy_call_sync 填出的响应缓冲并清零。 */
 void response_release(response_t *response);
@@ -102,19 +130,33 @@ int proxy_cancel(proxy_t *proxy, uint64_t request_id);
 
 /* ---- 流式调用 ---- */
 /* 客户端请求为普通 unary，响应按 chunk 回调，直到 LAST。 */
-int proxy_call_stream(proxy_t *proxy, const char *service, const char *method,
-                           const payload_t *request, response_chunk_fn on_chunk,
-                           stream_done_fn on_done, void *user, uint64_t timeout_ms,
-                           uint64_t *out_request_id);
+int proxy_call_stream(proxy_t *proxy,
+                      const char *service,
+                      const char *method,
+                      const payload_t *request,
+                      response_chunk_fn on_chunk,
+                      stream_done_fn on_done,
+                      void *user,
+                      uint64_t timeout_ms,
+                      uint64_t *out_request_id);
 
 /* 打开客户端流。 */
-int proxy_stream_open(proxy_t *proxy, const char *service, const char *method,
-                           response_fn cb, void *user, uint64_t timeout_ms,
-                           stream_t **out_stream);
+int proxy_stream_open(proxy_t *proxy,
+                      const char *service,
+                      const char *method,
+                      response_fn cb,
+                      void *user,
+                      uint64_t timeout_ms,
+                      stream_t **out_stream);
 /* 双向流：请求分片发送，同时接收响应分片。 */
-int proxy_stream_open_bidi(proxy_t *proxy, const char *service, const char *method,
-                                response_chunk_fn on_chunk, stream_done_fn on_done,
-                                void *user, uint64_t timeout_ms, stream_t **out_stream);
+int proxy_stream_open_bidi(proxy_t *proxy,
+                           const char *service,
+                           const char *method,
+                           response_chunk_fn on_chunk,
+                           stream_done_fn on_done,
+                           void *user,
+                           uint64_t timeout_ms,
+                           stream_t **out_stream);
 
 /*
  * 流式调用：分片发送请求，最后一个 chunk 必须带 STREAM_LAST。

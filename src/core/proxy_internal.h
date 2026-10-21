@@ -58,15 +58,28 @@ struct stream {
     int closed;
 };
 
-int zri_proxy_resolve(proxy_t *proxy, const char *service, char *ip_out, size_t ip_cap,
-                       uint16_t *port_out, transport_kind_t *transport_out,
-                       char *scheme_out, size_t scheme_cap, int prefer_stream);
+int zri_proxy_resolve(proxy_t *proxy,
+                      const char *service,
+                      char *ip_out,
+                      size_t ip_cap,
+                      uint16_t *port_out,
+                      transport_kind_t *transport_out,
+                      char *scheme_out,
+                      size_t scheme_cap,
+                      int prefer_stream);
 
 /* stub.c：带流式回调的内部调用入口；供 proxy 复用。 */
-int zri_stub_call_ex(stub_t *stub, const char *service, const char *method,
-                      const payload_t *payload, response_fn cb,
-                      response_chunk_fn chunk_cb, stream_done_fn done_cb,
-                      int streaming, void *user, uint64_t timeout_ms, uint64_t *out_request_id,
-                      const metadata_t *metadata);
+int zri_stub_call_ex(stub_t *stub,
+                     const char *service,
+                     const char *method,
+                     const payload_t *payload,
+                     response_fn cb,
+                     response_chunk_fn chunk_cb,
+                     stream_done_fn done_cb,
+                     int streaming,
+                     void *user,
+                     uint64_t timeout_ms,
+                     uint64_t *out_request_id,
+                     const metadata_t *metadata);
 
 #endif /* PROXY_INTERNAL_H */

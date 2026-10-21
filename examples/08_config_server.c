@@ -10,13 +10,15 @@
 #define RPC_LOG_TAG "example"
 #include <log.h>
 
-static void echo_handler(call_t *call, const request_t *req, void *user) {
+static void echo_handler(call_t *call, const request_t *req, void *user)
+{
     (void)user;
     /* payload 对框架透明：原样回显。 */
     reply(call, 0, &req->payload);
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char **argv)
+{
     const char *path = argc > 1 ? argv[1] : "08_config_server.json";
     config_t cfg;
     node_t *node = NULL;

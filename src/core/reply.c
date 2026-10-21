@@ -18,10 +18,16 @@
  * 由请求上下文派生响应上下文：保留路由/回程 token，切换 kind 与 payload。
  * 这样 reply 路径与普通发送共用同一个 zri_message_t 抽象。
  */
-static int send_reply(zri_transport_t *transport, const zri_message_t *request, int status,
-                      const void *metadata, uint16_t metadata_len, const char *message,
-                      uint16_t message_len, const payload_t *payload,
-                      const stream_meta_t *stream) {
+static int send_reply(zri_transport_t *transport,
+                      const zri_message_t *request,
+                      int status,
+                      const void *metadata,
+                      uint16_t metadata_len,
+                      const char *message,
+                      uint16_t message_len,
+                      const payload_t *payload,
+                      const stream_meta_t *stream)
+{
     zri_message_t reply;
     if (!transport || !request) {
         return ERR_STATE;
@@ -38,7 +44,7 @@ static int send_reply(zri_transport_t *transport, const zri_message_t *request, 
     reply.metadata_len = metadata_len;
     reply.status_msg = message;
     reply.status_msg_len = message_len;
-    reply.payload = payload ? *payload : (payload_t){0};
+    reply.payload = payload ? *payload : (payload_t){ 0 };
     if (stream) {
         reply.stream = *stream;
         reply.has_stream = 1;
@@ -47,7 +53,8 @@ static int send_reply(zri_transport_t *transport, const zri_message_t *request, 
 }
 
 /* 从 call_t 还原请求上下文（异步 reply 时请求视图已失效，只保留寻址信息）。 */
-static void call_request_context(const call_t *call, zri_message_t *out) {
+static void call_request_context(const call_t *call, zri_message_t *out)
+{
     memset(out, 0, sizeof(*out));
     out->request_id = call->msg_id;
     out->peer_ip = call->peer_ip;
@@ -59,7 +66,8 @@ static void call_request_context(const call_t *call, zri_message_t *out) {
  * call 可能来自 poller 的 zri_mem 池，也可能来自 worker 复用池；统一交给
  * zri_worker_call_free 按来源回收，避免对池对象误用 zri_mem_free。
  */
-static void call_release(call_t *call) {
+static void call_release(call_t *call)
+{
     if (call) {
         zri_worker_call_free(call->node, call);
     }
@@ -92,7 +100,8 @@ typedef struct zri_reply_task {
     uint64_t stream_offset;
 } zri_reply_task_t;
 
-static void reply_task_destroy(zri_reply_task_t *t) {
+static void reply_task_destroy(zri_reply_task_t *t)
+{
     if (!t) {
         return;
     }
@@ -106,7 +115,8 @@ static void reply_task_destroy(zri_reply_task_t *t) {
     }
 }
 
-static void reply_task_fn(void *user) {
+static void reply_task_fn(void *user)
+{
     zri_reply_task_t *t = (zri_reply_task_t *)user;
     zri_message_t request;
     payload_t payload;
@@ -135,9 +145,15 @@ static void reply_task_fn(void *user) {
         stream.offset = t->stream_offset;
         stream_ptr = &stream;
     }
-    (void)send_reply(t->transport, &request, t->status, t->metadata_len ? t->metadata : NULL,
-                     t->metadata_len, t->message_len ? t->message : NULL, t->message_len,
-                     &payload, stream_ptr);
+    (void)send_reply(t->transport,
+                     &request,
+                     t->status,
+                     t->metadata_len ? t->metadata : NULL,
+                     t->metadata_len,
+                     t->message_len ? t->message : NULL,
+                     t->message_len,
+                     &payload,
+                     stream_ptr);
     reply_task_destroy(t);
 }
 
@@ -145,9 +161,14 @@ static void reply_task_fn(void *user) {
  * 把回复拷成任务回投 call->poller。release_call 非 0 时，任务接管 call
  * （unary 回复 / STREAM_LAST）；分块响应的中间 chunk 保留 call。
  */
-static int reply_marshal(call_t *call, int status, const payload_t *payload,
-                         const stream_meta_t *stream, int release_call, const metadata_t *metadata,
-                         const char *message) {
+static int reply_marshal(call_t *call,
+                         int status,
+                         const payload_t *payload,
+                         const stream_meta_t *stream,
+                         int release_call,
+                         const metadata_t *metadata,
+                         const char *message)
+{
     zri_reply_task_t *t;
     int free_call = release_call && !call->stream_owned;
 
@@ -157,9 +178,9 @@ static int reply_marshal(call_t *call, int status, const payload_t *payload,
         }
         return ERR_STATE;
     }
-    t = call->node && call->node->reply_task_pool.lock
-            ? (zri_reply_task_t *)zri_obj_pool_alloc(&call->node->reply_task_pool, sizeof(*t))
-            : (zri_reply_task_t *)calloc(1, sizeof(*t));
+    t = call->node && call->node->reply_task_pool.lock ?
+        (zri_reply_task_t *)zri_obj_pool_alloc(&call->node->reply_task_pool, sizeof(*t)) :
+        (zri_reply_task_t *)calloc(1, sizeof(*t));
     if (!t) {
         if (free_call) {
             call_release(call);
@@ -190,9 +211,8 @@ static int reply_marshal(call_t *call, int status, const payload_t *payload,
         t->message_len = (uint16_t)msg_len;
     }
     if (payload && payload->len > 0 && payload->data) {
-        t->data = payload->len <= sizeof(t->inline_data)
-                      ? t->inline_data
-                      : (uint8_t *)malloc(payload->len);
+        t->data = payload->len <= sizeof(t->inline_data) ? t->inline_data :
+                                                           (uint8_t *)malloc(payload->len);
         if (!t->data) {
             reply_task_destroy(t);
             if (free_call) {
@@ -223,7 +243,8 @@ static int reply_marshal(call_t *call, int status, const payload_t *payload,
     return OK;
 }
 
-void zri_service_send_status(zri_transport_t *transport, const zri_message_t *request, int status) {
+void zri_service_send_status(zri_transport_t *transport, const zri_message_t *request, int status)
+{
     payload_t empty;
     if (!request || request->kind == KIND_EVENT) {
         return;
@@ -234,8 +255,12 @@ void zri_service_send_status(zri_transport_t *transport, const zri_message_t *re
 
 /* ---- 回复 ---- */
 
-void reply_ex(call_t *call, int status, const char *message, const payload_t *payload,
-              const metadata_t *metadata) {
+void reply_ex(call_t *call,
+              int status,
+              const char *message,
+              const payload_t *payload,
+              const metadata_t *metadata)
+{
     zri_message_t request;
     uint8_t meta_buf[METADATA_WIRE_MAX];
     size_t meta_len = 0;
@@ -260,19 +285,27 @@ void reply_ex(call_t *call, int status, const char *message, const payload_t *pa
         return;
     }
     call_request_context(call, &request);
-    (void)send_reply(call->transport, &request, status, meta_len ? meta_buf : NULL,
-                     (uint16_t)meta_len, message,
-                     message ? (uint16_t)strlen(message) : 0, payload, NULL);
+    (void)send_reply(call->transport,
+                     &request,
+                     status,
+                     meta_len ? meta_buf : NULL,
+                     (uint16_t)meta_len,
+                     message,
+                     message ? (uint16_t)strlen(message) : 0,
+                     payload,
+                     NULL);
     if (!call->stream_owned) {
         call_release(call);
     }
 }
 
-void reply(call_t *call, int status, const payload_t *payload) {
+void reply(call_t *call, int status, const payload_t *payload)
+{
     reply_ex(call, status, NULL, payload, NULL);
 }
 
-void reply_bytes(call_t *call, int status, const void *data, size_t len) {
+void reply_bytes(call_t *call, int status, const void *data, size_t len)
+{
     payload_t pl;
     pl.data = data;
     pl.len = len;
@@ -280,7 +313,8 @@ void reply_bytes(call_t *call, int status, const void *data, size_t len) {
     reply(call, status, &pl);
 }
 
-int reply_stream(call_t *call, int status, const chunk_t *chunk) {
+int reply_stream(call_t *call, int status, const chunk_t *chunk)
+{
     zri_message_t request;
     payload_t payload;
     stream_meta_t stream;
@@ -307,8 +341,13 @@ int reply_stream(call_t *call, int status, const chunk_t *chunk) {
         if (last) {
             call->replied = 1;
         }
-        return reply_marshal(call, status, &payload, &stream, last,
-                             chunk ? chunk->metadata : NULL, chunk ? chunk->message : NULL);
+        return reply_marshal(call,
+                             status,
+                             &payload,
+                             &stream,
+                             last,
+                             chunk ? chunk->metadata : NULL,
+                             chunk ? chunk->message : NULL);
     }
 
     if (chunk && chunk->metadata && chunk->metadata->count > 0) {
@@ -317,9 +356,14 @@ int reply_stream(call_t *call, int status, const chunk_t *chunk) {
         }
     }
     call_request_context(call, &request);
-    rc = send_reply(call->transport, &request, status, meta_len ? meta_buf : NULL,
-                    (uint16_t)meta_len, chunk ? chunk->message : NULL,
-                    chunk && chunk->message ? (uint16_t)strlen(chunk->message) : 0, &payload,
+    rc = send_reply(call->transport,
+                    &request,
+                    status,
+                    meta_len ? meta_buf : NULL,
+                    (uint16_t)meta_len,
+                    chunk ? chunk->message : NULL,
+                    chunk && chunk->message ? (uint16_t)strlen(chunk->message) : 0,
+                    &payload,
                     &stream);
     if (chunk && (chunk->flags & STREAM_LAST)) {
         call->replied = 1;

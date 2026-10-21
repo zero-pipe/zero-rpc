@@ -8,25 +8,25 @@
 
 static int g_fail;
 
-#define CHECK(cond)                                                \
-    do {                                                           \
-        if (!(cond)) {                                             \
+#define CHECK(cond)                                                     \
+    do {                                                                \
+        if (!(cond)) {                                                  \
             rpc_log_error("FAIL %s:%d: %s", __FILE__, __LINE__, #cond); \
-            g_fail = 1;                                            \
-        }                                                          \
+            g_fail = 1;                                                 \
+        }                                                               \
     } while (0)
 
-static void test_parse(void) {
-    const char *json =
-        "{"
-        "\"name\":\"n1\",\"transport\":\"tcp\",\"data_port\":9000,"
-        "\"io_threads\":2,\"handler_threads\":3,\"handler_max_concurrency\":64,"
-        "\"mode\":\"static\",\"frag_bytes\":1024,\"max_msg_bytes\":4194304,"
-        "\"discovery\":{\"broadcast\":\"127.0.0.1:41953\",\"hello_interval_ms\":500,"
-        "\"node_ttl_ms\":9000,"
-        "\"peers\":[\"10.0.0.1:41953\"]},"
-        "\"routes\":[{\"service\":\"echo\",\"endpoint\":\"tcp://10.0.0.2:9001\"}]"
-        "}";
+static void test_parse(void)
+{
+    const char *json = "{"
+                       "\"name\":\"n1\",\"transport\":\"tcp\",\"data_port\":9000,"
+                       "\"io_threads\":2,\"handler_threads\":3,\"handler_max_concurrency\":64,"
+                       "\"mode\":\"static\",\"frag_bytes\":1024,\"max_msg_bytes\":4194304,"
+                       "\"discovery\":{\"broadcast\":\"127.0.0.1:41953\",\"hello_interval_ms\":500,"
+                       "\"node_ttl_ms\":9000,"
+                       "\"peers\":[\"10.0.0.1:41953\"]},"
+                       "\"routes\":[{\"service\":\"echo\",\"endpoint\":\"tcp://10.0.0.2:9001\"}]"
+                       "}";
     config_t cfg;
 
     memset(&cfg, 0, sizeof(cfg));
@@ -51,7 +51,8 @@ static void test_parse(void) {
     CHECK(strcmp(cfg.routes[0].endpoint, "tcp://10.0.0.2:9001") == 0);
 }
 
-static void test_defaults(void) {
+static void test_defaults(void)
+{
     config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
     CHECK(config_load("{}", &cfg) == OK);
@@ -62,14 +63,16 @@ static void test_defaults(void) {
     CHECK(strcmp(cfg.discovery_host, "255.255.255.255") == 0);
 }
 
-static void test_bad_json(void) {
+static void test_bad_json(void)
+{
     config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
     CHECK(config_load("{ not json", &cfg) == ERR_INVALID);
     CHECK(config_load(NULL, &cfg) == ERR_INVALID);
 }
 
-static void test_endpoint_model(void) {
+static void test_endpoint_model(void)
+{
     endpoint_t endpoint;
     char text[128];
     CHECK(endpoint_parse("tcp://127.0.0.1:8080", &endpoint) == OK);
@@ -81,14 +84,14 @@ static void test_endpoint_model(void) {
     CHECK(endpoint.transport == TRANSPORT_CUSTOM);
 }
 
-static void test_binding_config(void) {
-    const char *json =
-        "{\"name\":\"dual\",\"mode\":\"static\","
-        "\"bindings\":["
-        "{\"name\":\"tcp\",\"endpoint\":\"tcp://127.0.0.1:8080\"},"
-        "{\"name\":\"udp\",\"endpoint\":\"udp://127.0.0.1:8081\"}],"
-        "\"routes\":[{\"service\":\"order\","
-        "\"endpoint\":\"tcp://127.0.0.1:9000\"}]}";
+static void test_binding_config(void)
+{
+    const char *json = "{\"name\":\"dual\",\"mode\":\"static\","
+                       "\"bindings\":["
+                       "{\"name\":\"tcp\",\"endpoint\":\"tcp://127.0.0.1:8080\"},"
+                       "{\"name\":\"udp\",\"endpoint\":\"udp://127.0.0.1:8081\"}],"
+                       "\"routes\":[{\"service\":\"order\","
+                       "\"endpoint\":\"tcp://127.0.0.1:9000\"}]}";
     config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
     CHECK(config_load(json, &cfg) == OK);
@@ -100,15 +103,15 @@ static void test_binding_config(void) {
 }
 
 /* 新的扁平格式：顶层字段 + URI 端点 + 字符串 peer/binding。 */
-static void test_flat_format(void) {
-    const char *json =
-        "{"
-        "\"name\":\"flat\",\"mode\":\"static\",\"io_threads\":4,"
-        "\"bindings\":[\"tcp://127.0.0.1:5000\",\"udp://127.0.0.1:5001\"],"
-        "\"discovery\":{\"broadcast\":\"127.0.0.1:42000\","
-        "\"peers\":[\"10.0.0.1:42000\",\"10.0.0.2:42001\"]},"
-        "\"routes\":[{\"service\":\"Foo\",\"endpoint\":\"tcp://10.0.0.9:6000\"}]"
-        "}";
+static void test_flat_format(void)
+{
+    const char *json = "{"
+                       "\"name\":\"flat\",\"mode\":\"static\",\"io_threads\":4,"
+                       "\"bindings\":[\"tcp://127.0.0.1:5000\",\"udp://127.0.0.1:5001\"],"
+                       "\"discovery\":{\"broadcast\":\"127.0.0.1:42000\","
+                       "\"peers\":[\"10.0.0.1:42000\",\"10.0.0.2:42001\"]},"
+                       "\"routes\":[{\"service\":\"Foo\",\"endpoint\":\"tcp://10.0.0.9:6000\"}]"
+                       "}";
     config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
     CHECK(config_load(json, &cfg) == OK);
@@ -131,7 +134,8 @@ static void test_flat_format(void) {
     CHECK(strcmp(cfg.routes[0].endpoint, "tcp://10.0.0.9:6000") == 0);
 }
 
-static void test_rtcp_config(void) {
+static void test_rtcp_config(void)
+{
     config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
     CHECK(config_load("{\"name\":\"r\",\"rtcp_interval_ms\":2000}", &cfg) == OK);
@@ -147,7 +151,8 @@ static void test_rtcp_config(void) {
     CHECK(cfg.node.rtcp_disabled == 0);
 }
 
-int main(void) {
+int main(void)
+{
     test_parse();
     test_defaults();
     test_bad_json();

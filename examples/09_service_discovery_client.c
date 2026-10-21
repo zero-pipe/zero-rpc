@@ -14,17 +14,16 @@
 #include <stdlib.h>
 #include <string.h>
 
-int main(int argc, char **argv) {
+int main(int argc, char **argv)
+{
     node_config_t cfg;
     node_t *node = NULL;
     proxy_t *proxy = NULL;
     response_t response;
     payload_t request;
     const char *server_ip = argc > 1 ? argv[1] : "127.0.0.1";
-    uint16_t client_discovery_port =
-        (uint16_t)(argc > 2 ? atoi(argv[2]) : 41954);
-    uint16_t server_discovery_port =
-        (uint16_t)(argc > 3 ? atoi(argv[3]) : 41953);
+    uint16_t client_discovery_port = (uint16_t)(argc > 2 ? atoi(argv[2]) : 41954);
+    uint16_t server_discovery_port = (uint16_t)(argc > 3 ? atoi(argv[3]) : 41953);
     int rc;
 
     memset(&cfg, 0, sizeof(cfg));
@@ -61,7 +60,8 @@ int main(int argc, char **argv) {
     memset(&response, 0, sizeof(response));
     rc = proxy_call_sync(proxy, "DiscoveryService", "echo", &request, &response, 3000, NULL);
     if (rc == OK) {
-        rpc_log_info("discovered call response: %.*s", (int)response.payload.len,
+        rpc_log_info("discovered call response: %.*s",
+                     (int)response.payload.len,
                      (const char *)response.payload.data);
     } else {
         rpc_log_error("discovered call failed: %d", rc);

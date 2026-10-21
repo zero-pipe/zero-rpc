@@ -56,8 +56,12 @@ void zri_discovery_send_hello(node_t *node, int bye);
 void zri_discovery_on_readable(node_t *node);
 void zri_discovery_tick(node_t *node, uint64_t now_ms);
 
-int zri_discovery_find(node_t *node, const char *service, char *ip_out, size_t ip_cap,
-                        uint16_t *port_out, transport_kind_t *transport_out);
+int zri_discovery_find(node_t *node,
+                       const char *service,
+                       char *ip_out,
+                       size_t ip_cap,
+                       uint16_t *port_out,
+                       transport_kind_t *transport_out);
 
 #ifdef __cplusplus
 }

@@ -3,7 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-static uint8_t log_level_from_env(void) {
+static uint8_t log_level_from_env(void)
+{
     const char *value = getenv("RPC_LOG_LEVEL");
     if (!value || !value[0]) {
         return ELOG_LVL_INFO;
@@ -35,7 +36,8 @@ static uint8_t log_level_from_env(void) {
 
 static INIT_ONCE s_log_once = INIT_ONCE_STATIC_INIT;
 
-static BOOL CALLBACK log_init_once(PINIT_ONCE once, PVOID param, PVOID *context) {
+static BOOL CALLBACK log_init_once(PINIT_ONCE once, PVOID param, PVOID *context)
+{
     uint8_t level;
     (void)once;
     (void)param;
@@ -52,7 +54,8 @@ static BOOL CALLBACK log_init_once(PINIT_ONCE once, PVOID param, PVOID *context)
     return TRUE;
 }
 
-void rpc_log_init(void) {
+void rpc_log_init(void)
+{
     (void)InitOnceExecuteOnce(&s_log_once, log_init_once, NULL, NULL);
 }
 #else
@@ -60,7 +63,8 @@ void rpc_log_init(void) {
 
 static pthread_once_t s_log_once = PTHREAD_ONCE_INIT;
 
-static void log_init_once(void) {
+static void log_init_once(void)
+{
     uint8_t level;
 
     if (elog_init() != ELOG_NO_ERR) {
@@ -73,7 +77,8 @@ static void log_init_once(void) {
     elog_start();
 }
 
-void rpc_log_init(void) {
+void rpc_log_init(void)
+{
     (void)pthread_once(&s_log_once, log_init_once);
 }
 #endif

@@ -25,7 +25,8 @@ typedef struct bench_options {
     int echo_request;
 } bench_options_t;
 
-static void on_signal(int signo) {
+static void on_signal(int signo)
+{
     (void)signo;
     g_stop = 1;
 }
@@ -33,12 +34,14 @@ static void on_signal(int signo) {
 static const char k_pattern[] = "rpc-bench-payload-pattern";
 
 /* 自定义 executor：用一个独立的 ntk_thread_pool 承载阻塞方法。 */
-static int executor_submit(void *ctx, void (*fn)(void *), void *user) {
+static int executor_submit(void *ctx, void (*fn)(void *), void *user)
+{
     ntk_thread_pool *pool = (ntk_thread_pool *)ctx;
     return ntk_thread_pool_async(pool, fn, user, 0) == NTK_OK ? OK : ERR_IO;
 }
 
-static void order_get(call_t *call, const request_t *req, void *user) {
+static void order_get(call_t *call, const request_t *req, void *user)
+{
     const bench_options_t *options = (const bench_options_t *)user;
     payload_t pl;
 
@@ -71,7 +74,8 @@ static void order_get(call_t *call, const request_t *req, void *user) {
     reply_bytes(call, 0, "order:confirmed", strlen("order:confirmed"));
 }
 
-static int parse_size(const char *value, size_t *out) {
+static int parse_size(const char *value, size_t *out)
+{
     char *end = NULL;
     unsigned long long parsed;
     if (!value || !out || value[0] == '\0') {
@@ -85,7 +89,8 @@ static int parse_size(const char *value, size_t *out) {
     return 0;
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char **argv)
+{
     node_config_t node_cfg;
     node_t *node = NULL;
     service_t *service = NULL;
@@ -127,8 +132,7 @@ int main(int argc, char **argv) {
         if (strcmp(argv[index], "--transport") == 0 && index + 1 < argc) {
             const char *t = argv[++index];
             node_cfg.transport =
-                (strcmp(t, "tcp") == 0 || strcmp(t, "TCP") == 0) ? TRANSPORT_TCP
-                                                                 : TRANSPORT_UDP;
+                (strcmp(t, "tcp") == 0 || strcmp(t, "TCP") == 0) ? TRANSPORT_TCP : TRANSPORT_UDP;
         } else if (strcmp(argv[index], "--io-threads") == 0 && index + 1 < argc) {
             node_cfg.io_threads = (unsigned)atoi(argv[++index]);
         } else if (strcmp(argv[index], "--mode") == 0 && index + 1 < argc) {
@@ -187,18 +191,17 @@ int main(int argc, char **argv) {
                 index++;
             }
         } else {
-            rpc_log_error(
-                "usage: %s [--transport udp|tcp] [--response-bytes <n>] "
-                "[--delay-ms <n>] [--echo-request] "
-                "[--block-method <name>] [--block-delay-ms <n>] [--block-worker] "
-                "[--block-executor <threads>] "
-                "[--mode static|mesh] "
-                "[--service <name>] [--method <name>] [--bind <ip>] [--io-threads <n>] "
-                "[--handler-threads <n>] [--handler-max-concurrency <n>] [--worker] "
-                "[--executor <threads>] "
-                "[--discovery-port <p>] [--data-port <p>] [--max-msg-bytes <n>] "
-                "[--backpressure-bytes <n>] [--peer <ip:port>]",
-                argv[0]);
+            rpc_log_error("usage: %s [--transport udp|tcp] [--response-bytes <n>] "
+                          "[--delay-ms <n>] [--echo-request] "
+                          "[--block-method <name>] [--block-delay-ms <n>] [--block-worker] "
+                          "[--block-executor <threads>] "
+                          "[--mode static|mesh] "
+                          "[--service <name>] [--method <name>] [--bind <ip>] [--io-threads <n>] "
+                          "[--handler-threads <n>] [--handler-max-concurrency <n>] [--worker] "
+                          "[--executor <threads>] "
+                          "[--discovery-port <p>] [--data-port <p>] [--max-msg-bytes <n>] "
+                          "[--backpressure-bytes <n>] [--peer <ip:port>]",
+                          argv[0]);
             return 1;
         }
     }
@@ -232,13 +235,12 @@ int main(int argc, char **argv) {
                 main_executor.submit = executor_submit;
                 mopts.exec = SERVICE_EXEC_EXECUTOR;
                 mopts.executor = &main_executor;
-                rc = service_add_method_ex(service, method_name, order_get, &fast_options,
-                                           &mopts);
+                rc = service_add_method_ex(service, method_name, order_get, &fast_options, &mopts);
             }
         } else {
-            rc = use_worker
-                     ? service_add_method_worker(service, method_name, order_get, &fast_options)
-                     : service_add_method(service, method_name, order_get, &fast_options);
+            rc = use_worker ?
+                service_add_method_worker(service, method_name, order_get, &fast_options) :
+                service_add_method(service, method_name, order_get, &fast_options);
         }
     }
     if (rc == OK && block_method_name && block_delay_ms > 0) {
@@ -258,12 +260,11 @@ int main(int argc, char **argv) {
                 block_executor.submit = executor_submit;
                 mopts.exec = SERVICE_EXEC_EXECUTOR;
                 mopts.executor = &block_executor;
-                rc = service_add_method_ex(service, block_method_name, order_get,
-                                           &block_options, &mopts);
+                rc = service_add_method_ex(
+                    service, block_method_name, order_get, &block_options, &mopts);
             }
         } else if (block_worker) {
-            rc = service_add_method_worker(service, block_method_name, order_get,
-                                           &block_options);
+            rc = service_add_method_worker(service, block_method_name, order_get, &block_options);
         } else {
             rc = service_add_method(service, block_method_name, order_get, &block_options);
         }
@@ -276,11 +277,18 @@ int main(int argc, char **argv) {
                  "discovery_port=%u handler_threads=%u handler_max_concurrency=%u "
                  "worker=%d main_executor_threads=%u block_worker=%d "
                  "block_executor_threads=%u block_delay_ms=%u",
-                 service_name, method_name, block_method_name ? block_method_name : "-",
+                 service_name,
+                 method_name,
+                 block_method_name ? block_method_name : "-",
                  node_transport(node) == TRANSPORT_TCP ? "tcp" : "udp",
-                 (unsigned)node_data_port(node), (unsigned)node_discovery_port(node),
-                 node_cfg.handler_threads, node_cfg.handler_max_concurrency, use_worker,
-                 main_executor_threads, block_worker, block_executor_threads,
+                 (unsigned)node_data_port(node),
+                 (unsigned)node_discovery_port(node),
+                 node_cfg.handler_threads,
+                 node_cfg.handler_max_concurrency,
+                 use_worker,
+                 main_executor_threads,
+                 block_worker,
+                 block_executor_threads,
                  (unsigned)block_delay_ms);
 
     while (!g_stop) {

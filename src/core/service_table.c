@@ -13,7 +13,8 @@
 static const service_table_t *g_tables[MAX_SERVICE_TABLES];
 static size_t g_table_count;
 
-static const method_descriptor_t *find_method(const char *service, const char *method) {
+static const method_descriptor_t *find_method(const char *service, const char *method)
+{
     size_t t;
     for (t = 0; t < g_table_count; t++) {
         const service_table_t *table = g_tables[t];
@@ -36,7 +37,8 @@ static const method_descriptor_t *find_method(const char *service, const char *m
 
 /* ---- 安装 ---- */
 
-int install_service_table(const service_table_t *table) {
+int install_service_table(const service_table_t *table)
+{
     size_t i;
     if (!table || (!table->services && table->service_count > 0)) {
         return ERR_INVALID;
@@ -85,15 +87,18 @@ int install_service_table(const service_table_t *table) {
 
 /* ---- 状态与查询 ---- */
 
-void reset_service_table(void) {
+void reset_service_table(void)
+{
     g_table_count = 0;
 }
 
-int service_table_active(void) {
+int service_table_active(void)
+{
     return g_table_count > 0;
 }
 
-int service_table_find_id(const char *service, const char *method, uint16_t *out_id) {
+int service_table_find_id(const char *service, const char *method, uint16_t *out_id)
+{
     const method_descriptor_t *found;
     if (!service || !method) {
         return ERR_INVALID;

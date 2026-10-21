@@ -26,21 +26,26 @@
 #include <string.h>
 
 /* 阻塞 handler：sleep 后回显。用于制造 poller 卡顿。 */
-static void slow_handler(call_t *call, const request_t *req, void *user) {
+static void slow_handler(call_t *call, const request_t *req, void *user)
+{
     (void)user;
     ntk_sleep_ms(400);
     reply_bytes(call, 0, req->payload.data, req->payload.len);
 }
 
 /* 快速内联 handler：worker 阻塞时它仍应在 poller 上及时响应。 */
-static void fast_handler(call_t *call, const request_t *req, void *user) {
+static void fast_handler(call_t *call, const request_t *req, void *user)
+{
     (void)user;
     reply_bytes(call, 0, req->payload.data, req->payload.len);
 }
 
 /* 校验用：流式注册在非法/不支持选项下应在建表前被拒绝。 */
-static void dummy_chunk_handler(call_t *call, const request_t *req, const chunk_t *chunk,
-                                void *user) {
+static void dummy_chunk_handler(call_t *call,
+                                const request_t *req,
+                                const chunk_t *chunk,
+                                void *user)
+{
     (void)call;
     (void)req;
     (void)chunk;
@@ -48,7 +53,8 @@ static void dummy_chunk_handler(call_t *call, const request_t *req, const chunk_
 }
 
 /* 校验用：同步风格 worker handler。 */
-static int sync_echo_handler(const request_t *req, message_view_t *resp, void *user) {
+static int sync_echo_handler(const request_t *req, message_view_t *resp, void *user)
+{
     (void)user;
     return message_view_set_data(resp, req->payload.data, req->payload.len);
 }
@@ -59,7 +65,8 @@ typedef struct block_state {
     ntk_sem *release;
 } block_state_t;
 
-static void blocking_handler(call_t *call, const request_t *req, void *user) {
+static void blocking_handler(call_t *call, const request_t *req, void *user)
+{
     block_state_t *st = (block_state_t *)user;
     ntk_sem_post(st->started, 1);
     ntk_sem_wait(st->release);
@@ -73,7 +80,8 @@ typedef struct direct_executor {
     int submitted;
 } direct_executor_t;
 
-static int direct_executor_submit(void *ctx, void (*fn)(void *), void *user) {
+static int direct_executor_submit(void *ctx, void (*fn)(void *), void *user)
+{
     direct_executor_t *e = (direct_executor_t *)ctx;
     e->submitted++;
     fn(user);
@@ -81,7 +89,8 @@ static int direct_executor_submit(void *ctx, void (*fn)(void *), void *user) {
 }
 
 /* 拒绝 executor：验证 submit 返回错误时客户端收到该状态。 */
-static int reject_executor_submit(void *ctx, void (*fn)(void *), void *user) {
+static int reject_executor_submit(void *ctx, void (*fn)(void *), void *user)
+{
     (void)ctx;
     (void)fn;
     (void)user;
@@ -102,7 +111,8 @@ typedef struct thread_executor {
     int submitted;
 } thread_executor_t;
 
-static void thread_executor_loop(void *arg) {
+static void thread_executor_loop(void *arg)
+{
     thread_executor_t *e = (thread_executor_t *)arg;
     for (;;) {
         void (*fn)(void *);
@@ -124,7 +134,8 @@ static void thread_executor_loop(void *arg) {
     }
 }
 
-static int thread_executor_submit(void *ctx, void (*fn)(void *), void *user) {
+static int thread_executor_submit(void *ctx, void (*fn)(void *), void *user)
+{
     thread_executor_t *e = (thread_executor_t *)ctx;
     int rc = OK;
     ntk_mutex_lock(e->lock);
@@ -142,7 +153,8 @@ static int thread_executor_submit(void *ctx, void (*fn)(void *), void *user) {
     return rc;
 }
 
-static int thread_executor_start(thread_executor_t *e) {
+static int thread_executor_start(thread_executor_t *e)
+{
     memset(e, 0, sizeof(*e));
     e->lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
     e->sem = ntk_sem_create(0);
@@ -153,7 +165,8 @@ static int thread_executor_start(thread_executor_t *e) {
     return e->thread ? 0 : 1;
 }
 
-static void thread_executor_stop(thread_executor_t *e) {
+static void thread_executor_stop(thread_executor_t *e)
+{
     if (e->lock) {
         ntk_mutex_lock(e->lock);
         e->stop = 1;
@@ -178,7 +191,8 @@ static void thread_executor_stop(thread_executor_t *e) {
 }
 
 static service_method_options_t method_opts(service_exec_mode_t exec,
-                                            const service_executor_t *executor) {
+                                            const service_executor_t *executor)
+{
     service_method_options_t opts = SERVICE_METHOD_OPTIONS_INIT;
     opts.exec = exec;
     opts.executor = executor;
@@ -194,7 +208,8 @@ typedef struct client_state {
     uint64_t done_ms;
 } client_state_t;
 
-static void on_response(int status, const response_t *resp, void *user) {
+static void on_response(int status, const response_t *resp, void *user)
+{
     client_state_t *st = (client_state_t *)user;
     st->status = status;
     st->app_status = resp ? resp->status : status;
@@ -205,7 +220,8 @@ static void on_response(int status, const response_t *resp, void *user) {
     ntk_sem_post(st->sem, 1);
 }
 
-static int run_case(transport_kind_t kind, const char *label) {
+static int run_case(transport_kind_t kind, const char *label)
+{
     node_config_t scfg;
     node_config_t ccfg;
     node_t *server = NULL;
@@ -356,7 +372,8 @@ cleanup:
  * handler_threads=0 时 WORKER 方法没有池可用，应退化为 poller 内联执行，
  * 而不是丢请求或报错。
  */
-static int run_fallback_case(transport_kind_t kind, const char *label) {
+static int run_fallback_case(transport_kind_t kind, const char *label)
+{
     node_config_t scfg;
     node_config_t ccfg;
     node_t *server = NULL;
@@ -433,8 +450,8 @@ static int run_fallback_case(transport_kind_t kind, const char *label) {
         failed = 1;
     } else if (state.status != OK || state.len != pl.len ||
                memcmp(state.buf, "fallback-payload", pl.len) != 0) {
-        rpc_log_error("[%s] fallback response bad status=%d len=%zu", label,
-                      state.status, state.len);
+        rpc_log_error(
+            "[%s] fallback response bad status=%d len=%zu", label, state.status, state.len);
         failed = 1;
     }
 
@@ -455,7 +472,8 @@ cleanup:
 }
 
 /* 注册 API 的参数校验：非法组合必须被拒绝，合法组合必须成功。 */
-static int run_api_checks(void) {
+static int run_api_checks(void)
+{
     node_config_t cfg;
     node_t *node = NULL;
     service_t *svc = NULL;
@@ -493,15 +511,13 @@ static int run_api_checks(void) {
     }
 
     opts = method_opts(SERVICE_EXEC_WORKER, NULL);
-    if (service_add_stream_method_ex(svc, "workerstream", dummy_chunk_handler, NULL, &opts) !=
-        OK) {
+    if (service_add_stream_method_ex(svc, "workerstream", dummy_chunk_handler, NULL, &opts) != OK) {
         rpc_log_error("[api] stream worker registration failed");
         failed = 1;
     }
 
     opts = method_opts(SERVICE_EXEC_EXECUTOR, &good_exec);
-    if (service_add_stream_method_ex(svc, "execstream", dummy_chunk_handler, NULL, &opts) !=
-        OK) {
+    if (service_add_stream_method_ex(svc, "execstream", dummy_chunk_handler, NULL, &opts) != OK) {
         rpc_log_error("[api] stream executor registration failed");
         failed = 1;
     }
@@ -560,7 +576,8 @@ cleanup:
  * 单 worker + max_concurrency=1：第一个请求占住 worker 后，第二个请求必须
  * 立刻收到 ERR_AGAIN，而不是排到无界队列里。
  */
-static int run_overload_case(transport_kind_t kind, const char *label) {
+static int run_overload_case(transport_kind_t kind, const char *label)
+{
     node_config_t scfg;
     node_config_t ccfg;
     node_t *server = NULL;
@@ -659,8 +676,11 @@ static int run_overload_case(transport_kind_t kind, const char *label) {
         rpc_log_error("[%s] overloaded call was not rejected", label);
         failed = 1;
     } else if (second.status != OK || second.app_status != ERR_AGAIN) {
-        rpc_log_error("[%s] overloaded call status=%d app_status=%d (want %d)", label,
-                      second.status, second.app_status, ERR_AGAIN);
+        rpc_log_error("[%s] overloaded call status=%d app_status=%d (want %d)",
+                      label,
+                      second.status,
+                      second.app_status,
+                      ERR_AGAIN);
         failed = 1;
     }
 
@@ -671,8 +691,11 @@ static int run_overload_case(transport_kind_t kind, const char *label) {
         failed = 1;
     } else if (first.status != OK || first.app_status != OK || first.len != pl.len ||
                memcmp(first.buf, "overload-payload", pl.len) != 0) {
-        rpc_log_error("[%s] first response bad status=%d app_status=%d len=%zu", label,
-                      first.status, first.app_status, first.len);
+        rpc_log_error("[%s] first response bad status=%d app_status=%d len=%zu",
+                      label,
+                      first.status,
+                      first.app_status,
+                      first.len);
         failed = 1;
     }
 
@@ -709,7 +732,8 @@ cleanup:
  * 自定义 executor：服务端不配置内置 handler 池，worker 方法仍能被后台线程
  * 执行，且 reply() 回投原 poller；submit 返回错误时客户端拿到该状态。
  */
-static int run_executor_case(transport_kind_t kind, const char *label) {
+static int run_executor_case(transport_kind_t kind, const char *label)
+{
     node_config_t scfg;
     node_config_t ccfg;
     node_t *server = NULL;
@@ -816,8 +840,11 @@ static int run_executor_case(transport_kind_t kind, const char *label) {
         failed = 1;
     } else if (custom.status != OK || custom.app_status != OK || custom.len != pl.len ||
                memcmp(custom.buf, "executor-payload", pl.len) != 0) {
-        rpc_log_error("[%s] custom response bad status=%d app_status=%d len=%zu", label,
-                      custom.status, custom.app_status, custom.len);
+        rpc_log_error("[%s] custom response bad status=%d app_status=%d len=%zu",
+                      label,
+                      custom.status,
+                      custom.app_status,
+                      custom.len);
         failed = 1;
     } else if (te.submitted != 1) {
         rpc_log_error("[%s] custom executor submitted=%d (want 1)", label, te.submitted);
@@ -833,8 +860,10 @@ static int run_executor_case(transport_kind_t kind, const char *label) {
         rpc_log_error("[%s] reject call timeout", label);
         failed = 1;
     } else if (rejected.status != OK || rejected.app_status != ERR_AGAIN) {
-        rpc_log_error("[%s] reject response bad status=%d app_status=%d", label,
-                      rejected.status, rejected.app_status);
+        rpc_log_error("[%s] reject response bad status=%d app_status=%d",
+                      label,
+                      rejected.status,
+                      rejected.app_status);
         failed = 1;
     }
 
@@ -868,7 +897,8 @@ typedef struct deadline_probe {
     volatile uint64_t call_deadline;
 } deadline_probe_t;
 
-static void deadline_probe_handler(call_t *call, const request_t *req, void *user) {
+static void deadline_probe_handler(call_t *call, const request_t *req, void *user)
+{
     deadline_probe_t *p = (deadline_probe_t *)user;
     p->req_deadline = req->deadline_ms;
     p->call_deadline = call_deadline_ms(call);
@@ -879,7 +909,8 @@ typedef struct run_counter {
     volatile int runs;
 } run_counter_t;
 
-static void run_count_handler(call_t *call, const request_t *req, void *user) {
+static void run_count_handler(call_t *call, const request_t *req, void *user)
+{
     run_counter_t *c = (run_counter_t *)user;
     c->runs++;
     reply_bytes(call, 0, req->payload.data, req->payload.len);
@@ -889,7 +920,8 @@ static void run_count_handler(call_t *call, const request_t *req, void *user) {
  * deadline：客户端 timeout 应传播到 req->deadline_ms / call_deadline_ms；
  * 排队期间过期的 worker 任务在启动前被跳过，不执行 handler。
  */
-static int run_deadline_case(const char *label) {
+static int run_deadline_case(const char *label)
+{
     node_config_t scfg;
     node_config_t ccfg;
     node_t *server = NULL;
@@ -977,8 +1009,8 @@ static int run_deadline_case(const char *label) {
     pl.encoding = 0;
 
     /* 1) deadline 传播：worker 里读到的两个视图应一致且非 0。 */
-    if (proxy_call_async(proxy, "deadline", "probe", &pl, on_response, &probe_resp, 3000,
-                         NULL) != OK) {
+    if (proxy_call_async(proxy, "deadline", "probe", &pl, on_response, &probe_resp, 3000, NULL) !=
+        OK) {
         rpc_log_error("[%s] probe call failed", label);
         failed = 1;
         goto cleanup;
@@ -987,15 +1019,16 @@ static int run_deadline_case(const char *label) {
         rpc_log_error("[%s] probe timeout/status=%d", label, probe_resp.status);
         failed = 1;
     } else if (probe.req_deadline == 0 || probe.call_deadline != probe.req_deadline) {
-        rpc_log_error("[%s] deadline not propagated req=%llu call=%llu", label,
+        rpc_log_error("[%s] deadline not propagated req=%llu call=%llu",
+                      label,
                       (unsigned long long)probe.req_deadline,
                       (unsigned long long)probe.call_deadline);
         failed = 1;
     }
 
     /* 2) 占住唯一 worker，再发一个短 deadline 的请求排在其后。 */
-    if (proxy_call_async(proxy, "deadline", "block", &pl, on_response, &block_resp, 5000,
-                         NULL) != OK) {
+    if (proxy_call_async(proxy, "deadline", "block", &pl, on_response, &block_resp, 5000, NULL) !=
+        OK) {
         rpc_log_error("[%s] block call failed", label);
         failed = 1;
         goto cleanup;
@@ -1005,8 +1038,8 @@ static int run_deadline_case(const char *label) {
         failed = 1;
         goto cleanup;
     }
-    if (proxy_call_async(proxy, "deadline", "queued", &pl, on_response, &queued_resp, 60,
-                         NULL) != OK) {
+    if (proxy_call_async(proxy, "deadline", "queued", &pl, on_response, &queued_resp, 60, NULL) !=
+        OK) {
         rpc_log_error("[%s] queued call failed", label);
         failed = 1;
         goto cleanup;
@@ -1068,7 +1101,8 @@ cleanup:
  * cancellation：客户端 proxy_cancel 应把 CANCEL 传播到服务端；排队中的 worker
  * 任务在启动前被跳过，客户端立即收到取消回调。
  */
-static int run_cancel_case(const char *label) {
+static int run_cancel_case(const char *label)
+{
     node_config_t scfg;
     node_config_t ccfg;
     node_t *server = NULL;
@@ -1121,8 +1155,7 @@ static int run_cancel_case(const char *label) {
     block_resp.sem = ntk_sem_create(0);
     queued_resp.sem = ntk_sem_create(0);
     ping_resp.sem = ntk_sem_create(0);
-    if (!block.started || !block.release || !block_resp.sem || !queued_resp.sem ||
-        !ping_resp.sem) {
+    if (!block.started || !block.release || !block_resp.sem || !queued_resp.sem || !ping_resp.sem) {
         rpc_log_error("[%s] sem create failed", label);
         failed = 1;
         goto cleanup;
@@ -1155,8 +1188,8 @@ static int run_cancel_case(const char *label) {
     pl.encoding = 0;
 
     /* 占住唯一 worker。 */
-    if (proxy_call_async(proxy, "cancel", "block", &pl, on_response, &block_resp, 5000,
-                         NULL) != OK) {
+    if (proxy_call_async(proxy, "cancel", "block", &pl, on_response, &block_resp, 5000, NULL) !=
+        OK) {
         rpc_log_error("[%s] block call failed", label);
         failed = 1;
         goto cleanup;
@@ -1168,15 +1201,14 @@ static int run_cancel_case(const char *label) {
     }
 
     /* 第二个请求排在 worker 队列里。 */
-    if (proxy_call_async(proxy, "cancel", "queued", &pl, on_response, &queued_resp, 5000,
-                         &queued_id) != OK) {
+    if (proxy_call_async(
+            proxy, "cancel", "queued", &pl, on_response, &queued_resp, 5000, &queued_id) != OK) {
         rpc_log_error("[%s] queued call failed", label);
         failed = 1;
         goto cleanup;
     }
     /* TCP 有序：ping 响应返回说明 queued 已被服务端接收并派发。 */
-    if (proxy_call_async(proxy, "cancel", "ping", &pl, on_response, &ping_resp, 3000, NULL) !=
-            OK ||
+    if (proxy_call_async(proxy, "cancel", "ping", &pl, on_response, &ping_resp, 3000, NULL) != OK ||
         ntk_sem_timedwait(ping_resp.sem, 3000) != NTK_OK || ping_resp.status != OK) {
         rpc_log_error("[%s] ping before cancel failed status=%d", label, ping_resp.status);
         failed = 1;
@@ -1202,8 +1234,7 @@ static int run_cancel_case(const char *label) {
         memset(&ping2, 0, sizeof(ping2));
         ping2.sem = ntk_sem_create(0);
         if (!ping2.sem ||
-            proxy_call_async(proxy, "cancel", "ping", &pl, on_response, &ping2, 3000, NULL) !=
-                OK ||
+            proxy_call_async(proxy, "cancel", "ping", &pl, on_response, &ping2, 3000, NULL) != OK ||
             ntk_sem_timedwait(ping2.sem, 3000) != NTK_OK || ping2.status != OK) {
             rpc_log_error("[%s] ping after cancel failed status=%d", label, ping2.status);
             failed = 1;
@@ -1256,7 +1287,8 @@ cleanup:
     return failed;
 }
 
-int main(void) {
+int main(void)
+{
     int failed = 0;
     failed += run_case(TRANSPORT_UDP, "udp");
     failed += run_case(TRANSPORT_TCP, "tcp");

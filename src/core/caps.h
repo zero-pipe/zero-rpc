@@ -61,7 +61,8 @@
  * compile-time default. A longer tick cuts timer overhead (measured ~10% more
  * throughput at saturation) but coarsens UDP NACK/RTX and TCP backlog flush,
  * hence configurable rather than hardcoded. */
-static inline uint32_t zri_tick_interval_ms(void) {
+static inline uint32_t zri_tick_interval_ms(void)
+{
     static int inited = 0;
     static uint32_t value = TICK_INTERVAL_MS;
     if (!inited) {

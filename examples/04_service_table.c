@@ -9,11 +9,11 @@
 #define RPC_LOG_TAG "example"
 #include <log.h>
 
-SERVICE_DEFINE(order_table, 1u, "OrderService",
-                    SERVICE_METHOD(1u, "get"),
-                    SERVICE_METHOD(2u, "put"));
+SERVICE_DEFINE(
+    order_table, 1u, "OrderService", SERVICE_METHOD(1u, "get"), SERVICE_METHOD(2u, "put"));
 
-int main(void) {
+int main(void)
+{
     uint16_t id = 0;
     int rc;
 

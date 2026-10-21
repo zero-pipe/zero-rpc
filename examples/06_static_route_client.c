@@ -10,7 +10,8 @@
 
 #include <string.h>
 
-int main(void) {
+int main(void)
+{
     node_config_t cfg;
     node_t *node = NULL;
     proxy_t *proxy = NULL;
@@ -27,8 +28,7 @@ int main(void) {
 
     rc = node_create(&cfg, &node);
     if (rc == OK) {
-        rc = node_add_static_route(node, "OrderService", "127.0.0.1", 42420,
-                                        TRANSPORT_TCP);
+        rc = node_add_static_route(node, "OrderService", "127.0.0.1", 42420, TRANSPORT_TCP);
     }
     if (rc == OK) {
         rc = proxy_create(node, NULL, &proxy);
@@ -45,8 +45,7 @@ int main(void) {
     memset(&response, 0, sizeof(response));
     rc = proxy_call_sync(proxy, "OrderService", "get", &request, &response, 3000, NULL);
     if (rc == OK) {
-        rpc_log_info("%.*s", (int)response.payload.len,
-                     (const char *)response.payload.data);
+        rpc_log_info("%.*s", (int)response.payload.len, (const char *)response.payload.data);
     } else {
         rpc_log_error("static route call failed: %d", rc);
     }

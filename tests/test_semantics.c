@@ -28,7 +28,8 @@ static int g_server_interceptor_calls;
 static int g_client_before_calls;
 static int g_client_after_calls;
 
-static int server_interceptor(call_t *call, const request_t *req, void *user) {
+static int server_interceptor(call_t *call, const request_t *req, void *user)
+{
     (void)call;
     (void)user;
     g_server_interceptor_calls++;
@@ -38,7 +39,8 @@ static int server_interceptor(call_t *call, const request_t *req, void *user) {
     return OK;
 }
 
-static void echo_meta_handler(call_t *call, const request_t *req, void *user) {
+static void echo_meta_handler(call_t *call, const request_t *req, void *user)
+{
     metadata_t out;
     const char *k = req->metadata ? metadata_get_string(req->metadata, "k") : NULL;
     (void)user;
@@ -50,7 +52,8 @@ static void echo_meta_handler(call_t *call, const request_t *req, void *user) {
     reply_ex(call, 0, "done", &req->payload, &out);
 }
 
-static void on_response(int status, const response_t *resp, void *user) {
+static void on_response(int status, const response_t *resp, void *user)
+{
     client_state_t *st = (client_state_t *)user;
     st->status = status;
     st->app_status = resp ? resp->status : status;
@@ -61,8 +64,10 @@ static void on_response(int status, const response_t *resp, void *user) {
         if (resp->metadata) {
             const char *m = metadata_get_string(resp->metadata, "resp");
             const char *s = metadata_get_string(resp->metadata, "seen");
-            if (m) snprintf(st->meta, sizeof(st->meta), "%s", m);
-            if (s) snprintf(st->seen, sizeof(st->seen), "%s", s);
+            if (m)
+                snprintf(st->meta, sizeof(st->meta), "%s", m);
+            if (s)
+                snprintf(st->seen, sizeof(st->seen), "%s", s);
         }
         if (resp->payload.len <= sizeof(st->buf)) {
             memcpy(st->buf, resp->payload.data, resp->payload.len);
@@ -72,8 +77,9 @@ static void on_response(int status, const response_t *resp, void *user) {
     ntk_sem_post(st->sem, 1);
 }
 
-static int client_before(void *ctx, const char *service, const char *method, metadata_t *md,
-                         uint64_t *timeout_ms) {
+static int client_before(
+    void *ctx, const char *service, const char *method, metadata_t *md, uint64_t *timeout_ms)
+{
     (void)ctx;
     (void)service;
     (void)method;
@@ -82,14 +88,16 @@ static int client_before(void *ctx, const char *service, const char *method, met
     return metadata_set_string(md, "client", "1");
 }
 
-static void client_after(void *ctx, int status, const response_t *resp) {
+static void client_after(void *ctx, int status, const response_t *resp)
+{
     (void)ctx;
     (void)status;
     (void)resp;
     g_client_after_calls++;
 }
 
-static int test_metadata_unit(void) {
+static int test_metadata_unit(void)
+{
     metadata_t md;
     metadata_t out;
     uint8_t wire[METADATA_WIRE_MAX];
@@ -126,7 +134,8 @@ static int test_metadata_unit(void) {
     return failed;
 }
 
-static int test_rpc_semantics(void) {
+static int test_rpc_semantics(void)
+{
     node_config_t scfg;
     node_config_t ccfg;
     node_t *server = NULL;
@@ -189,8 +198,7 @@ static int test_rpc_semantics(void) {
         failed = 1;
         goto cleanup;
     }
-    if (proxy_create(client, NULL, &proxy) != OK ||
-        proxy_set_interceptor(proxy, &interc) != OK ||
+    if (proxy_create(client, NULL, &proxy) != OK || proxy_set_interceptor(proxy, &interc) != OK ||
         node_wait_for_service(client, "sem", 5000) != OK) {
         rpc_log_error("[semantics] client setup failed");
         failed = 1;
@@ -213,8 +221,11 @@ static int test_rpc_semantics(void) {
         failed = 1;
     } else if (ok.app_status != 0 || strcmp(ok.message, "done") != 0 ||
                strcmp(ok.meta, "ok") != 0 || strcmp(ok.seen, "v") != 0) {
-        rpc_log_error("[semantics] echo app=%d msg=%s resp=%s seen=%s", ok.app_status, ok.message,
-                      ok.meta, ok.seen);
+        rpc_log_error("[semantics] echo app=%d msg=%s resp=%s seen=%s",
+                      ok.app_status,
+                      ok.message,
+                      ok.meta,
+                      ok.seen);
         failed = 1;
     }
 
@@ -233,7 +244,9 @@ static int test_rpc_semantics(void) {
     if (g_server_interceptor_calls != 2 || g_client_before_calls != 2 ||
         g_client_after_calls != 2) {
         rpc_log_error("[semantics] interceptor calls srv=%d before=%d after=%d",
-                      g_server_interceptor_calls, g_client_before_calls, g_client_after_calls);
+                      g_server_interceptor_calls,
+                      g_client_before_calls,
+                      g_client_after_calls);
         failed = 1;
     }
 
@@ -256,7 +269,8 @@ cleanup:
     return failed;
 }
 
-int main(void) {
+int main(void)
+{
     int failed = 0;
     failed += test_metadata_unit();
     failed += test_rpc_semantics();

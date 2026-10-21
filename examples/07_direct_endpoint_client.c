@@ -9,7 +9,8 @@
 
 #include <string.h>
 
-int main(void) {
+int main(void)
+{
     node_config_t cfg;
     node_t *node = NULL;
     proxy_t *proxy = NULL;
@@ -43,8 +44,7 @@ int main(void) {
     memset(&response, 0, sizeof(response));
     rc = proxy_call_sync(proxy, "OrderService", "get", &request, &response, 3000, NULL);
     if (rc == OK) {
-        rpc_log_info("%.*s", (int)response.payload.len,
-                     (const char *)response.payload.data);
+        rpc_log_info("%.*s", (int)response.payload.len, (const char *)response.payload.data);
     } else {
         rpc_log_error("direct endpoint call failed: %d", rc);
     }

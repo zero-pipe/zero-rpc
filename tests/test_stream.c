@@ -18,8 +18,8 @@ typedef struct upload_state {
     char buf[256];
 } upload_state_t;
 
-static void on_upload(call_t *call, const request_t *req, const chunk_t *chunk,
-                      void *user) {
+static void on_upload(call_t *call, const request_t *req, const chunk_t *chunk, void *user)
+{
     upload_state_t *st = (upload_state_t *)user;
     (void)req;
     st->chunks++;
@@ -36,8 +36,8 @@ static void on_upload(call_t *call, const request_t *req, const chunk_t *chunk,
     }
 }
 
-static void on_bidi(call_t *call, const request_t *req, const chunk_t *chunk,
-                    void *user) {
+static void on_bidi(call_t *call, const request_t *req, const chunk_t *chunk, void *user)
+{
     (void)req;
     (void)user;
     (void)reply_stream(call, 0, chunk);
@@ -50,7 +50,8 @@ typedef struct client_state {
     size_t len;
 } client_state_t;
 
-static void on_response(int status, const response_t *resp, void *user) {
+static void on_response(int status, const response_t *resp, void *user)
+{
     client_state_t *st = (client_state_t *)user;
     st->status = status;
     if (status == OK && resp && resp->payload.len <= sizeof(st->buf)) {
@@ -63,7 +64,8 @@ static void on_response(int status, const response_t *resp, void *user) {
 
 static const char k_download[] = "0123456789ABCDEF";
 
-static void on_download(call_t *call, const request_t *req, void *user) {
+static void on_download(call_t *call, const request_t *req, void *user)
+{
     size_t i;
     (void)req;
     (void)user;
@@ -88,7 +90,8 @@ typedef struct download_client {
     int status;
 } download_client_t;
 
-static void on_download_chunk(int status, const chunk_t *chunk, void *user) {
+static void on_download_chunk(int status, const chunk_t *chunk, void *user)
+{
     download_client_t *c = (download_client_t *)user;
     if (status != OK) {
         return;
@@ -103,7 +106,8 @@ static void on_download_chunk(int status, const chunk_t *chunk, void *user) {
     }
 }
 
-static void on_download_done(int status, void *user) {
+static void on_download_done(int status, void *user)
+{
     download_client_t *c = (download_client_t *)user;
     c->done = 1;
     c->status = status;
@@ -112,7 +116,8 @@ static void on_download_done(int status, void *user) {
     }
 }
 
-static void on_bidi_chunk(int status, const chunk_t *chunk, void *user) {
+static void on_bidi_chunk(int status, const chunk_t *chunk, void *user)
+{
     download_client_t *c = (download_client_t *)user;
     if (status != OK) {
         return;
@@ -127,8 +132,8 @@ static void on_bidi_chunk(int status, const chunk_t *chunk, void *user) {
     }
 }
 
-static int run_case(transport_kind_t transport, const char *label, uint16_t sdisc,
-                    uint16_t cdisc) {
+static int run_case(transport_kind_t transport, const char *label, uint16_t sdisc, uint16_t cdisc)
+{
     node_config_t scfg;
     node_config_t ccfg;
     node_t *server = NULL;
@@ -224,14 +229,17 @@ static int run_case(transport_kind_t transport, const char *label, uint16_t sdis
             failed = 1;
         } else {
             if (cst.status != OK || strcmp(cst.buf, expect) != 0) {
-                rpc_log_error("[%s] bad response status=%d buf=%s", label, cst.status,
-                              cst.buf);
+                rpc_log_error("[%s] bad response status=%d buf=%s", label, cst.status, cst.buf);
                 failed = 1;
             }
             if (upload.chunks != 3 || upload.first_seen != 1 || upload.last_seen != 1 ||
                 upload.bytes != strlen(expect)) {
-                rpc_log_error("[%s] server state chunks=%d first=%d last=%d bytes=%zu", label,
-                              upload.chunks, upload.first_seen, upload.last_seen, upload.bytes);
+                rpc_log_error("[%s] server state chunks=%d first=%d last=%d bytes=%zu",
+                              label,
+                              upload.chunks,
+                              upload.first_seen,
+                              upload.last_seen,
+                              upload.bytes);
                 failed = 1;
             }
         }
@@ -251,8 +259,15 @@ static int run_case(transport_kind_t transport, const char *label, uint16_t sdis
         dc.sem = ntk_sem_create(0);
         if (!dc.sem) {
             failed = 1;
-        } else if (proxy_call_stream(proxy, "upload", "download", NULL, on_download_chunk,
-                                          on_download_done, &dc, 3000, &req_id) != OK) {
+        } else if (proxy_call_stream(proxy,
+                                     "upload",
+                                     "download",
+                                     NULL,
+                                     on_download_chunk,
+                                     on_download_done,
+                                     &dc,
+                                     3000,
+                                     &req_id) != OK) {
             rpc_log_error("[%s] call_stream failed", label);
             failed = 1;
         } else if (ntk_sem_timedwait(dc.sem, 3000) != NTK_OK) {
@@ -260,8 +275,12 @@ static int run_case(transport_kind_t transport, const char *label, uint16_t sdis
             failed = 1;
         } else if (dc.status != OK || dc.len != strlen(k_download) ||
                    memcmp(dc.buf, k_download, dc.len) != 0 || dc.chunks != 4 || dc.last != 1) {
-            rpc_log_error("[%s] download mismatch status=%d len=%zu chunks=%d last=%d", label,
-                          dc.status, dc.len, dc.chunks, dc.last);
+            rpc_log_error("[%s] download mismatch status=%d len=%zu chunks=%d last=%d",
+                          label,
+                          dc.status,
+                          dc.len,
+                          dc.chunks,
+                          dc.last);
             failed = 1;
         }
         if (dc.sem) {
@@ -277,8 +296,7 @@ static int run_case(transport_kind_t transport, const char *label, uint16_t sdis
         cc.sem = ntk_sem_create(0);
         if (!cc.sem) {
             failed = 1;
-        } else if (proxy_stream_open(proxy, "upload", "chunk", on_response, &cc, 3000, &s2) !=
-                   OK) {
+        } else if (proxy_stream_open(proxy, "upload", "chunk", on_response, &cc, 3000, &s2) != OK) {
             rpc_log_error("[%s] cancel open failed", label);
             failed = 1;
         } else {
@@ -310,8 +328,9 @@ static int run_case(transport_kind_t transport, const char *label, uint16_t sdis
         stream_t *bidi = NULL;
         memset(&bc, 0, sizeof(bc));
         bc.sem = ntk_sem_create(0);
-        if (!bc.sem || proxy_stream_open_bidi(proxy, "upload", "chat", on_bidi_chunk,
-                                                   on_download_done, &bc, 3000, &bidi) != OK) {
+        if (!bc.sem ||
+            proxy_stream_open_bidi(
+                proxy, "upload", "chat", on_bidi_chunk, on_download_done, &bc, 3000, &bidi) != OK) {
             rpc_log_error("[%s] bidi open failed", label);
             failed = 1;
         } else {
@@ -327,11 +346,14 @@ static int run_case(transport_kind_t transport, const char *label, uint16_t sdis
             ck.offset = 4;
             ck.flags = STREAM_LAST;
             (void)proxy_stream_send(bidi, &ck);
-            if (ntk_sem_timedwait(bc.sem, 3000) != NTK_OK || bc.status != OK ||
-                bc.len != 8 || memcmp(bc.buf, "pingpong", 8) != 0 || bc.chunks != 2 ||
-                bc.last != 1) {
-                rpc_log_error("[%s] bidi mismatch status=%d len=%zu chunks=%d last=%d", label,
-                              bc.status, bc.len, bc.chunks, bc.last);
+            if (ntk_sem_timedwait(bc.sem, 3000) != NTK_OK || bc.status != OK || bc.len != 8 ||
+                memcmp(bc.buf, "pingpong", 8) != 0 || bc.chunks != 2 || bc.last != 1) {
+                rpc_log_error("[%s] bidi mismatch status=%d len=%zu chunks=%d last=%d",
+                              label,
+                              bc.status,
+                              bc.len,
+                              bc.chunks,
+                              bc.last);
                 failed = 1;
             }
             (void)proxy_stream_destroy(bidi);
@@ -351,7 +373,8 @@ static int run_case(transport_kind_t transport, const char *label, uint16_t sdis
     return failed;
 }
 
-int main(void) {
+int main(void)
+{
     int failed = 0;
     failed += run_case(TRANSPORT_UDP, "udp", 43111, 43112);
     failed += run_case(TRANSPORT_TCP, "tcp", 43113, 43114);

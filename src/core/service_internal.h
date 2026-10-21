@@ -17,8 +17,8 @@ typedef struct zri_method {
     handler_fn fn;
     chunk_handler_fn stream_fn;
     void *user;
-    int owns_user; /* user 由框架分配（如 sync 桥接结构），销毁时释放 */
-    int run_in_worker; /* 非 0 时 unary handler 调度到 node->handler_pool */
+    int owns_user;                      /* user 由框架分配（如 sync 桥接结构），销毁时释放 */
+    int run_in_worker;                  /* 非 0 时 unary handler 调度到 node->handler_pool */
     const service_executor_t *executor; /* 非 NULL 时使用调用者提供的 executor */
 } zri_method_t;
 
@@ -86,18 +86,25 @@ typedef struct zri_recv_stream {
     struct zri_stream_task *pending_tail;
 } zri_recv_stream_t;
 
-void zri_service_handle_request(node_t *node, zri_transport_t *transport,
+void zri_service_handle_request(node_t *node,
+                                zri_transport_t *transport,
                                 const zri_message_t *message);
-void zri_service_handle_cancel(node_t *node, zri_transport_t *transport,
+void zri_service_handle_cancel(node_t *node,
+                               zri_transport_t *transport,
                                const zri_message_t *message);
-void zri_service_handle_stream_chunk(node_t *node, zri_transport_t *transport,
+void zri_service_handle_stream_chunk(node_t *node,
+                                     zri_transport_t *transport,
                                      const zri_message_t *message);
 void zri_service_expire_streams(node_t *node, uint64_t now_ms);
 
 /* 取消登记表：登记 / 查询 / 过期。查询不加锁地只读快照，避免热路径阻塞。 */
-void zri_node_cancel_record(node_t *node, uint32_t request_id, const char *peer_ip,
+void zri_node_cancel_record(node_t *node,
+                            uint32_t request_id,
+                            const char *peer_ip,
                             uint16_t peer_port);
-int zri_node_is_canceled(const node_t *node, uint32_t request_id, const char *peer_ip,
+int zri_node_is_canceled(const node_t *node,
+                         uint32_t request_id,
+                         const char *peer_ip,
                          uint16_t peer_port);
 void zri_node_expire_cancels(node_t *node, uint64_t now_ms);
 

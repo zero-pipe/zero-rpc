@@ -10,7 +10,8 @@
 #include <string.h>
 
 /* 服务端 handler：原样回显。 */
-static void echo_handler(call_t *call, const request_t *req, void *user) {
+static void echo_handler(call_t *call, const request_t *req, void *user)
+{
     (void)user;
     reply_bytes(call, 0, req->payload.data, req->payload.len);
 }
@@ -22,18 +23,21 @@ typedef struct client_state {
     size_t len;
 } client_state_t;
 
-static void on_response(int status, const response_t *resp, void *user) {
+static void on_response(int status, const response_t *resp, void *user)
+{
     client_state_t *st = (client_state_t *)user;
     st->status = status;
     if (status == OK && resp && resp->payload.len <= sizeof(st->buf)) {
         memcpy(st->buf, resp->payload.data, resp->payload.len);
         st->len = resp->payload.len;
-        st->buf[resp->payload.len < sizeof(st->buf) ? resp->payload.len : sizeof(st->buf) - 1] = '\0';
+        st->buf[resp->payload.len < sizeof(st->buf) ? resp->payload.len : sizeof(st->buf) - 1] =
+            '\0';
     }
     ntk_sem_post(st->sem, 1);
 }
 
-static int wait_response(client_state_t *st, unsigned timeout_ms) {
+static int wait_response(client_state_t *st, unsigned timeout_ms)
+{
     if (ntk_sem_timedwait(st->sem, timeout_ms) != NTK_OK) {
         return -1;
     }
@@ -41,7 +45,8 @@ static int wait_response(client_state_t *st, unsigned timeout_ms) {
 }
 
 /* 反复尝试直到发现收敛或超时。返回最终 status。 */
-static int run_call(proxy_t *proxy, client_state_t *st, const void *data, size_t len) {
+static int run_call(proxy_t *proxy, client_state_t *st, const void *data, size_t len)
+{
     int attempt;
     payload_t pl;
     pl.data = data;
@@ -67,7 +72,8 @@ static int run_call(proxy_t *proxy, client_state_t *st, const void *data, size_t
     return -1;
 }
 
-static int run_case(transport_kind_t kind, const char *label) {
+static int run_case(transport_kind_t kind, const char *label)
+{
     node_config_t scfg;
     node_config_t ccfg;
     node_t *server = NULL;
@@ -150,8 +156,7 @@ static int run_case(transport_kind_t kind, const char *label) {
         const char *msg = "hello-rpc";
         rc = run_call(proxy, &st, msg, strlen(msg) + 1);
         if (rc != OK || strcmp(st.buf, msg) != 0) {
-            rpc_log_error("[%s] small message failed: status=%d buf=%s", label, st.status,
-                          st.buf);
+            rpc_log_error("[%s] small message failed: status=%d buf=%s", label, st.status, st.buf);
             failed = 1;
         }
     }
@@ -179,7 +184,8 @@ static int run_case(transport_kind_t kind, const char *label) {
         memset(&metrics, 0, sizeof(metrics));
         node_metrics(client, &metrics);
         if (metrics.requests_sent < 2 || metrics.responses_received < 2) {
-            rpc_log_error("[%s] metrics mismatch: sent=%llu recv=%llu", label,
+            rpc_log_error("[%s] metrics mismatch: sent=%llu recv=%llu",
+                          label,
                           (unsigned long long)metrics.requests_sent,
                           (unsigned long long)metrics.responses_received);
             failed = 1;
@@ -206,7 +212,8 @@ static int run_case(transport_kind_t kind, const char *label) {
             waited += 200;
         }
         if (!ok) {
-            rpc_log_error("[%s] rtcp sr not exchanged: sent=%llu recv=%llu", label,
+            rpc_log_error("[%s] rtcp sr not exchanged: sent=%llu recv=%llu",
+                          label,
                           (unsigned long long)m.rtcp_sr_sent,
                           (unsigned long long)m.rtcp_sr_received);
             failed = 1;
@@ -241,7 +248,8 @@ cleanup:
     return failed;
 }
 
-int main(void) {
+int main(void)
+{
     int failed = 0;
     failed += run_case(TRANSPORT_UDP, "udp");
     failed += run_case(TRANSPORT_TCP, "tcp");

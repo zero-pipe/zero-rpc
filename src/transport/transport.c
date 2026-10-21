@@ -3,20 +3,23 @@
 
 #include <stdlib.h>
 
-int zri_transport_start(zri_transport_t *t) {
+int zri_transport_start(zri_transport_t *t)
+{
     if (!t || !t->ops || !t->ops->start) {
         return ERR_INVALID;
     }
     return t->ops->start(t);
 }
 
-void zri_transport_stop(zri_transport_t *t) {
+void zri_transport_stop(zri_transport_t *t)
+{
     if (t && t->ops && t->ops->stop) {
         t->ops->stop(t);
     }
 }
 
-void zri_transport_destroy(zri_transport_t *t) {
+void zri_transport_destroy(zri_transport_t *t)
+{
     if (!t) {
         return;
     }
@@ -28,14 +31,16 @@ void zri_transport_destroy(zri_transport_t *t) {
     free(t);
 }
 
-int zri_transport_send(zri_transport_t *t, const zri_message_t *message) {
+int zri_transport_send(zri_transport_t *t, const zri_message_t *message)
+{
     if (!t || !t->ops || !t->ops->send || !message) {
         return ERR_INVALID;
     }
     return t->ops->send(t, message);
 }
 
-int zri_transport_reply(zri_transport_t *t, const zri_message_t *message) {
+int zri_transport_reply(zri_transport_t *t, const zri_message_t *message)
+{
     if (!t || !t->ops || !t->ops->reply || !message) {
         return ERR_INVALID;
     }

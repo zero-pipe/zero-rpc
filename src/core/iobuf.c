@@ -4,7 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-static zri_iobuf_blk_t *blk_new(ntk_buf *owner, const void *data, size_t len) {
+static zri_iobuf_blk_t *blk_new(ntk_buf *owner, const void *data, size_t len)
+{
     zri_iobuf_blk_t *blk;
 
     if (!data || len == 0) {
@@ -22,7 +23,8 @@ static zri_iobuf_blk_t *blk_new(ntk_buf *owner, const void *data, size_t len) {
     return blk;
 }
 
-static void blk_release(zri_iobuf_blk_t *blk) {
+static void blk_release(zri_iobuf_blk_t *blk)
+{
     if (!blk) {
         return;
     }
@@ -32,7 +34,8 @@ static void blk_release(zri_iobuf_blk_t *blk) {
     zri_mem_free(blk);
 }
 
-static int iobuf_push(zri_iobuf_t *b, zri_iobuf_blk_t *blk) {
+static int iobuf_push(zri_iobuf_t *b, zri_iobuf_blk_t *blk)
+{
     if (!b || !blk) {
         return -1;
     }
@@ -46,7 +49,8 @@ static int iobuf_push(zri_iobuf_t *b, zri_iobuf_blk_t *blk) {
     return 0;
 }
 
-void zri_iobuf_init(zri_iobuf_t *b) {
+void zri_iobuf_init(zri_iobuf_t *b)
+{
     if (!b) {
         return;
     }
@@ -55,7 +59,8 @@ void zri_iobuf_init(zri_iobuf_t *b) {
     b->total = 0;
 }
 
-void zri_iobuf_reset(zri_iobuf_t *b) {
+void zri_iobuf_reset(zri_iobuf_t *b)
+{
     zri_iobuf_blk_t *blk;
 
     if (!b) {
@@ -70,15 +75,18 @@ void zri_iobuf_reset(zri_iobuf_t *b) {
     zri_iobuf_init(b);
 }
 
-size_t zri_iobuf_len(const zri_iobuf_t *b) {
+size_t zri_iobuf_len(const zri_iobuf_t *b)
+{
     return b ? b->total : 0;
 }
 
-int zri_iobuf_empty(const zri_iobuf_t *b) {
+int zri_iobuf_empty(const zri_iobuf_t *b)
+{
     return (!b || b->total == 0) ? 1 : 0;
 }
 
-int zri_iobuf_append_copy(zri_iobuf_t *b, ntk_poller *poller, const void *data, size_t len) {
+int zri_iobuf_append_copy(zri_iobuf_t *b, ntk_poller *poller, const void *data, size_t len)
+{
     ntk_buf *owner;
     zri_iobuf_blk_t *blk;
 
@@ -104,7 +112,8 @@ int zri_iobuf_append_copy(zri_iobuf_t *b, ntk_poller *poller, const void *data, 
     return 0;
 }
 
-int zri_iobuf_append_buf(zri_iobuf_t *b, ntk_buf *owner, const void *data, size_t len) {
+int zri_iobuf_append_buf(zri_iobuf_t *b, ntk_buf *owner, const void *data, size_t len)
+{
     zri_iobuf_blk_t *blk;
 
     if (!b || !owner || !data || len == 0) {
@@ -123,7 +132,8 @@ int zri_iobuf_append_buf(zri_iobuf_t *b, ntk_buf *owner, const void *data, size_
     return 0;
 }
 
-int zri_iobuf_append_borrow(zri_iobuf_t *b, const void *data, size_t len) {
+int zri_iobuf_append_borrow(zri_iobuf_t *b, const void *data, size_t len)
+{
     zri_iobuf_blk_t *blk;
 
     if (!b || !data || len == 0) {
@@ -140,7 +150,8 @@ int zri_iobuf_append_borrow(zri_iobuf_t *b, const void *data, size_t len) {
     return 0;
 }
 
-static const zri_iobuf_blk_t *blk_at_offset(const zri_iobuf_t *b, size_t off, size_t *blk_off) {
+static const zri_iobuf_blk_t *blk_at_offset(const zri_iobuf_t *b, size_t off, size_t *blk_off)
+{
     const zri_iobuf_blk_t *blk = b->head;
 
     while (blk) {
@@ -157,7 +168,8 @@ static const zri_iobuf_blk_t *blk_at_offset(const zri_iobuf_t *b, size_t off, si
     return NULL;
 }
 
-size_t zri_iobuf_peek(const zri_iobuf_t *b, size_t off, void *dst, size_t n) {
+size_t zri_iobuf_peek(const zri_iobuf_t *b, size_t off, void *dst, size_t n)
+{
     uint8_t *out = (uint8_t *)dst;
     size_t done = 0;
 
@@ -186,8 +198,11 @@ size_t zri_iobuf_peek(const zri_iobuf_t *b, size_t off, void *dst, size_t n) {
     return done;
 }
 
-unsigned zri_iobuf_iovec(const zri_iobuf_t *b, ntk_socket_iov *iov, unsigned max_count,
-                          size_t max_bytes) {
+unsigned zri_iobuf_iovec(const zri_iobuf_t *b,
+                         ntk_socket_iov *iov,
+                         unsigned max_count,
+                         size_t max_bytes)
+{
     const zri_iobuf_blk_t *blk;
     unsigned n = 0;
     size_t total = 0;
@@ -217,7 +232,8 @@ unsigned zri_iobuf_iovec(const zri_iobuf_t *b, ntk_socket_iov *iov, unsigned max
     return n;
 }
 
-void zri_iobuf_consume(zri_iobuf_t *b, size_t n) {
+void zri_iobuf_consume(zri_iobuf_t *b, size_t n)
+{
     if (!b || n == 0) {
         return;
     }
@@ -240,7 +256,8 @@ void zri_iobuf_consume(zri_iobuf_t *b, size_t n) {
     }
 }
 
-const uint8_t *zri_iobuf_view(zri_iobuf_t *b, size_t n, ntk_poller *poller, ntk_buf **scratch) {
+const uint8_t *zri_iobuf_view(zri_iobuf_t *b, size_t n, ntk_poller *poller, ntk_buf **scratch)
+{
     const zri_iobuf_blk_t *blk;
     size_t head_remain;
 

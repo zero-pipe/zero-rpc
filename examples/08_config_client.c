@@ -11,7 +11,8 @@
 
 #include <string.h>
 
-int main(int argc, char **argv) {
+int main(int argc, char **argv)
+{
     const char *path = argc > 1 ? argv[1] : "08_config_client.json";
     config_t cfg;
     node_t *node = NULL;
@@ -41,8 +42,8 @@ int main(int argc, char **argv) {
     memset(&response, 0, sizeof(response));
     rc = proxy_call_sync(proxy, "EchoService", "echo", &request, &response, 3000, NULL);
     if (rc == OK) {
-        rpc_log_info("response: %.*s", (int)response.payload.len,
-                     (const char *)response.payload.data);
+        rpc_log_info(
+            "response: %.*s", (int)response.payload.len, (const char *)response.payload.data);
     } else {
         rpc_log_error("call failed: %d (server running?)", rc);
     }
