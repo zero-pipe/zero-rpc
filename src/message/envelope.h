@@ -35,7 +35,7 @@ extern "C" {
  *   [0]      kind
  *   [1]      encoding
  *   [2]      stream_flags
- *   [3]      reserved
+ *   [3]      flags        (MSG_FLAG_*)
  *   [4..7]   status       (应用状态码；仅 RESPONSE 有意义)
  *   [8..11]  request_id
  *   [12..15] stream_id
@@ -53,6 +53,7 @@ typedef struct zri_envelope {
     uint8_t kind;
     uint8_t encoding;
     uint8_t stream_flags;
+    uint8_t flags;        /* MSG_FLAG_*；随包透传 */
     int status;
     uint32_t request_id;
     uint32_t stream_id;

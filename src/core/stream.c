@@ -102,7 +102,7 @@ static uint64_t stream_send_task_fn(void *user)
     stream_t *stream = task->stream;
     payload_t payload;
     stream_meta_t meta;
-    char route[ROUTE_MAX];
+    char route[MAX_ROUTE];
     zri_message_t message;
     int rc;
     if (stream->closed) {
@@ -163,7 +163,7 @@ static void stream_cancel_task_fn(void *user)
         payload_t empty;
         stream_meta_t meta;
         zri_message_t message;
-        char route[ROUTE_MAX];
+        char route[MAX_ROUTE];
         memset(&empty, 0, sizeof(empty));
         memset(&meta, 0, sizeof(meta));
         meta.flags = STREAM_CANCEL;

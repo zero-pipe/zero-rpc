@@ -11,7 +11,7 @@
 struct zri_registry_instance {
     zri_registry_instance_t *next;
     char service[SERVICE_NAME_MAX];
-    char instance_id[NAME_MAX];
+    char instance_id[ZRI_NAME_MAX];
     uint32_t node_id;
     endpoint_t endpoints[MAX_BINDINGS];
     size_t endpoint_count;

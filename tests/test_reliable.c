@@ -28,12 +28,13 @@ static void test_rx_window(void)
     zri_rx_window_reset(&window);
     CHECK(zri_rx_window_accept(&window, 10) == 1);
     CHECK(zri_rx_window_accept(&window, 12) == 1); /* gap at 11 */
-    CHECK(zri_rx_window_accept(&window, 12) == 1); /* duplicate still accepted */
+    CHECK(zri_rx_window_accept(&window, 12) == 0); /* in-window duplicate rejected */
     n = zri_rx_window_missing(&window, missing, 64);
     CHECK(n == 1);
     CHECK(missing[0] == 11);
 
     CHECK(zri_rx_window_accept(&window, 11) == 1); /* fills gap, advances base */
+    CHECK(zri_rx_window_accept(&window, 11) == 0); /* duplicate below base */
     n = zri_rx_window_missing(&window, missing, 64);
     CHECK(n == 0);
 

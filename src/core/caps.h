@@ -8,11 +8,13 @@
  */
 
 #include "framing.h" /* RTP_HDR_LEN / FRAG_HDR_LEN */
+#include <types.h>   /* SERVICE_NAME_MAX / METHOD_NAME_MAX */
 #include <stdint.h>
 #include <stdlib.h>
 
 /* ---- 消息与路由 ---- */
-#define MAX_ROUTE 128
+/* "service.method" 的最大缓冲区长度（含结尾 '\0'）。 */
+#define MAX_ROUTE (SERVICE_NAME_MAX + METHOD_NAME_MAX + 2)
 #define MAX_MSG 1048576u /* 1 MiB */
 #define MAX_MSG_LIMIT (64u * 1024u * 1024u)
 

@@ -46,7 +46,7 @@ typedef struct zri_obj_pool {
 
 struct node {
     node_config_t cfg;
-    char name[NAME_MAX];
+    char name[ZRI_NAME_MAX];
     uint32_t node_id;
     char bind_host[ENDPOINT_MAX];
     char discovery_host[ENDPOINT_MAX];

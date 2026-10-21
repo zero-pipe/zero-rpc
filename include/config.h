@@ -66,7 +66,7 @@ typedef struct binding_endpoint {
 
 typedef struct config {
     node_config_t node; /* 指针指向下面的缓冲区 */
-    char name[NAME_MAX];
+    char name[ZRI_NAME_MAX];
     char bind_host[ENDPOINT_MAX];
     char discovery_host[ENDPOINT_MAX];
     static_route_t routes[CONFIG_MAX_ROUTES];

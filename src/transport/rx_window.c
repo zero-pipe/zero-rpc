@@ -59,6 +59,9 @@ int zri_rx_window_accept(zri_rx_window_t *window, uint16_t seq)
         window->max = seq;
         diff = 0;
     }
+    if (bit_test(window, diff)) {
+        return 0; /* duplicate within the window: do not redeliver */
+    }
     bit_set(window, diff);
     if (seq_diff16(seq, window->max) > 0) {
         window->max = seq;

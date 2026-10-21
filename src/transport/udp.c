@@ -550,6 +550,7 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_me
     /* 仅把 envelope 头 + route 编进栈上前缀；payload 保持借用，不做整包拷贝。 */
     memset(&envelope, 0, sizeof(envelope));
     envelope.kind = msg->kind;
+    envelope.flags = msg->flags;
     envelope.status = msg->status;
     envelope.encoding = msg->payload.encoding;
     envelope.request_id = msg->request_id;

@@ -31,6 +31,7 @@ static void provider_on_receive(void *receiver,
         message->stream.stream_id != 0;
     memset(&msg, 0, sizeof(msg));
     msg.kind = message->kind;
+    msg.flags = message->flags;
     msg.status = message->status;
     msg.request_id = message->request_id;
     msg.route = message->route;
@@ -64,6 +65,7 @@ static void provider_message_from(const zri_message_t *src, transport_message_t 
 {
     memset(dst, 0, sizeof(*dst));
     dst->kind = src->kind;
+    dst->flags = src->flags;
     dst->status = src->status;
     dst->request_id = src->request_id;
     if (src->has_stream) {

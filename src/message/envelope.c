@@ -37,7 +37,7 @@ size_t zri_envelope_encode(uint8_t *buf, size_t cap, const zri_envelope_t *envel
     p[0] = envelope->kind;
     p[1] = envelope->encoding;
     p[2] = envelope->stream_flags;
-    p[3] = 0;
+    p[3] = envelope->flags;
     zri_put_u32(p + 4, (uint32_t)envelope->status);
     zri_put_u32(p + 8, envelope->request_id);
     zri_put_u32(p + 12, envelope->stream_id);
@@ -84,6 +84,7 @@ int zri_envelope_decode(const uint8_t *buf, size_t len, zri_envelope_t *view)
     view->kind = buf[0];
     view->encoding = buf[1];
     view->stream_flags = buf[2];
+    view->flags = buf[3];
     view->status = (int)zri_get_u32(buf + 4);
     view->request_id = zri_get_u32(buf + 8);
     view->stream_id = zri_get_u32(buf + 12);
@@ -124,6 +125,7 @@ void zri_envelope_to_message(const zri_envelope_t *envelope,
     route_buf[route_len] = '\0';
 
     out->kind = envelope->kind;
+    out->flags = envelope->flags;
     out->status = envelope->status;
     out->request_id = envelope->request_id;
     out->timeout_ms = envelope->timeout_ms;

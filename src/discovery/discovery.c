@@ -202,7 +202,7 @@ static void peer_store(node_t *node,
         off += sl;
     }
     {
-        char instance_id[NAME_MAX];
+        char instance_id[ZRI_NAME_MAX];
         int n = snprintf(instance_id,
                          sizeof(instance_id),
                          "%s-%08x",
@@ -234,7 +234,7 @@ static void disc_handle_frame(node_t *node, const char *ip, const uint8_t *buf, 
     uint8_t flags;
     size_t off;
     uint8_t name_len;
-    char remote_name[NAME_MAX];
+    char remote_name[ZRI_NAME_MAX];
     uint16_t svc_count;
     size_t svc_len;
     size_t binding_len;

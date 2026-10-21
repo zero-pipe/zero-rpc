@@ -8,9 +8,6 @@
 
 /* 小工具：跨模块共享的内联辅助（避免多文件重复定义）。 */
 
-/* "service.method" 路由串的最大长度（含结尾 '\0'）。 */
-#define ROUTE_MAX (SERVICE_NAME_MAX + METHOD_NAME_MAX + 2)
-
 /* 单调毫秒时钟（实现于 node.c）。 */
 uint64_t zri_now_ms(void);
 

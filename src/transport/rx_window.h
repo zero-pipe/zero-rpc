@@ -19,7 +19,7 @@ typedef struct zri_rx_window {
 } zri_rx_window_t;
 
 void zri_rx_window_reset(zri_rx_window_t *window);
-/* Returns 1 for a sequence accepted into the window, 0 for an old duplicate. */
+/* Returns 1 for a new sequence, 0 for a duplicate (old or still in-window). */
 int zri_rx_window_accept(zri_rx_window_t *window, uint16_t seq);
 size_t zri_rx_window_missing(const zri_rx_window_t *window, uint16_t *out, size_t cap);
 

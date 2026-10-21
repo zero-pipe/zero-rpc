@@ -407,11 +407,12 @@ int stub_call_ex(stub_t *stub,
     if (rc != OK) {
         return rc;
     }
-    id = stub_next_id(stub->node);
     if (metadata &&
         metadata_encode(metadata, metadata_buf, sizeof(metadata_buf), &metadata_len) != OK) {
-        metadata_len = 0;
+        rpc_log_error("metadata encode failed (too large?): service=%s method=%s", service, method);
+        return ERR_TOOBIG;
     }
+    id = stub_next_id(stub->node);
     if (ntk_poller_is_current_thread(stub->node->poller)) {
         stub_event_now(
             stub, id, service, method, data, len, encoding, metadata_buf, (uint16_t)metadata_len);
@@ -480,11 +481,12 @@ int zri_stub_call_ex(stub_t *stub,
     if (rc != OK) {
         return rc;
     }
-    id = stub_next_id(stub->node);
     if (metadata &&
         metadata_encode(metadata, metadata_buf, sizeof(metadata_buf), &metadata_len) != OK) {
-        metadata_len = 0;
+        rpc_log_error("metadata encode failed (too large?): service=%s method=%s", service, method);
+        return ERR_TOOBIG;
     }
+    id = stub_next_id(stub->node);
 
     if (ntk_poller_is_current_thread(stub->node->poller)) {
         stub_call_now(stub,

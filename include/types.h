@@ -30,6 +30,13 @@ extern "C" {
 #define ERR_TOOBIG (-8)
 #define ERR_CLOSED (-9)
 
+/* ---- 消息标志 ---- */
+/*
+ * 响应包的 status 字段承载框架错误码（如 ERR_AGAIN），而非应用状态。
+ * 应用状态码仍只通过 response_t.status 传递。
+ */
+#define MSG_FLAG_FRAMEWORK_STATUS 0x01u
+
 /* ---- 元数据（对齐 gRPC metadata：字符串 key + 二进制 value） ---- */
 #define METADATA_MAX_ENTRIES 16
 #define METADATA_KEY_MAX 64
@@ -170,7 +177,7 @@ typedef void (*stream_done_fn)(int status, void *user);
 #endif
 
 /* 名称与地址长度上限 */
-#define NAME_MAX 64
+#define ZRI_NAME_MAX 64
 #define SERVICE_NAME_MAX 64
 #define METHOD_NAME_MAX 64
 #define ENDPOINT_MAX 64

@@ -675,12 +675,8 @@ static int run_overload_case(transport_kind_t kind, const char *label)
     if (ntk_sem_timedwait(second.sem, 2000) != NTK_OK) {
         rpc_log_error("[%s] overloaded call was not rejected", label);
         failed = 1;
-    } else if (second.status != OK || second.app_status != ERR_AGAIN) {
-        rpc_log_error("[%s] overloaded call status=%d app_status=%d (want %d)",
-                      label,
-                      second.status,
-                      second.app_status,
-                      ERR_AGAIN);
+    } else if (second.status != ERR_AGAIN) {
+        rpc_log_error("[%s] overloaded call status=%d (want %d)", label, second.status, ERR_AGAIN);
         failed = 1;
     }
 
@@ -859,11 +855,8 @@ static int run_executor_case(transport_kind_t kind, const char *label)
     if (ntk_sem_timedwait(rejected.sem, 3000) != NTK_OK) {
         rpc_log_error("[%s] reject call timeout", label);
         failed = 1;
-    } else if (rejected.status != OK || rejected.app_status != ERR_AGAIN) {
-        rpc_log_error("[%s] reject response bad status=%d app_status=%d",
-                      label,
-                      rejected.status,
-                      rejected.app_status);
+    } else if (rejected.status != ERR_AGAIN) {
+        rpc_log_error("[%s] reject response bad status=%d", label, rejected.status);
         failed = 1;
     }
 

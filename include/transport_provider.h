@@ -16,7 +16,8 @@ typedef struct transport_instance transport_instance_t;
 /* ---- 消息与回调 ---- */
 typedef struct transport_message {
     uint8_t kind;
-    int status; /* 应用状态码；仅 RESPONSE 有意义 */
+    uint8_t flags; /* MSG_FLAG_*；随包透传 */
+    int status; /* RESPONSE：应用状态码；带 MSG_FLAG_FRAMEWORK_STATUS 时为框架错误码 */
     uint32_t request_id;
     stream_meta_t stream;
     const char *route;

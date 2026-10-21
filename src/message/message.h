@@ -28,7 +28,8 @@ typedef void *zri_peer_token_t;
 
 typedef struct zri_message {
     uint8_t kind;         /* KIND_REQUEST / RESPONSE / EVENT */
-    int status;           /* 应用状态码；仅 RESPONSE 有意义 */
+    uint8_t flags;        /* MSG_FLAG_*；随 envelope 透传 */
+    int status;           /* RESPONSE：应用状态码，或带框架标志时的框架错误码 */
     uint32_t request_id;  /* 请求/响应关联 ID */
     uint32_t timeout_ms;  /* 请求剩余超时毫秒；0 = 无 deadline */
     const void *metadata; /* metadata TLV 字节；可为 NULL */

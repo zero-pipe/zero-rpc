@@ -678,6 +678,7 @@ static int tcp_send_common(zri_tcp_transport_t *t, zri_tcp_link_t *link, const z
 
     memset(&header_envelope, 0, sizeof(header_envelope));
     header_envelope.kind = msg->kind;
+    header_envelope.flags = msg->flags;
     header_envelope.status = msg->status;
     header_envelope.encoding = msg->payload.encoding;
     header_envelope.request_id = msg->request_id;

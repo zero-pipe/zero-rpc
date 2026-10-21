@@ -11,6 +11,8 @@
 #include "mem.h"
 #include "util.h"
 
+#include <log.h>
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -26,7 +28,8 @@ static int send_reply(zri_transport_t *transport,
                       const char *message,
                       uint16_t message_len,
                       const payload_t *payload,
-                      const stream_meta_t *stream)
+                      const stream_meta_t *stream,
+                      uint8_t flags)
 {
     zri_message_t reply;
     if (!transport || !request) {
@@ -38,6 +41,7 @@ static int send_reply(zri_transport_t *transport,
     }
     reply = *request;
     reply.kind = KIND_RESPONSE;
+    reply.flags = flags;
     reply.status = status;
     reply.route = NULL;
     reply.metadata = metadata;
@@ -153,7 +157,8 @@ static void reply_task_fn(void *user)
                      t->message_len ? t->message : NULL,
                      t->message_len,
                      &payload,
-                     stream_ptr);
+                     stream_ptr,
+                     0);
     reply_task_destroy(t);
 }
 
@@ -199,6 +204,9 @@ static int reply_marshal(call_t *call,
         size_t meta_len = 0;
         if (metadata_encode(metadata, t->metadata, sizeof(t->metadata), &meta_len) == OK) {
             t->metadata_len = (uint16_t)meta_len;
+        } else {
+            rpc_log_warn("reply metadata dropped (encode failed): id=%u",
+                         (unsigned)t->msg_id);
         }
     }
     if (message && message[0]) {
@@ -250,7 +258,8 @@ void zri_service_send_status(zri_transport_t *transport, const zri_message_t *re
         return;
     }
     memset(&empty, 0, sizeof(empty));
-    (void)send_reply(transport, request, status, NULL, 0, NULL, 0, &empty, NULL);
+    (void)send_reply(
+        transport, request, status, NULL, 0, NULL, 0, &empty, NULL, MSG_FLAG_FRAMEWORK_STATUS);
 }
 
 /* ---- 回复 ---- */
@@ -277,6 +286,8 @@ void reply_ex(call_t *call,
     }
     if (metadata && metadata->count > 0) {
         if (metadata_encode(metadata, meta_buf, sizeof(meta_buf), &meta_len) != OK) {
+            rpc_log_warn("reply metadata dropped (encode failed): id=%u",
+                         (unsigned)call->msg_id);
             meta_len = 0;
         }
     }
@@ -293,7 +304,8 @@ void reply_ex(call_t *call,
                      message,
                      message ? (uint16_t)strlen(message) : 0,
                      payload,
-                     NULL);
+                     NULL,
+                     0);
     if (!call->stream_owned) {
         call_release(call);
     }
@@ -352,6 +364,8 @@ int reply_stream(call_t *call, int status, const chunk_t *chunk)
 
     if (chunk && chunk->metadata && chunk->metadata->count > 0) {
         if (metadata_encode(chunk->metadata, meta_buf, sizeof(meta_buf), &meta_len) != OK) {
+            rpc_log_warn("stream chunk metadata dropped (encode failed): id=%u",
+                         (unsigned)call->msg_id);
             meta_len = 0;
         }
     }
@@ -364,7 +378,8 @@ int reply_stream(call_t *call, int status, const chunk_t *chunk)
                     chunk ? chunk->message : NULL,
                     chunk && chunk->message ? (uint16_t)strlen(chunk->message) : 0,
                     &payload,
-                    &stream);
+                    &stream,
+                    0);
     if (chunk && (chunk->flags & STREAM_LAST)) {
         call->replied = 1;
         if (!call->stream_owned) {

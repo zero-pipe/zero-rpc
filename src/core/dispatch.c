@@ -100,6 +100,11 @@ static void node_dispatch(node_t *node, zri_transport_t *transport, const zri_me
         }
         node->metrics.responses_received++;
         node->metrics.bytes_received += msg->payload.len;
+        if (msg->flags & MSG_FLAG_FRAMEWORK_STATUS) {
+            /* 框架错误走回调 status 通道，response_t.status 只放业务码。 */
+            zri_pending_invoke(p, msg->status, NULL);
+            return;
+        }
         pending_attach_response(p, msg);
         if (p->streaming) {
             int app_status = msg->status;
@@ -182,7 +187,7 @@ int zri_node_send_call(node_t *node,
                        uint16_t metadata_len)
 {
     zri_message_t message;
-    char route[ROUTE_MAX];
+    char route[MAX_ROUTE];
 
     if (!node || !target || !service || !method || !target->ip[0] || !target->port) {
         return ERR_INVALID;
