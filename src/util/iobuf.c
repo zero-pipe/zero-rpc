@@ -4,14 +4,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-static zri_iobuf_blk_t *blk_new(ntk_buf *owner, const void *data, size_t len)
+static nb_iobuf_blk_t *nb_blk_new(ntk_buf *owner, const void *data, size_t len)
 {
-    zri_iobuf_blk_t *blk;
+    nb_iobuf_blk_t *blk;
 
     if (!data || len == 0) {
         return NULL;
     }
-    blk = (zri_iobuf_blk_t *)zri_mem_alloc(sizeof(*blk));
+    blk = (nb_iobuf_blk_t *)nb_mem_alloc(sizeof(*blk));
     if (!blk) {
         return NULL;
     }
@@ -23,7 +23,7 @@ static zri_iobuf_blk_t *blk_new(ntk_buf *owner, const void *data, size_t len)
     return blk;
 }
 
-static void blk_release(zri_iobuf_blk_t *blk)
+static void nb_blk_release(nb_iobuf_blk_t *blk)
 {
     if (!blk) {
         return;
@@ -31,10 +31,10 @@ static void blk_release(zri_iobuf_blk_t *blk)
     if (blk->owner) {
         ntk_buf_unref(blk->owner);
     }
-    zri_mem_free(blk);
+    nb_mem_free(blk);
 }
 
-static int iobuf_push(zri_iobuf_t *b, zri_iobuf_blk_t *blk)
+static int nb_iobuf_push(nb_iobuf_t *b, nb_iobuf_blk_t *blk)
 {
     if (!b || !blk) {
         return -1;
@@ -49,7 +49,7 @@ static int iobuf_push(zri_iobuf_t *b, zri_iobuf_blk_t *blk)
     return 0;
 }
 
-void zri_iobuf_init(zri_iobuf_t *b)
+void nb_iobuf_init(nb_iobuf_t *b)
 {
     if (!b) {
         return;
@@ -59,36 +59,36 @@ void zri_iobuf_init(zri_iobuf_t *b)
     b->total = 0;
 }
 
-void zri_iobuf_reset(zri_iobuf_t *b)
+void nb_iobuf_reset(nb_iobuf_t *b)
 {
-    zri_iobuf_blk_t *blk;
+    nb_iobuf_blk_t *blk;
 
     if (!b) {
         return;
     }
     blk = b->head;
     while (blk) {
-        zri_iobuf_blk_t *next = blk->next;
-        blk_release(blk);
+        nb_iobuf_blk_t *next = blk->next;
+        nb_blk_release(blk);
         blk = next;
     }
-    zri_iobuf_init(b);
+    nb_iobuf_init(b);
 }
 
-size_t zri_iobuf_len(const zri_iobuf_t *b)
+size_t nb_iobuf_len(const nb_iobuf_t *b)
 {
     return b ? b->total : 0;
 }
 
-int zri_iobuf_empty(const zri_iobuf_t *b)
+int nb_iobuf_empty(const nb_iobuf_t *b)
 {
     return (!b || b->total == 0) ? 1 : 0;
 }
 
-int zri_iobuf_append_copy(zri_iobuf_t *b, ntk_poller *poller, const void *data, size_t len)
+int nb_iobuf_append_copy(nb_iobuf_t *b, ntk_poller *poller, const void *data, size_t len)
 {
     ntk_buf *owner;
-    zri_iobuf_blk_t *blk;
+    nb_iobuf_blk_t *blk;
 
     if (!b || !data || len == 0) {
         return -1;
@@ -99,60 +99,60 @@ int zri_iobuf_append_copy(zri_iobuf_t *b, ntk_poller *poller, const void *data, 
     }
     memcpy((void *)ntk_buf_data(owner), data, len);
     ntk_buf_set_len(owner, len);
-    blk = blk_new(owner, ntk_buf_data(owner), len);
+    blk = nb_blk_new(owner, ntk_buf_data(owner), len);
     if (!blk) {
         ntk_buf_unref(owner);
         return -1;
     }
-    blk->owner = owner; /* blk_new 已赋值，这里显式强调所有权 */
-    if (iobuf_push(b, blk) != 0) {
-        blk_release(blk);
+    blk->owner = owner; /* nb_blk_new 已赋值，这里显式强调所有权 */
+    if (nb_iobuf_push(b, blk) != 0) {
+        nb_blk_release(blk);
         return -1;
     }
     return 0;
 }
 
-int zri_iobuf_append_buf(zri_iobuf_t *b, ntk_buf *owner, const void *data, size_t len)
+int nb_iobuf_append_buf(nb_iobuf_t *b, ntk_buf *owner, const void *data, size_t len)
 {
-    zri_iobuf_blk_t *blk;
+    nb_iobuf_blk_t *blk;
 
     if (!b || !owner || !data || len == 0) {
         return -1;
     }
     ntk_buf_ref(owner); /* block 持有一份引用 */
-    blk = blk_new(owner, data, len);
+    blk = nb_blk_new(owner, data, len);
     if (!blk) {
         ntk_buf_unref(owner);
         return -1;
     }
-    if (iobuf_push(b, blk) != 0) {
-        blk_release(blk);
+    if (nb_iobuf_push(b, blk) != 0) {
+        nb_blk_release(blk);
         return -1;
     }
     return 0;
 }
 
-int zri_iobuf_append_borrow(zri_iobuf_t *b, const void *data, size_t len)
+int nb_iobuf_append_borrow(nb_iobuf_t *b, const void *data, size_t len)
 {
-    zri_iobuf_blk_t *blk;
+    nb_iobuf_blk_t *blk;
 
     if (!b || !data || len == 0) {
         return -1;
     }
-    blk = blk_new(NULL, data, len); /* 无主内存：借用，不参与引用计数 */
+    blk = nb_blk_new(NULL, data, len); /* 无主内存：借用，不参与引用计数 */
     if (!blk) {
         return -1;
     }
-    if (iobuf_push(b, blk) != 0) {
-        blk_release(blk);
+    if (nb_iobuf_push(b, blk) != 0) {
+        nb_blk_release(blk);
         return -1;
     }
     return 0;
 }
 
-static const zri_iobuf_blk_t *blk_at_offset(const zri_iobuf_t *b, size_t off, size_t *blk_off)
+static const nb_iobuf_blk_t *nb_blk_at_offset(const nb_iobuf_t *b, size_t off, size_t *blk_off)
 {
-    const zri_iobuf_blk_t *blk = b->head;
+    const nb_iobuf_blk_t *blk = b->head;
 
     while (blk) {
         size_t remain = blk->len - blk->off;
@@ -168,7 +168,7 @@ static const zri_iobuf_blk_t *blk_at_offset(const zri_iobuf_t *b, size_t off, si
     return NULL;
 }
 
-size_t zri_iobuf_peek(const zri_iobuf_t *b, size_t off, void *dst, size_t n)
+size_t nb_iobuf_peek(const nb_iobuf_t *b, size_t off, void *dst, size_t n)
 {
     uint8_t *out = (uint8_t *)dst;
     size_t done = 0;
@@ -178,7 +178,7 @@ size_t zri_iobuf_peek(const zri_iobuf_t *b, size_t off, void *dst, size_t n)
     }
     while (done < n && b->total > off) {
         size_t blk_off = 0;
-        const zri_iobuf_blk_t *blk = blk_at_offset(b, off, &blk_off);
+        const nb_iobuf_blk_t *blk = nb_blk_at_offset(b, off, &blk_off);
         size_t remain;
         size_t take;
         if (!blk) {
@@ -198,12 +198,12 @@ size_t zri_iobuf_peek(const zri_iobuf_t *b, size_t off, void *dst, size_t n)
     return done;
 }
 
-unsigned zri_iobuf_iovec(const zri_iobuf_t *b,
+unsigned nb_iobuf_iovec(const nb_iobuf_t *b,
                          ntk_socket_iov *iov,
                          unsigned max_count,
                          size_t max_bytes)
 {
-    const zri_iobuf_blk_t *blk;
+    const nb_iobuf_blk_t *blk;
     unsigned n = 0;
     size_t total = 0;
 
@@ -232,13 +232,13 @@ unsigned zri_iobuf_iovec(const zri_iobuf_t *b,
     return n;
 }
 
-void zri_iobuf_consume(zri_iobuf_t *b, size_t n)
+void nb_iobuf_consume(nb_iobuf_t *b, size_t n)
 {
     if (!b || n == 0) {
         return;
     }
     while (n > 0 && b->head) {
-        zri_iobuf_blk_t *blk = b->head;
+        nb_iobuf_blk_t *blk = b->head;
         size_t remain = blk->len - blk->off;
         if (n < remain) {
             blk->off += n;
@@ -252,13 +252,13 @@ void zri_iobuf_consume(zri_iobuf_t *b, size_t n)
         if (!b->head) {
             b->tail = NULL;
         }
-        blk_release(blk);
+        nb_blk_release(blk);
     }
 }
 
-const uint8_t *zri_iobuf_view(zri_iobuf_t *b, size_t n, ntk_poller *poller, ntk_buf **scratch)
+const uint8_t *nb_iobuf_view(nb_iobuf_t *b, size_t n, ntk_poller *poller, ntk_buf **scratch)
 {
-    const zri_iobuf_blk_t *blk;
+    const nb_iobuf_blk_t *blk;
     size_t head_remain;
 
     if (!b || n == 0) {
@@ -287,7 +287,7 @@ const uint8_t *zri_iobuf_view(zri_iobuf_t *b, size_t n, ntk_poller *poller, ntk_
         }
         *scratch = nb;
     }
-    if (zri_iobuf_peek(b, 0, (void *)ntk_buf_data(*scratch), n) != n) {
+    if (nb_iobuf_peek(b, 0, (void *)ntk_buf_data(*scratch), n) != n) {
         return NULL;
     }
     ntk_buf_set_len(*scratch, n);

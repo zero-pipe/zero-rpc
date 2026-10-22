@@ -27,56 +27,56 @@
 extern "C" {
 #endif
 
-typedef struct zri_iobuf_blk {
-    struct zri_iobuf_blk *next;
+typedef struct nb_iobuf_blk {
+    struct nb_iobuf_blk *next;
     ntk_buf *owner; /* 引用计数块；NULL 表示借用/无主内存 */
     const uint8_t *data;
     size_t off; /* 已消费字节（相对 data） */
     size_t len; /* 有效字节 */
-} zri_iobuf_blk_t;
+} nb_iobuf_blk_t;
 
-typedef struct zri_iobuf {
-    zri_iobuf_blk_t *head;
-    zri_iobuf_blk_t *tail;
+typedef struct nb_iobuf {
+    nb_iobuf_blk_t *head;
+    nb_iobuf_blk_t *tail;
     size_t total; /* 未消费字节数 */
-} zri_iobuf_t;
+} nb_iobuf_t;
 
-void zri_iobuf_init(zri_iobuf_t *b);
+void nb_iobuf_init(nb_iobuf_t *b);
 /* 释放所有 block（含未消费部分）。调用后 iobuf 处于已 init 的空状态。 */
-void zri_iobuf_reset(zri_iobuf_t *b);
+void nb_iobuf_reset(nb_iobuf_t *b);
 
-size_t zri_iobuf_len(const zri_iobuf_t *b);
-int zri_iobuf_empty(const zri_iobuf_t *b);
+size_t nb_iobuf_len(const nb_iobuf_t *b);
+int nb_iobuf_empty(const nb_iobuf_t *b);
 
 /*
  * 追加一段。owner 非空时对其 +1 引用，data 必须是该 ntk_buf 数据区内的一段。
  * 返回 0 成功，-1 失败（不改变原有内容）。
  */
-int zri_iobuf_append_copy(zri_iobuf_t *b, ntk_poller *poller, const void *data, size_t len);
-int zri_iobuf_append_buf(zri_iobuf_t *b, ntk_buf *owner, const void *data, size_t len);
-int zri_iobuf_append_borrow(zri_iobuf_t *b, const void *data, size_t len);
+int nb_iobuf_append_copy(nb_iobuf_t *b, ntk_poller *poller, const void *data, size_t len);
+int nb_iobuf_append_buf(nb_iobuf_t *b, ntk_buf *owner, const void *data, size_t len);
+int nb_iobuf_append_borrow(nb_iobuf_t *b, const void *data, size_t len);
 
 /* 从逻辑偏移 off 起拷贝 n 字节到 dst（不消费）。返回实际拷贝字节数。 */
-size_t zri_iobuf_peek(const zri_iobuf_t *b, size_t off, void *dst, size_t n);
+size_t nb_iobuf_peek(const nb_iobuf_t *b, size_t off, void *dst, size_t n);
 
 /*
  * 把前缀导出为 iovec。最多 max_count 段、累计不超过 max_bytes（max_bytes=0 表示不限）。
  * 返回写入的 iov 数量。
  */
-unsigned zri_iobuf_iovec(const zri_iobuf_t *b,
+unsigned nb_iobuf_iovec(const nb_iobuf_t *b,
                          ntk_socket_iov *iov,
                          unsigned max_count,
                          size_t max_bytes);
 
 /* 消费前缀 n 字节；整块消费完的 block 自动释放。n 超过当前长度时消费全部。 */
-void zri_iobuf_consume(zri_iobuf_t *b, size_t n);
+void nb_iobuf_consume(nb_iobuf_t *b, size_t n);
 
 /*
  * 取前缀 n 字节的连续视图：若已连续（落在单个 block 内）直接返回内部指针，
  * 不拷贝；否则拷贝进 *scratch（必要时从 poller 池分配/扩容），返回其数据指针。
  * 返回值在下次 consume/reset 前有效。*scratch 可为 NULL（调用方不需要回收）。
  */
-const uint8_t *zri_iobuf_view(zri_iobuf_t *b, size_t n, ntk_poller *poller, ntk_buf **scratch);
+const uint8_t *nb_iobuf_view(nb_iobuf_t *b, size_t n, ntk_poller *poller, ntk_buf **scratch);
 
 #ifdef __cplusplus
 }

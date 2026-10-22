@@ -12,40 +12,40 @@
 #include "caps.h"
 #include "pending.h"
 
-struct proxy {
-    node_t *node;
+struct nb_proxy {
+    nb_node_t *node;
     uint8_t payload_encoding;
     uint32_t prefer_stream_threshold;
-    stub_t *stub;
+    nb_stub_t *stub;
     int has_endpoint;
-    char endpoint_ip[ENDPOINT_MAX];
-    char endpoint_scheme[SCHEME_MAX];
+    char endpoint_ip[NB_ENDPOINT_MAX];
+    char endpoint_scheme[NB_SCHEME_MAX];
     uint16_t endpoint_port;
-    transport_kind_t endpoint_transport;
+    nb_transport_kind_t endpoint_transport;
     int has_interceptor;
-    proxy_interceptor_t interceptor;
+    nb_proxy_interceptor_t interceptor;
 };
 
 /* Stub：node 之上的传输无关调用原语；proxy 在它之上注入路由。 */
-struct stub {
-    node_t *node;
+struct nb_stub {
+    nb_node_t *node;
     uint8_t payload_encoding;
     stub_send_fn send;
     void *user_data;
 };
 
-struct stream {
-    proxy_t *proxy;
-    stub_t *stub; /* open 后只依赖 stub 指针做 owner 标记，不再解引用 proxy */
-    node_t *node;
+struct nb_stream {
+    nb_proxy_t *proxy;
+    nb_stub_t *stub; /* open 后只依赖 stub 指针做 owner 标记，不再解引用 proxy */
+    nb_node_t *node;
     uint64_t request_id;
     uint32_t stream_id;
-    char service[SERVICE_NAME_MAX];
-    char method[METHOD_NAME_MAX];
-    char ip[ENDPOINT_MAX];
-    char scheme[SCHEME_MAX];
+    char service[NB_SERVICE_NAME_MAX];
+    char method[NB_METHOD_NAME_MAX];
+    char ip[NB_ENDPOINT_MAX];
+    char scheme[NB_SCHEME_MAX];
     uint16_t port;
-    transport_kind_t transport;
+    nb_transport_kind_t transport;
     response_fn cb;
     response_chunk_fn chunk_cb;
     stream_done_fn done_cb;
@@ -59,21 +59,21 @@ struct stream {
     int closed;
 };
 
-int zri_proxy_resolve(proxy_t *proxy,
+int nb_proxy_resolve(nb_proxy_t *proxy,
                       const char *service,
                       char *ip_out,
                       size_t ip_cap,
                       uint16_t *port_out,
-                      transport_kind_t *transport_out,
+                      nb_transport_kind_t *transport_out,
                       char *scheme_out,
                       size_t scheme_cap,
                       int prefer_stream);
 
 /* stub.c：带流式回调的内部调用入口；供 proxy 复用。 */
-int zri_stub_call_ex(stub_t *stub,
+int nb_stub_call_ex(nb_stub_t *stub,
                      const char *service,
                      const char *method,
-                     const payload_t *payload,
+                     const nb_payload_t *payload,
                      response_fn cb,
                      response_chunk_fn chunk_cb,
                      stream_done_fn done_cb,
@@ -81,9 +81,9 @@ int zri_stub_call_ex(stub_t *stub,
                      void *user,
                      uint64_t timeout_ms,
                      uint64_t *out_request_id,
-                     const metadata_t *metadata);
+                     const nb_metadata_t *metadata);
 
 /* 取消该 stub 名下所有未完成调用（proxy/stub 销毁前调用，避免回调 UAF）。 */
-int zri_stub_cancel_all(stub_t *stub, int status);
+int nb_stub_cancel_all(nb_stub_t *stub, int status);
 
 #endif /* PROXY_INTERNAL_H */

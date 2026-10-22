@@ -4,7 +4,7 @@
 #include <platform.h>
 #include <thread/sem.h>
 
-#define RPC_LOG_TAG "test"
+#define NB_LOG_TAG "test"
 #include <log.h>
 
 #include <stdio.h>
@@ -18,29 +18,29 @@ typedef struct upload_state {
     char buf[256];
 } upload_state_t;
 
-static void on_upload(call_t *call, const request_t *req, const chunk_t *chunk, void *user)
+static void on_upload(nb_call_t *call, const nb_request_t *req, const nb_chunk_t *chunk, void *user)
 {
     upload_state_t *st = (upload_state_t *)user;
     (void)req;
     st->chunks++;
-    if (chunk->flags & STREAM_FIRST) {
+    if (chunk->flags & NB_STREAM_FIRST) {
         st->first_seen++;
     }
     if (chunk->len > 0 && st->bytes + chunk->len <= sizeof(st->buf)) {
         memcpy(st->buf + st->bytes, chunk->data, chunk->len);
         st->bytes += chunk->len;
     }
-    if (chunk->flags & STREAM_LAST) {
+    if (chunk->flags & NB_STREAM_LAST) {
         st->last_seen++;
-        reply_bytes(call, 0, st->buf, st->bytes);
+        nb_reply_bytes(call, 0, st->buf, st->bytes);
     }
 }
 
-static void on_bidi(call_t *call, const request_t *req, const chunk_t *chunk, void *user)
+static void on_bidi(nb_call_t *call, const nb_request_t *req, const nb_chunk_t *chunk, void *user)
 {
     (void)req;
     (void)user;
-    (void)reply_stream(call, 0, chunk);
+    (void)nb_reply_stream(call, 0, chunk);
 }
 
 typedef struct client_state {
@@ -50,11 +50,11 @@ typedef struct client_state {
     size_t len;
 } client_state_t;
 
-static void on_response(int status, const response_t *resp, void *user)
+static void on_response(int status, const nb_response_t *resp, void *user)
 {
     client_state_t *st = (client_state_t *)user;
     st->status = status;
-    if (status == OK && resp && resp->payload.len <= sizeof(st->buf)) {
+    if (status == NB_OK && resp && resp->payload.len <= sizeof(st->buf)) {
         memcpy(st->buf, resp->payload.data, resp->payload.len);
         st->len = resp->payload.len;
         st->buf[resp->payload.len] = '\0';
@@ -64,19 +64,19 @@ static void on_response(int status, const response_t *resp, void *user)
 
 static const char k_download[] = "0123456789ABCDEF";
 
-static void on_download(call_t *call, const request_t *req, void *user)
+static void on_download(nb_call_t *call, const nb_request_t *req, void *user)
 {
     size_t i;
     (void)req;
     (void)user;
     for (i = 0; i < 4; i++) {
-        chunk_t chunk;
+        nb_chunk_t chunk;
         memset(&chunk, 0, sizeof(chunk));
         chunk.data = k_download + i * 4;
         chunk.len = 4;
         chunk.offset = i * 4;
-        chunk.flags = (i == 0 ? STREAM_FIRST : 0) | (i == 3 ? STREAM_LAST : 0);
-        (void)reply_stream(call, 0, &chunk);
+        chunk.flags = (i == 0 ? NB_STREAM_FIRST : 0) | (i == 3 ? NB_STREAM_LAST : 0);
+        (void)nb_reply_stream(call, 0, &chunk);
     }
 }
 
@@ -90,14 +90,14 @@ typedef struct download_client {
     int status;
 } download_client_t;
 
-static void on_download_chunk(int status, const chunk_t *chunk, void *user)
+static void on_download_chunk(int status, const nb_chunk_t *chunk, void *user)
 {
     download_client_t *c = (download_client_t *)user;
-    if (status != OK) {
+    if (status != NB_OK) {
         return;
     }
     c->chunks++;
-    if (chunk->flags & STREAM_LAST) {
+    if (chunk->flags & NB_STREAM_LAST) {
         c->last++;
     }
     if (chunk->len > 0 && c->len + chunk->len <= sizeof(c->buf)) {
@@ -116,14 +116,14 @@ static void on_download_done(int status, void *user)
     }
 }
 
-static void on_bidi_chunk(int status, const chunk_t *chunk, void *user)
+static void on_bidi_chunk(int status, const nb_chunk_t *chunk, void *user)
 {
     download_client_t *c = (download_client_t *)user;
-    if (status != OK) {
+    if (status != NB_OK) {
         return;
     }
     c->chunks++;
-    if (chunk->flags & STREAM_LAST) {
+    if (chunk->flags & NB_STREAM_LAST) {
         c->last++;
     }
     if (c->len + chunk->len <= sizeof(c->buf)) {
@@ -132,15 +132,15 @@ static void on_bidi_chunk(int status, const chunk_t *chunk, void *user)
     }
 }
 
-static int run_case(transport_kind_t transport, const char *label, uint16_t sdisc, uint16_t cdisc)
+static int run_case(nb_transport_kind_t transport, const char *label, uint16_t sdisc, uint16_t cdisc)
 {
-    node_config_t scfg;
-    node_config_t ccfg;
-    node_t *server = NULL;
-    node_t *client = NULL;
-    service_t *svc = NULL;
-    proxy_t *proxy = NULL;
-    stream_t *stream = NULL;
+    nb_node_config_t scfg;
+    nb_node_config_t ccfg;
+    nb_node_t *server = NULL;
+    nb_node_t *client = NULL;
+    nb_service_t *svc = NULL;
+    nb_proxy_t *proxy = NULL;
+    nb_stream_t *stream = NULL;
     upload_state_t upload;
     client_state_t cst;
     const char *expect = "hello world!";
@@ -166,75 +166,75 @@ static int run_case(transport_kind_t transport, const char *label, uint16_t sdis
     ccfg.discovery.hello_interval_ms = 200;
     ccfg.discovery.node_ttl_ms = 3000;
 
-    if (node_create(&scfg, &server) != OK || node_create(&ccfg, &client) != OK) {
-        rpc_log_error("[%s] node create failed", label);
+    if (nb_node_create(&scfg, &server) != NB_OK || nb_node_create(&ccfg, &client) != NB_OK) {
+        nb_log_error("[%s] node create failed", label);
         return 1;
     }
-    (void)node_add_discovery_peer(server, "127.0.0.1", cdisc);
-    (void)node_add_discovery_peer(client, "127.0.0.1", sdisc);
+    (void)nb_node_add_discovery_peer(server, "127.0.0.1", cdisc);
+    (void)nb_node_add_discovery_peer(client, "127.0.0.1", sdisc);
 
     memset(&upload, 0, sizeof(upload));
-    if (service_create(server, "upload", &svc) != OK ||
-        service_add_stream_method(svc, "chunk", on_upload, &upload) != OK ||
-        service_add_stream_method(svc, "chat", on_bidi, NULL) != OK ||
-        service_add_method(svc, "download", on_download, NULL) != OK) {
-        rpc_log_error("[%s] service setup failed", label);
-        node_destroy(client);
-        node_destroy(server);
+    if (nb_service_create(server, "upload", &svc) != NB_OK ||
+        nb_service_add_stream_method(svc, "chunk", on_upload, &upload) != NB_OK ||
+        nb_service_add_stream_method(svc, "chat", on_bidi, NULL) != NB_OK ||
+        nb_service_add_method(svc, "download", on_download, NULL) != NB_OK) {
+        nb_log_error("[%s] service setup failed", label);
+        nb_node_destroy(client);
+        nb_node_destroy(server);
         return 1;
     }
-    if (proxy_create(client, NULL, &proxy) != OK) {
-        rpc_log_error("[%s] proxy create failed", label);
-        node_destroy(client);
-        node_destroy(server);
+    if (nb_proxy_create(client, NULL, &proxy) != NB_OK) {
+        nb_log_error("[%s] proxy create failed", label);
+        nb_node_destroy(client);
+        nb_node_destroy(server);
         return 1;
     }
 
-    (void)node_wait_for_service(client, "upload", 5000);
+    (void)nb_node_wait_for_service(client, "upload", 5000);
 
     memset(&cst, 0, sizeof(cst));
     cst.sem = ntk_sem_create(0);
     if (!cst.sem) {
         failed = 1;
-    } else if (proxy_stream_open(proxy, "upload", "chunk", on_response, &cst, 3000, &stream) !=
-               OK) {
-        rpc_log_error("[%s] open failed", label);
+    } else if (nb_proxy_stream_open(proxy, "upload", "chunk", on_response, &cst, 3000, &stream) !=
+               NB_OK) {
+        nb_log_error("[%s] open failed", label);
         failed = 1;
     } else {
-        chunk_t chunk;
+        nb_chunk_t chunk;
         memset(&chunk, 0, sizeof(chunk));
         chunk.data = "hello ";
         chunk.len = 6;
         chunk.offset = 0;
-        chunk.flags = STREAM_FIRST;
-        if (proxy_stream_send(stream, &chunk) != OK) {
+        chunk.flags = NB_STREAM_FIRST;
+        if (nb_proxy_stream_send(stream, &chunk) != NB_OK) {
             failed = 1;
         }
         chunk.data = "world";
         chunk.len = 5;
         chunk.offset = 6;
         chunk.flags = 0;
-        if (proxy_stream_send(stream, &chunk) != OK) {
+        if (nb_proxy_stream_send(stream, &chunk) != NB_OK) {
             failed = 1;
         }
         chunk.data = "!";
         chunk.len = 1;
         chunk.offset = 11;
-        chunk.flags = STREAM_LAST;
-        if (proxy_stream_send(stream, &chunk) != OK) {
+        chunk.flags = NB_STREAM_LAST;
+        if (nb_proxy_stream_send(stream, &chunk) != NB_OK) {
             failed = 1;
         }
         if (ntk_sem_timedwait(cst.sem, 3000) != NTK_OK) {
-            rpc_log_error("[%s] response timeout", label);
+            nb_log_error("[%s] response timeout", label);
             failed = 1;
         } else {
-            if (cst.status != OK || strcmp(cst.buf, expect) != 0) {
-                rpc_log_error("[%s] bad response status=%d buf=%s", label, cst.status, cst.buf);
+            if (cst.status != NB_OK || strcmp(cst.buf, expect) != 0) {
+                nb_log_error("[%s] bad response status=%d buf=%s", label, cst.status, cst.buf);
                 failed = 1;
             }
             if (upload.chunks != 3 || upload.first_seen != 1 || upload.last_seen != 1 ||
                 upload.bytes != strlen(expect)) {
-                rpc_log_error("[%s] server state chunks=%d first=%d last=%d bytes=%zu",
+                nb_log_error("[%s] server state chunks=%d first=%d last=%d bytes=%zu",
                               label,
                               upload.chunks,
                               upload.first_seen,
@@ -245,7 +245,7 @@ static int run_case(transport_kind_t transport, const char *label, uint16_t sdis
         }
     }
     if (stream) {
-        (void)proxy_stream_destroy(stream);
+        (void)nb_proxy_stream_destroy(stream);
     }
     if (cst.sem) {
         ntk_sem_destroy(cst.sem);
@@ -259,7 +259,7 @@ static int run_case(transport_kind_t transport, const char *label, uint16_t sdis
         dc.sem = ntk_sem_create(0);
         if (!dc.sem) {
             failed = 1;
-        } else if (proxy_call_stream(proxy,
+        } else if (nb_proxy_call_stream(proxy,
                                      "upload",
                                      "download",
                                      NULL,
@@ -267,15 +267,15 @@ static int run_case(transport_kind_t transport, const char *label, uint16_t sdis
                                      on_download_done,
                                      &dc,
                                      3000,
-                                     &req_id) != OK) {
-            rpc_log_error("[%s] call_stream failed", label);
+                                     &req_id) != NB_OK) {
+            nb_log_error("[%s] call_stream failed", label);
             failed = 1;
         } else if (ntk_sem_timedwait(dc.sem, 3000) != NTK_OK) {
-            rpc_log_error("[%s] download timeout", label);
+            nb_log_error("[%s] download timeout", label);
             failed = 1;
-        } else if (dc.status != OK || dc.len != strlen(k_download) ||
+        } else if (dc.status != NB_OK || dc.len != strlen(k_download) ||
                    memcmp(dc.buf, k_download, dc.len) != 0 || dc.chunks != 4 || dc.last != 1) {
-            rpc_log_error("[%s] download mismatch status=%d len=%zu chunks=%d last=%d",
+            nb_log_error("[%s] download mismatch status=%d len=%zu chunks=%d last=%d",
                           label,
                           dc.status,
                           dc.len,
@@ -291,31 +291,31 @@ static int run_case(transport_kind_t transport, const char *label, uint16_t sdis
     /* 取消方向：发送 FIRST 后取消，本地回调应为 CLOSED，服务端清理流状态。 */
     {
         client_state_t cc;
-        stream_t *s2 = NULL;
+        nb_stream_t *s2 = NULL;
         memset(&cc, 0, sizeof(cc));
         cc.sem = ntk_sem_create(0);
         if (!cc.sem) {
             failed = 1;
-        } else if (proxy_stream_open(proxy, "upload", "chunk", on_response, &cc, 3000, &s2) != OK) {
-            rpc_log_error("[%s] cancel open failed", label);
+        } else if (nb_proxy_stream_open(proxy, "upload", "chunk", on_response, &cc, 3000, &s2) != NB_OK) {
+            nb_log_error("[%s] cancel open failed", label);
             failed = 1;
         } else {
-            chunk_t ck;
+            nb_chunk_t ck;
             memset(&ck, 0, sizeof(ck));
             ck.data = "x";
             ck.len = 1;
             ck.offset = 0;
-            ck.flags = STREAM_FIRST;
-            (void)proxy_stream_send(s2, &ck);
-            (void)proxy_stream_cancel(s2);
+            ck.flags = NB_STREAM_FIRST;
+            (void)nb_proxy_stream_send(s2, &ck);
+            (void)nb_proxy_stream_cancel(s2);
             if (ntk_sem_timedwait(cc.sem, 3000) != NTK_OK) {
-                rpc_log_error("[%s] cancel timeout", label);
+                nb_log_error("[%s] cancel timeout", label);
                 failed = 1;
-            } else if (cc.status != ERR_CLOSED) {
-                rpc_log_error("[%s] cancel status=%d", label, cc.status);
+            } else if (cc.status != NB_ERR_CLOSED) {
+                nb_log_error("[%s] cancel status=%d", label, cc.status);
                 failed = 1;
             }
-            (void)proxy_stream_destroy(s2);
+            (void)nb_proxy_stream_destroy(s2);
         }
         if (cc.sem) {
             ntk_sem_destroy(cc.sem);
@@ -325,30 +325,30 @@ static int run_case(transport_kind_t transport, const char *label, uint16_t sdis
     /* Full duplex：请求和响应同时按 chunk 进行。 */
     {
         download_client_t bc;
-        stream_t *bidi = NULL;
+        nb_stream_t *bidi = NULL;
         memset(&bc, 0, sizeof(bc));
         bc.sem = ntk_sem_create(0);
         if (!bc.sem ||
-            proxy_stream_open_bidi(
-                proxy, "upload", "chat", on_bidi_chunk, on_download_done, &bc, 3000, &bidi) != OK) {
-            rpc_log_error("[%s] bidi open failed", label);
+            nb_proxy_stream_open_bidi(
+                proxy, "upload", "chat", on_bidi_chunk, on_download_done, &bc, 3000, &bidi) != NB_OK) {
+            nb_log_error("[%s] bidi open failed", label);
             failed = 1;
         } else {
-            chunk_t ck;
+            nb_chunk_t ck;
             memset(&ck, 0, sizeof(ck));
             ck.data = "ping";
             ck.len = 4;
             ck.offset = 0;
-            ck.flags = STREAM_FIRST;
-            (void)proxy_stream_send(bidi, &ck);
+            ck.flags = NB_STREAM_FIRST;
+            (void)nb_proxy_stream_send(bidi, &ck);
             ck.data = "pong";
             ck.len = 4;
             ck.offset = 4;
-            ck.flags = STREAM_LAST;
-            (void)proxy_stream_send(bidi, &ck);
-            if (ntk_sem_timedwait(bc.sem, 3000) != NTK_OK || bc.status != OK || bc.len != 8 ||
+            ck.flags = NB_STREAM_LAST;
+            (void)nb_proxy_stream_send(bidi, &ck);
+            if (ntk_sem_timedwait(bc.sem, 3000) != NTK_OK || bc.status != NB_OK || bc.len != 8 ||
                 memcmp(bc.buf, "pingpong", 8) != 0 || bc.chunks != 2 || bc.last != 1) {
-                rpc_log_error("[%s] bidi mismatch status=%d len=%zu chunks=%d last=%d",
+                nb_log_error("[%s] bidi mismatch status=%d len=%zu chunks=%d last=%d",
                               label,
                               bc.status,
                               bc.len,
@@ -356,19 +356,19 @@ static int run_case(transport_kind_t transport, const char *label, uint16_t sdis
                               bc.last);
                 failed = 1;
             }
-            (void)proxy_stream_destroy(bidi);
+            (void)nb_proxy_stream_destroy(bidi);
         }
         if (bc.sem) {
             ntk_sem_destroy(bc.sem);
         }
     }
 
-    proxy_destroy(proxy);
-    node_destroy(client);
-    node_destroy(server);
+    nb_proxy_destroy(proxy);
+    nb_node_destroy(client);
+    nb_node_destroy(server);
 
     if (failed) {
-        rpc_log_error("[%s] FAIL", label);
+        nb_log_error("[%s] FAIL", label);
     }
     return failed;
 }
@@ -376,12 +376,12 @@ static int run_case(transport_kind_t transport, const char *label, uint16_t sdis
 int main(void)
 {
     int failed = 0;
-    failed += run_case(TRANSPORT_UDP, "udp", 43111, 43112);
-    failed += run_case(TRANSPORT_TCP, "tcp", 43113, 43114);
+    failed += run_case(NB_TRANSPORT_UDP, "udp", 43111, 43112);
+    failed += run_case(NB_TRANSPORT_TCP, "tcp", 43113, 43114);
     if (failed) {
-        rpc_log_error("stream: FAIL");
+        nb_log_error("stream: FAIL");
         return 1;
     }
-    rpc_log_info("stream: OK");
+    nb_log_info("stream: NB_OK");
     return 0;
 }

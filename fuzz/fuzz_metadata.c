@@ -9,8 +9,8 @@
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
-    metadata_t metadata;
+    nb_metadata_t metadata;
     memset(&metadata, 0, sizeof(metadata));
-    (void)metadata_decode(&metadata, data, size);
+    (void)nb_metadata_decode(&metadata, data, size);
     return 0;
 }

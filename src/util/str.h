@@ -4,7 +4,7 @@
 #include <stddef.h>
 
 /* 安全字符串拷贝：src 为空时用 def，始终 NUL 结尾。 */
-static inline void zri_copy_str(char *dst, size_t cap, const char *src, const char *def)
+static inline void nb_copy_str(char *dst, size_t cap, const char *src, const char *def)
 {
     const char *s = (src && src[0]) ? src : def;
     size_t i = 0;

@@ -6,7 +6,7 @@
 #include <platform.h>
 #include <thread/sem.h>
 
-#define RPC_LOG_TAG "test"
+#define NB_LOG_TAG "test"
 #include <log.h>
 
 #include <stdio.h>
@@ -28,31 +28,31 @@ static int g_server_interceptor_calls;
 static int g_client_before_calls;
 static int g_client_after_calls;
 
-static int server_interceptor(call_t *call, const request_t *req, void *user)
+static int server_interceptor(nb_call_t *call, const nb_request_t *req, void *user)
 {
     (void)call;
     (void)user;
     g_server_interceptor_calls++;
     if (strcmp(req->method, "deny") == 0) {
-        return ERR_AGAIN;
+        return NB_ERR_AGAIN;
     }
-    return OK;
+    return NB_OK;
 }
 
-static void echo_meta_handler(call_t *call, const request_t *req, void *user)
+static void echo_meta_handler(nb_call_t *call, const nb_request_t *req, void *user)
 {
-    metadata_t out;
-    const char *k = req->metadata ? metadata_get_string(req->metadata, "k") : NULL;
+    nb_metadata_t out;
+    const char *k = req->metadata ? nb_metadata_get_string(req->metadata, "k") : NULL;
     (void)user;
-    metadata_init(&out);
-    metadata_set_string(&out, "resp", "ok");
+    nb_metadata_init(&out);
+    nb_metadata_set_string(&out, "resp", "ok");
     if (k) {
-        metadata_set_string(&out, "seen", k);
+        nb_metadata_set_string(&out, "seen", k);
     }
-    reply_ex(call, 0, "done", &req->payload, &out);
+    nb_reply_ex(call, 0, "done", &req->payload, &out);
 }
 
-static void on_response(int status, const response_t *resp, void *user)
+static void on_response(int status, const nb_response_t *resp, void *user)
 {
     client_state_t *st = (client_state_t *)user;
     st->status = status;
@@ -62,8 +62,8 @@ static void on_response(int status, const response_t *resp, void *user)
             snprintf(st->message, sizeof(st->message), "%s", resp->message);
         }
         if (resp->metadata) {
-            const char *m = metadata_get_string(resp->metadata, "resp");
-            const char *s = metadata_get_string(resp->metadata, "seen");
+            const char *m = nb_metadata_get_string(resp->metadata, "resp");
+            const char *s = nb_metadata_get_string(resp->metadata, "seen");
             if (m)
                 snprintf(st->meta, sizeof(st->meta), "%s", m);
             if (s)
@@ -78,17 +78,17 @@ static void on_response(int status, const response_t *resp, void *user)
 }
 
 static int client_before(
-    void *ctx, const char *service, const char *method, metadata_t *md, uint64_t *timeout_ms)
+    void *ctx, const char *service, const char *method, nb_metadata_t *md, uint64_t *timeout_ms)
 {
     (void)ctx;
     (void)service;
     (void)method;
     (void)timeout_ms;
     g_client_before_calls++;
-    return metadata_set_string(md, "client", "1");
+    return nb_metadata_set_string(md, "client", "1");
 }
 
-static void client_after(void *ctx, int status, const response_t *resp)
+static void client_after(void *ctx, int status, const nb_response_t *resp)
 {
     (void)ctx;
     (void)status;
@@ -98,55 +98,55 @@ static void client_after(void *ctx, int status, const response_t *resp)
 
 static int test_metadata_unit(void)
 {
-    metadata_t md;
-    metadata_t out;
-    uint8_t wire[METADATA_WIRE_MAX];
+    nb_metadata_t md;
+    nb_metadata_t out;
+    uint8_t wire[NB_METADATA_WIRE_MAX];
     size_t wire_len = 0;
     const char *v;
     int failed = 0;
 
-    metadata_init(&md);
-    if (metadata_set_string(&md, "a", "hello") != OK ||
-        metadata_set(&md, "b", "\x01\x02\x00", 3) != OK) {
+    nb_metadata_init(&md);
+    if (nb_metadata_set_string(&md, "a", "hello") != NB_OK ||
+        nb_metadata_set(&md, "b", "\x01\x02\x00", 3) != NB_OK) {
         failed = 1;
     }
-    if (metadata_encode(&md, wire, sizeof(wire), &wire_len) != OK || wire_len == 0) {
+    if (nb_metadata_encode(&md, wire, sizeof(wire), &wire_len) != NB_OK || wire_len == 0) {
         failed = 1;
     }
-    metadata_init(&out);
-    if (metadata_decode(&out, wire, wire_len) != OK) {
+    nb_metadata_init(&out);
+    if (nb_metadata_decode(&out, wire, wire_len) != NB_OK) {
         failed = 1;
     }
-    v = metadata_get_string(&out, "a");
+    v = nb_metadata_get_string(&out, "a");
     if (!v || strcmp(v, "hello") != 0) {
         failed = 1;
     }
     {
         size_t blen = 0;
-        const uint8_t *b = (const uint8_t *)metadata_get(&out, "b", &blen);
+        const uint8_t *b = (const uint8_t *)nb_metadata_get(&out, "b", &blen);
         if (!b || blen != 3 || b[0] != 1 || b[2] != 0) {
             failed = 1;
         }
     }
     if (failed) {
-        rpc_log_error("[semantics] metadata unit failed");
+        nb_log_error("[semantics] metadata unit failed");
     }
     return failed;
 }
 
 static int test_rpc_semantics(void)
 {
-    node_config_t scfg;
-    node_config_t ccfg;
-    node_t *server = NULL;
-    node_t *client = NULL;
-    service_t *svc = NULL;
-    proxy_t *proxy = NULL;
-    proxy_interceptor_t interc;
+    nb_node_config_t scfg;
+    nb_node_config_t ccfg;
+    nb_node_t *server = NULL;
+    nb_node_t *client = NULL;
+    nb_service_t *svc = NULL;
+    nb_proxy_t *proxy = NULL;
+    nb_proxy_interceptor_t interc;
     client_state_t ok;
     client_state_t denied;
-    metadata_t req_md;
-    payload_t pl;
+    nb_metadata_t req_md;
+    nb_payload_t pl;
     uint16_t sport = 46111;
     uint16_t cport = 46112;
     int failed = 0;
@@ -159,7 +159,7 @@ static int test_rpc_semantics(void)
 
     memset(&scfg, 0, sizeof(scfg));
     scfg.name = "sem-srv";
-    scfg.transport.transport = TRANSPORT_TCP;
+    scfg.transport.transport = NB_TRANSPORT_TCP;
     scfg.transport.bind_host = "127.0.0.1";
     scfg.discovery.host = "127.0.0.1";
     scfg.discovery.port = sport;
@@ -169,7 +169,7 @@ static int test_rpc_semantics(void)
 
     memset(&ccfg, 0, sizeof(ccfg));
     ccfg.name = "sem-cli";
-    ccfg.transport.transport = TRANSPORT_TCP;
+    ccfg.transport.transport = NB_TRANSPORT_TCP;
     ccfg.transport.bind_host = "127.0.0.1";
     ccfg.discovery.host = "127.0.0.1";
     ccfg.discovery.port = cport;
@@ -183,24 +183,24 @@ static int test_rpc_semantics(void)
         failed = 1;
         goto cleanup;
     }
-    if (node_create(&scfg, &server) != OK || node_create(&ccfg, &client) != OK) {
+    if (nb_node_create(&scfg, &server) != NB_OK || nb_node_create(&ccfg, &client) != NB_OK) {
         failed = 1;
         goto cleanup;
     }
-    (void)node_add_discovery_peer(server, "127.0.0.1", cport);
-    (void)node_add_discovery_peer(client, "127.0.0.1", sport);
+    (void)nb_node_add_discovery_peer(server, "127.0.0.1", cport);
+    (void)nb_node_add_discovery_peer(client, "127.0.0.1", sport);
 
-    if (service_create(server, "sem", &svc) != OK ||
-        service_add_method(svc, "echo", echo_meta_handler, NULL) != OK ||
-        service_add_method(svc, "deny", echo_meta_handler, NULL) != OK ||
-        service_set_interceptor(svc, server_interceptor, NULL) != OK) {
-        rpc_log_error("[semantics] service setup failed");
+    if (nb_service_create(server, "sem", &svc) != NB_OK ||
+        nb_service_add_method(svc, "echo", echo_meta_handler, NULL) != NB_OK ||
+        nb_service_add_method(svc, "deny", echo_meta_handler, NULL) != NB_OK ||
+        nb_service_set_interceptor(svc, server_interceptor, NULL) != NB_OK) {
+        nb_log_error("[semantics] service setup failed");
         failed = 1;
         goto cleanup;
     }
-    if (proxy_create(client, NULL, &proxy) != OK || proxy_set_interceptor(proxy, &interc) != OK ||
-        node_wait_for_service(client, "sem", 5000) != OK) {
-        rpc_log_error("[semantics] client setup failed");
+    if (nb_proxy_create(client, NULL, &proxy) != NB_OK || nb_proxy_set_interceptor(proxy, &interc) != NB_OK ||
+        nb_node_wait_for_service(client, "sem", 5000) != NB_OK) {
+        nb_log_error("[semantics] client setup failed");
         failed = 1;
         goto cleanup;
     }
@@ -208,20 +208,20 @@ static int test_rpc_semantics(void)
     pl.data = "ping";
     pl.len = 5;
     pl.encoding = 0;
-    metadata_init(&req_md);
-    metadata_set_string(&req_md, "k", "v");
+    nb_metadata_init(&req_md);
+    nb_metadata_set_string(&req_md, "k", "v");
 
-    if (proxy_call_async_ex(proxy, "sem", "echo", &pl, &req_md, on_response, &ok, 3000, NULL) !=
-        OK) {
+    if (nb_proxy_call_async_ex(proxy, "sem", "echo", &pl, &req_md, on_response, &ok, 3000, NULL) !=
+        NB_OK) {
         failed = 1;
         goto cleanup;
     }
-    if (ntk_sem_timedwait(ok.sem, 3000) != NTK_OK || ok.status != OK) {
-        rpc_log_error("[semantics] echo status=%d", ok.status);
+    if (ntk_sem_timedwait(ok.sem, 3000) != NTK_OK || ok.status != NB_OK) {
+        nb_log_error("[semantics] echo status=%d", ok.status);
         failed = 1;
     } else if (ok.app_status != 0 || strcmp(ok.message, "done") != 0 ||
                strcmp(ok.meta, "ok") != 0 || strcmp(ok.seen, "v") != 0) {
-        rpc_log_error("[semantics] echo app=%d msg=%s resp=%s seen=%s",
+        nb_log_error("[semantics] echo app=%d msg=%s resp=%s seen=%s",
                       ok.app_status,
                       ok.message,
                       ok.meta,
@@ -229,21 +229,21 @@ static int test_rpc_semantics(void)
         failed = 1;
     }
 
-    if (proxy_call_async_ex(proxy, "sem", "deny", &pl, NULL, on_response, &denied, 3000, NULL) !=
-        OK) {
+    if (nb_proxy_call_async_ex(proxy, "sem", "deny", &pl, NULL, on_response, &denied, 3000, NULL) !=
+        NB_OK) {
         failed = 1;
         goto cleanup;
     }
     if (ntk_sem_timedwait(denied.sem, 3000) != NTK_OK) {
         failed = 1;
-    } else if (denied.status != OK || denied.app_status != ERR_AGAIN) {
-        rpc_log_error("[semantics] deny app=%d (want %d)", denied.app_status, ERR_AGAIN);
+    } else if (denied.status != NB_OK || denied.app_status != NB_ERR_AGAIN) {
+        nb_log_error("[semantics] deny app=%d (want %d)", denied.app_status, NB_ERR_AGAIN);
         failed = 1;
     }
 
     if (g_server_interceptor_calls != 2 || g_client_before_calls != 2 ||
         g_client_after_calls != 2) {
-        rpc_log_error("[semantics] interceptor calls srv=%d before=%d after=%d",
+        nb_log_error("[semantics] interceptor calls srv=%d before=%d after=%d",
                       g_server_interceptor_calls,
                       g_client_before_calls,
                       g_client_after_calls);
@@ -252,13 +252,13 @@ static int test_rpc_semantics(void)
 
 cleanup:
     if (proxy) {
-        proxy_destroy(proxy);
+        nb_proxy_destroy(proxy);
     }
     if (client) {
-        node_destroy(client);
+        nb_node_destroy(client);
     }
     if (server) {
-        node_destroy(server);
+        nb_node_destroy(server);
     }
     if (ok.sem) {
         ntk_sem_destroy(ok.sem);
@@ -275,9 +275,9 @@ int main(void)
     failed += test_metadata_unit();
     failed += test_rpc_semantics();
     if (failed) {
-        rpc_log_error("semantics: FAIL");
+        nb_log_error("semantics: FAIL");
         return 1;
     }
-    rpc_log_info("semantics: OK");
+    nb_log_info("semantics: NB_OK");
     return 0;
 }

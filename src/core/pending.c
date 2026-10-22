@@ -13,7 +13,7 @@
 
 #include <stdlib.h>
 
-static int lane_index(node_t *node, ntk_poller *poller)
+static int nb_lane_index(nb_node_t *node, ntk_poller *poller)
 {
     unsigned i;
     if (!node) {
@@ -29,9 +29,9 @@ static int lane_index(node_t *node, ntk_poller *poller)
     return 0;
 }
 
-static void lane_insert(node_t *node, zri_pending_t *p)
+static void nb_lane_insert(nb_node_t *node, nb_pending_t *p)
 {
-    int idx = lane_index(node, p->poller);
+    int idx = nb_lane_index(node, p->poller);
     p->lane_prev = NULL;
     p->lane_next = node->pending_lanes[idx];
     if (p->lane_next) {
@@ -40,9 +40,9 @@ static void lane_insert(node_t *node, zri_pending_t *p)
     node->pending_lanes[idx] = p;
 }
 
-static void lane_remove(node_t *node, zri_pending_t *p)
+static void nb_lane_remove(nb_node_t *node, nb_pending_t *p)
 {
-    int idx = lane_index(node, p->poller);
+    int idx = nb_lane_index(node, p->poller);
     if (p->lane_prev) {
         p->lane_prev->lane_next = p->lane_next;
     } else if (node->pending_lanes[idx] == p) {
@@ -56,7 +56,7 @@ static void lane_remove(node_t *node, zri_pending_t *p)
 }
 
 /* 从哈希与 lane 摘除并递减计数；仅在归属 poller 上调用。 */
-static void pending_detach(node_t *node, zri_pending_t *p)
+static void nb_pending_detach(nb_node_t *node, nb_pending_t *p)
 {
     if (node->pending_lock) {
         ntk_mutex_lock(node->pending_lock);
@@ -65,12 +65,12 @@ static void pending_detach(node_t *node, zri_pending_t *p)
     if (node->pending_lock) {
         ntk_mutex_unlock(node->pending_lock);
     }
-    lane_remove(node, p);
+    nb_lane_remove(node, p);
     p->used = 0;
-    zri_atomic_sub_u32((uint32_t *)&node->pending_count, 1u);
+    nb_atomic_sub_u32((uint32_t *)&node->pending_count, 1u);
 }
 
-static void pending_recycle(node_t *node, zri_pending_t *p)
+static void nb_pending_recycle(nb_node_t *node, nb_pending_t *p)
 {
     p->node = NULL;
     p->owner = NULL;
@@ -107,11 +107,11 @@ static void pending_recycle(node_t *node, zri_pending_t *p)
     }
 }
 
-void zri_pending_invoke(zri_pending_t *p, int status, const response_t *resp)
+void nb_pending_invoke(nb_pending_t *p, int status, const nb_response_t *resp)
 {
     response_fn cb;
     void *user;
-    node_t *node;
+    nb_node_t *node;
     if (!p || !p->used) {
         return;
     }
@@ -119,12 +119,12 @@ void zri_pending_invoke(zri_pending_t *p, int status, const response_t *resp)
     user = p->user;
     node = p->node;
     if (node) {
-        pending_detach(node, p);
+        nb_pending_detach(node, p);
     } else {
         p->used = 0;
     }
     if (p->data) {
-        zri_mem_free(p->data);
+        nb_mem_free(p->data);
         p->data = NULL;
     }
     if (p->metadata) {
@@ -135,11 +135,11 @@ void zri_pending_invoke(zri_pending_t *p, int status, const response_t *resp)
     p->has_req = 0;
     p->len = 0;
     if (node) {
-        if (status == ERR_TIMEOUT) {
-            ZRI_METRIC_INC(node->metrics.timeouts);
+        if (status == NB_ERR_TIMEOUT) {
+            NB_METRIC_INC(node->metrics.timeouts);
         }
-        if (status != OK) {
-            ZRI_METRIC_INC(node->metrics.requests_failed);
+        if (status != NB_OK) {
+            NB_METRIC_INC(node->metrics.requests_failed);
         }
     }
     if (p->streaming) {
@@ -154,24 +154,24 @@ void zri_pending_invoke(zri_pending_t *p, int status, const response_t *resp)
         cb(status, resp, user);
     }
     if (node) {
-        pending_recycle(node, p);
+        nb_pending_recycle(node, p);
     }
 }
 
-void zri_pending_release(zri_pending_t *p)
+void nb_pending_release(nb_pending_t *p)
 {
-    node_t *node;
+    nb_node_t *node;
     if (!p || !p->used) {
         return;
     }
     node = p->node;
     if (node) {
-        pending_detach(node, p);
+        nb_pending_detach(node, p);
     } else {
         p->used = 0;
     }
     if (p->data) {
-        zri_mem_free(p->data);
+        nb_mem_free(p->data);
         p->data = NULL;
     }
     if (p->metadata) {
@@ -188,11 +188,11 @@ void zri_pending_release(zri_pending_t *p)
         p->response_message = NULL;
     }
     if (node) {
-        pending_recycle(node, p);
+        nb_pending_recycle(node, p);
     }
 }
 
-zri_pending_t *zri_pending_add(node_t *node,
+nb_pending_t *nb_pending_add(nb_node_t *node,
                                uint64_t id,
                                response_fn cb,
                                void *user,
@@ -200,20 +200,20 @@ zri_pending_t *zri_pending_add(node_t *node,
                                ntk_poller *poller,
                                int *out_rc)
 {
-    zri_pending_t *p;
+    nb_pending_t *p;
     if (out_rc) {
-        *out_rc = OK;
+        *out_rc = NB_OK;
     }
     if (!node) {
         if (out_rc) {
-            *out_rc = ERR_INVALID;
+            *out_rc = NB_ERR_INVALID;
         }
         return NULL;
     }
     if (node->max_inflight &&
-        zri_atomic_load_u32((const uint32_t *)&node->pending_count) >= node->max_inflight) {
+        nb_atomic_load_u32((const uint32_t *)&node->pending_count) >= node->max_inflight) {
         if (out_rc) {
-            *out_rc = ERR_AGAIN;
+            *out_rc = NB_ERR_AGAIN;
         }
         return NULL;
     }
@@ -225,13 +225,13 @@ zri_pending_t *zri_pending_add(node_t *node,
         node->pending_free = p->free_next;
         p->free_next = NULL;
     } else {
-        p = (zri_pending_t *)calloc(1, sizeof(*p));
+        p = (nb_pending_t *)calloc(1, sizeof(*p));
         if (!p) {
             if (node->pending_lock) {
                 ntk_mutex_unlock(node->pending_lock);
             }
             if (out_rc) {
-                *out_rc = ERR_NOMEM;
+                *out_rc = NB_ERR_NOMEM;
             }
             return NULL;
         }
@@ -246,8 +246,8 @@ zri_pending_t *zri_pending_add(node_t *node,
     p->request_id = id;
     p->cb = cb;
     p->user = user;
-    p->started_ms = zri_now_ms();
-    p->deadline_ms = p->started_ms + (timeout_ms ? timeout_ms : DEFAULT_TIMEOUT_MS);
+    p->started_ms = nb_now_ms();
+    p->deadline_ms = p->started_ms + (timeout_ms ? timeout_ms : NB_DEFAULT_TIMEOUT_MS);
     p->has_req = 0;
     p->streaming = 0;
     p->chunk_cb = NULL;
@@ -266,17 +266,17 @@ zri_pending_t *zri_pending_add(node_t *node,
     p->lane_prev = NULL;
     p->lane_next = NULL;
     HASH_ADD(hh, node->pending_hash, request_id, sizeof(p->request_id), p);
-    zri_atomic_add_u32((uint32_t *)&node->pending_count, 1u);
+    nb_atomic_add_u32((uint32_t *)&node->pending_count, 1u);
     if (node->pending_lock) {
         ntk_mutex_unlock(node->pending_lock);
     }
-    lane_insert(node, p);
+    nb_lane_insert(node, p);
     return p;
 }
 
-zri_pending_t *zri_pending_find(node_t *node, uint64_t id)
+nb_pending_t *nb_pending_find(nb_node_t *node, uint64_t id)
 {
-    zri_pending_t *p = NULL;
+    nb_pending_t *p = NULL;
     if (!node) {
         return NULL;
     }
@@ -293,9 +293,9 @@ zri_pending_t *zri_pending_find(node_t *node, uint64_t id)
     return p;
 }
 
-ntk_poller *zri_pending_owner(node_t *node, uint64_t id)
+ntk_poller *nb_pending_owner(nb_node_t *node, uint64_t id)
 {
-    zri_pending_t *p = NULL;
+    nb_pending_t *p = NULL;
     ntk_poller *owner = NULL;
     if (!node) {
         return NULL;
@@ -317,25 +317,25 @@ ntk_poller *zri_pending_owner(node_t *node, uint64_t id)
  * 先把本 poller lane 上超时/待重传的槽位摘到临时链表，再逐个处理；
  * 这样可以避免回调里取消/新增 pending 破坏正在遍历的 lane。
  */
-void zri_pending_tick(node_t *node, uint64_t now_ms, ntk_poller *poller)
+void nb_pending_tick(nb_node_t *node, uint64_t now_ms, ntk_poller *poller)
 {
     int idx;
-    zri_pending_t *expired = NULL;
-    zri_pending_t *expired_tail = NULL;
-    zri_pending_t *p;
+    nb_pending_t *expired = NULL;
+    nb_pending_t *expired_tail = NULL;
+    nb_pending_t *p;
     if (!node) {
         return;
     }
-    idx = lane_index(node, poller);
+    idx = nb_lane_index(node, poller);
     p = node->pending_lanes[idx];
     while (p) {
-        zri_pending_t *next = p->lane_next;
+        nb_pending_t *next = p->lane_next;
         if (p->used) {
             int timeout = (now_ms >= p->deadline_ms);
-            int retx = (!timeout && p->has_req && p->transport == TRANSPORT_UDP &&
+            int retx = (!timeout && p->has_req && p->transport == NB_TRANSPORT_UDP &&
                         p->retries < MAX_RETX && now_ms >= p->next_retx_ms);
             if (timeout || retx) {
-                lane_remove(node, p);
+                nb_lane_remove(node, p);
                 p->lane_prev = NULL;
                 p->lane_next = NULL;
                 if (expired_tail) {
@@ -349,35 +349,35 @@ void zri_pending_tick(node_t *node, uint64_t now_ms, ntk_poller *poller)
         p = next;
     }
     while (expired) {
-        zri_pending_t *cur = expired;
+        nb_pending_t *cur = expired;
         expired = cur->lane_next;
         if (!cur->used) {
             continue;
         }
         if (now_ms >= cur->deadline_ms) {
-            zri_pending_invoke(cur, ERR_TIMEOUT, NULL);
+            nb_pending_invoke(cur, NB_ERR_TIMEOUT, NULL);
         } else {
             uint32_t shift = cur->retries < 4 ? cur->retries : 4;
-            zri_pending_retx(node, cur);
+            nb_pending_retx(node, cur);
             cur->retries++;
             cur->next_retx_ms = now_ms + (uint64_t)RTO_INIT_MS * ((uint64_t)1u << shift);
-            lane_insert(node, cur);
+            nb_lane_insert(node, cur);
         }
     }
 }
 
-void zri_pending_cleanup(node_t *node)
+void nb_pending_cleanup(nb_node_t *node)
 {
-    zri_pending_t *p;
+    nb_pending_t *p;
     unsigned i;
     if (!node) {
         return;
     }
     p = node->pending;
     while (p) {
-        zri_pending_t *next = p->next;
+        nb_pending_t *next = p->next;
         if (p->data) {
-            zri_mem_free(p->data);
+            nb_mem_free(p->data);
             p->data = NULL;
         }
         if (p->metadata) {

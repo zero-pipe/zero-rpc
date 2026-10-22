@@ -4,42 +4,42 @@
  */
 #include <client.h>
 
-#define RPC_LOG_TAG "example"
+#define NB_LOG_TAG "example"
 #include <log.h>
 
 #include <string.h>
 
 int main(void)
 {
-    node_config_t cfg;
-    proxy_options_t options;
-    node_t *node = NULL;
-    proxy_t *proxy = NULL;
+    nb_node_config_t cfg;
+    nb_proxy_options_t options;
+    nb_node_t *node = NULL;
+    nb_proxy_t *proxy = NULL;
     int rc;
 
-    node_config_default(&cfg);
+    nb_node_config_default(&cfg);
     cfg.name = "ProxyExample";
-    cfg.transport.transport = TRANSPORT_TCP;
+    cfg.transport.transport = NB_TRANSPORT_TCP;
     cfg.transport.bind_host = "127.0.0.1";
-    cfg.mode = MODE_STATIC;
+    cfg.mode = NB_MODE_STATIC;
     cfg.runtime.io_threads = 1;
-    rc = node_create(&cfg, &node);
-    if (rc != OK) {
-        rpc_log_error("node create failed: %d", rc);
+    rc = nb_node_create(&cfg, &node);
+    if (rc != NB_OK) {
+        nb_log_error("node create failed: %d", rc);
         return 1;
     }
 
     memset(&options, 0, sizeof(options));
     options.payload_encoding = 1; /* 默认写入请求的编码标识 */
-    rc = proxy_create(node, &options, &proxy);
-    if (rc != OK) {
-        rpc_log_error("proxy create failed: %d", rc);
-        node_destroy(node);
+    rc = nb_proxy_create(node, &options, &proxy);
+    if (rc != NB_OK) {
+        nb_log_error("proxy create failed: %d", rc);
+        nb_node_destroy(node);
         return 1;
     }
-    rpc_log_info("created node=%s and proxy", node_name(node));
+    nb_log_info("created node=%s and proxy", nb_node_name(node));
 
-    proxy_destroy(proxy);
-    node_destroy(node);
+    nb_proxy_destroy(proxy);
+    nb_node_destroy(node);
     return 0;
 }

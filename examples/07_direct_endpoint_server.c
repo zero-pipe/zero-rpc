@@ -4,47 +4,47 @@
  */
 #include <server.h>
 
-#define RPC_LOG_TAG "example"
+#define NB_LOG_TAG "example"
 #include <log.h>
 
 #include <string.h>
 
-static int order_get(const request_t *req, message_view_t *resp, void *user)
+static int order_get(const nb_request_t *req, nb_message_view_t *resp, void *user)
 {
     (void)user;
     (void)req;
-    return message_view_set_string(resp, "direct endpoint: ok");
+    return nb_message_view_set_string(resp, "direct endpoint: ok");
 }
 
 int main(void)
 {
-    node_config_t cfg;
-    node_t *node = NULL;
-    service_t *svc = NULL;
+    nb_node_config_t cfg;
+    nb_node_t *node = NULL;
+    nb_service_t *svc = NULL;
     int rc;
 
-    node_config_default(&cfg);
+    nb_node_config_default(&cfg);
     cfg.name = "DirectServer";
-    cfg.transport.transport = TRANSPORT_TCP;
+    cfg.transport.transport = NB_TRANSPORT_TCP;
     cfg.transport.bind_host = "127.0.0.1";
     cfg.transport.data_port = 42430;
-    cfg.mode = MODE_STATIC;
+    cfg.mode = NB_MODE_STATIC;
     cfg.runtime.io_threads = 1;
 
-    rc = node_create(&cfg, &node);
-    if (rc == OK) {
-        rc = service_create(node, "OrderService", &svc);
+    rc = nb_node_create(&cfg, &node);
+    if (rc == NB_OK) {
+        rc = nb_service_create(node, "OrderService", &svc);
     }
-    if (rc == OK) {
-        rc = service_add_sync_method(svc, "get", order_get, NULL);
+    if (rc == NB_OK) {
+        rc = nb_service_add_sync_method(svc, "get", order_get, NULL);
     }
-    if (rc != OK) {
-        rpc_log_error("server failed: %d", rc);
-        node_destroy(node);
+    if (rc != NB_OK) {
+        nb_log_error("server failed: %d", rc);
+        nb_node_destroy(node);
         return 1;
     }
-    rpc_log_info("direct endpoint server ready on tcp://127.0.0.1:42430 (Ctrl+C to stop)");
-    (void)node_spin(node);
-    node_destroy(node);
+    nb_log_info("direct endpoint server ready on tcp://127.0.0.1:42430 (Ctrl+C to stop)");
+    (void)nb_node_spin(node);
+    nb_node_destroy(node);
     return 0;
 }

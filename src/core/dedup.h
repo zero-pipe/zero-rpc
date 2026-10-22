@@ -1,5 +1,5 @@
-#ifndef ZRI_DEDUP_H
-#define ZRI_DEDUP_H
+#ifndef NB_DEDUP_H
+#define NB_DEDUP_H
 
 /*
  * 服务端请求去重 / 响应重放缓存。
@@ -28,16 +28,16 @@
 extern "C" {
 #endif
 
-#define ZRI_DEDUP_SHARDS 16
-#define ZRI_DEDUP_SLOTS_PER_SHARD 16
-#define ZRI_DEDUP_TTL_MS 10000u
-#define ZRI_DEDUP_MAX_BYTES (8u * 1024u * 1024u)
+#define NB_DEDUP_SHARDS 16
+#define NB_DEDUP_SLOTS_PER_SHARD 16
+#define NB_DEDUP_TTL_MS 10000u
+#define NB_DEDUP_MAX_BYTES (8u * 1024u * 1024u)
 
-typedef struct zri_dedup_slot {
+typedef struct nb_dedup_slot {
     int used;
     int completed;
     uint32_t request_id;
-    char peer_ip[ENDPOINT_MAX];
+    char peer_ip[NB_ENDPOINT_MAX];
     uint16_t peer_port;
     uint64_t expires_ms;
     uint64_t last_ms;
@@ -49,41 +49,41 @@ typedef struct zri_dedup_slot {
     uint16_t metadata_len;
     char *message;
     uint16_t message_len;
-} zri_dedup_slot_t;
+} nb_dedup_slot_t;
 
-typedef struct zri_dedup_shard {
+typedef struct nb_dedup_shard {
     ntk_mutex *lock;
     size_t bytes;
-    zri_dedup_slot_t slots[ZRI_DEDUP_SLOTS_PER_SHARD];
-} zri_dedup_shard_t;
+    nb_dedup_slot_t slots[NB_DEDUP_SLOTS_PER_SHARD];
+} nb_dedup_shard_t;
 
-typedef struct zri_dedup {
-    zri_dedup_shard_t shards[ZRI_DEDUP_SHARDS];
-} zri_dedup_t;
+typedef struct nb_dedup {
+    nb_dedup_shard_t shards[NB_DEDUP_SHARDS];
+} nb_dedup_t;
 
-void zri_dedup_init(zri_dedup_t *d);
-void zri_dedup_cleanup(zri_dedup_t *d);
+void nb_dedup_init(nb_dedup_t *d);
+void nb_dedup_cleanup(nb_dedup_t *d);
 
 /*
  * state: 0 = 新请求（上层需正常处理），1 = 已重放缓存响应，2 = 在途重复（丢弃）。
  */
-int zri_dedup_begin(zri_dedup_t *d, zri_transport_t *transport, const zri_message_t *req, int *state);
+int nb_dedup_begin(nb_dedup_t *d, nb_transport_t *transport, const nb_message_t *req, int *state);
 /* 记录最终响应，供后续重复请求重放。 */
-void zri_dedup_complete(zri_dedup_t *d,
-                        zri_transport_t *transport,
-                        const zri_message_t *req,
+void nb_dedup_complete(nb_dedup_t *d,
+                        nb_transport_t *transport,
+                        const nb_message_t *req,
                         int status,
-                        const payload_t *payload,
+                        const nb_payload_t *payload,
                         const void *metadata,
                         uint16_t metadata_len,
                         const char *message,
                         uint16_t message_len);
 /* 处理失败时撤销登记，允许重传重试。 */
-void zri_dedup_abort(zri_dedup_t *d, const zri_message_t *req);
-void zri_dedup_expire(zri_dedup_t *d, uint64_t now_ms);
+void nb_dedup_abort(nb_dedup_t *d, const nb_message_t *req);
+void nb_dedup_expire(nb_dedup_t *d, uint64_t now_ms);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* ZRI_DEDUP_H */
+#endif /* NB_DEDUP_H */

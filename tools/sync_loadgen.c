@@ -2,12 +2,12 @@
  * Synchronous rpc benchmark client.
  *
  * One call is outstanding per process. Each iteration uses
- * proxy_call_sync(), so the reported latency includes the blocking
+ * nb_proxy_call_sync(), so the reported latency includes the blocking
  * wrapper and response-buffer copy/release path.
  */
 #include <client.h>
 
-#define RPC_LOG_TAG "sync_loadgen"
+#define NB_LOG_TAG "sync_loadgen"
 #include <log.h>
 
 #include <stdio.h>
@@ -53,7 +53,7 @@ typedef struct options {
     size_t payload_bytes;
     size_t expect_response_bytes;
     int verify_response;
-    transport_kind_t transport;
+    nb_transport_kind_t transport;
 } options_t;
 
 static int parse_u64(const char *value, uint64_t *out)
@@ -129,7 +129,7 @@ static uint64_t histogram_percentile(const uint64_t *hist, uint64_t count, doubl
 
 static void usage(const char *argv0)
 {
-    rpc_log_error("usage: %s --target host:port [--transport tcp|udp] [--service s] [--method m]\n"
+    nb_log_error("usage: %s --target host:port [--transport tcp|udp] [--service s] [--method m]\n"
                   "          [--duration-seconds n] [--max-requests n] [--payload-bytes n]\n"
                   "          [--expect-response-bytes n] [--timeout-ms n] [--verify-response]\n"
                   "          [--worker-id id] [--output path|-]",
@@ -139,10 +139,10 @@ static void usage(const char *argv0)
 int main(int argc, char **argv)
 {
     options_t opt;
-    node_config_t cfg;
-    node_t *node = NULL;
-    proxy_t *proxy = NULL;
-    payload_t request;
+    nb_node_config_t cfg;
+    nb_node_t *node = NULL;
+    nb_proxy_t *proxy = NULL;
+    nb_payload_t request;
     uint8_t *payload = NULL;
     uint64_t hist[LAT_HIST_SIZE];
     uint64_t attempted = 0;
@@ -160,7 +160,7 @@ int main(int argc, char **argv)
     int error_count = 0;
     FILE *out = stdout;
     int i;
-    int rc = OK;
+    int rc = NB_OK;
 
     memset(&opt, 0, sizeof(opt));
     memset(hist, 0, sizeof(hist));
@@ -173,7 +173,7 @@ int main(int argc, char **argv)
     opt.duration_seconds = 15;
     opt.payload_bytes = 64;
     opt.timeout_ms = 5000;
-    opt.transport = TRANSPORT_TCP;
+    opt.transport = NB_TRANSPORT_TCP;
 
     for (i = 1; i < argc; i++) {
         const char *arg = argv[i];
@@ -182,8 +182,8 @@ int main(int argc, char **argv)
         } else if (strcmp(arg, "--transport") == 0 && i + 1 < argc) {
             const char *transport = argv[++i];
             opt.transport = (strcmp(transport, "udp") == 0 || strcmp(transport, "UDP") == 0) ?
-                TRANSPORT_UDP :
-                TRANSPORT_TCP;
+                NB_TRANSPORT_UDP :
+                NB_TRANSPORT_TCP;
         } else if (strcmp(arg, "--service") == 0 && i + 1 < argc) {
             opt.service = argv[++i];
         } else if (strcmp(arg, "--method") == 0 && i + 1 < argc) {
@@ -213,7 +213,7 @@ int main(int argc, char **argv)
     if (opt.payload_bytes > 0) {
         payload = (uint8_t *)malloc(opt.payload_bytes);
         if (!payload) {
-            rpc_log_error("payload allocation failed");
+            nb_log_error("payload allocation failed");
             return 1;
         }
         for (i = 0; i < (int)opt.payload_bytes; i++) {
@@ -221,30 +221,30 @@ int main(int argc, char **argv)
         }
     }
 
-    node_config_default(&cfg);
+    nb_node_config_default(&cfg);
     cfg.name = opt.worker_id ? opt.worker_id : "sync_loadgen";
     cfg.transport.transport = opt.transport;
     cfg.transport.bind_host = "0.0.0.0";
-    cfg.mode = MODE_STATIC;
+    cfg.mode = NB_MODE_STATIC;
     cfg.runtime.io_threads = 1;
-    rc = node_create(&cfg, &node);
-    if (rc == OK) {
-        rc = proxy_create(node, NULL, &proxy);
+    rc = nb_node_create(&cfg, &node);
+    if (rc == NB_OK) {
+        rc = nb_proxy_create(node, NULL, &proxy);
     }
-    if (rc == OK) {
+    if (rc == NB_OK) {
         char endpoint[128];
         snprintf(endpoint,
                  sizeof(endpoint),
                  "%s://%s",
-                 opt.transport == TRANSPORT_TCP ? "tcp" : "udp",
+                 opt.transport == NB_TRANSPORT_TCP ? "tcp" : "udp",
                  opt.target);
-        rc = proxy_set_endpoint_uri(proxy, endpoint);
+        rc = nb_proxy_set_endpoint_uri(proxy, endpoint);
     }
-    if (rc != OK) {
-        rpc_log_error("client setup failed: %d", rc);
+    if (rc != NB_OK) {
+        nb_log_error("client setup failed: %d", rc);
         free(payload);
-        proxy_destroy(proxy);
-        node_destroy(node);
+        nb_proxy_destroy(proxy);
+        nb_node_destroy(node);
         return 1;
     }
 
@@ -254,16 +254,16 @@ int main(int argc, char **argv)
 
     /* Exclude connection establishment and one-time route setup from results. */
     {
-        response_t warm_response;
+        nb_response_t warm_response;
         memset(&warm_response, 0, sizeof(warm_response));
-        rc = proxy_call_sync(
+        rc = nb_proxy_call_sync(
             proxy, opt.service, opt.method, &request, &warm_response, opt.timeout_ms, NULL);
-        response_release(&warm_response);
-        if (rc != OK) {
-            rpc_log_error("warmup call failed: %d", rc);
+        nb_response_release(&warm_response);
+        if (rc != NB_OK) {
+            nb_log_error("warmup call failed: %d", rc);
             free(payload);
-            proxy_destroy(proxy);
-            node_destroy(node);
+            nb_proxy_destroy(proxy);
+            nb_node_destroy(node);
             return 1;
         }
     }
@@ -271,21 +271,21 @@ int main(int argc, char **argv)
     start_ns = now_ns();
     deadline_ns = start_ns + opt.duration_seconds * 1000000000ull;
     while (now_ns() < deadline_ns && (opt.max_requests == 0 || attempted < opt.max_requests)) {
-        response_t response;
+        nb_response_t response;
         uint64_t call_start = now_ns();
         uint64_t latency;
         uint64_t us;
         int call_ok;
 
         memset(&response, 0, sizeof(response));
-        rc = proxy_call_sync(
+        rc = nb_proxy_call_sync(
             proxy, opt.service, opt.method, &request, &response, opt.timeout_ms, NULL);
         latency = now_ns() - call_start;
         attempted++;
         us = (latency + 999ull) / 1000ull;
         hist[lat_hist_index(us)]++;
         call_ok =
-            (rc == OK &&
+            (rc == NB_OK &&
              (opt.expect_response_bytes == 0 || response.payload.len == opt.expect_response_bytes));
         if (call_ok && opt.verify_response) {
             call_ok = response.payload.len == opt.payload_bytes &&
@@ -306,8 +306,8 @@ int main(int argc, char **argv)
             int found = 0;
             int error_index;
             failed++;
-            if (rc == OK) {
-                error = ERR_IO;
+            if (rc == NB_OK) {
+                error = NB_ERR_IO;
             }
             for (error_index = 0; error_index < error_count; error_index++) {
                 if (errors[error_index] == error) {
@@ -321,7 +321,7 @@ int main(int argc, char **argv)
                 error_counts[error_count++] = 1;
             }
         }
-        response_release(&response);
+        nb_response_release(&response);
     }
     end_ns = now_ns();
 
@@ -379,7 +379,7 @@ int main(int argc, char **argv)
         fclose(out);
     }
     free(payload);
-    proxy_destroy(proxy);
-    node_destroy(node);
+    nb_proxy_destroy(proxy);
+    nb_node_destroy(node);
     return failed == 0 ? 0 : 2;
 }

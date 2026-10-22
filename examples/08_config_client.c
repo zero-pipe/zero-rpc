@@ -6,7 +6,7 @@
 #include <client.h>
 #include <config.h>
 
-#define RPC_LOG_TAG "example"
+#define NB_LOG_TAG "example"
 #include <log.h>
 
 #include <string.h>
@@ -14,27 +14,27 @@
 int main(int argc, char **argv)
 {
     const char *path = argc > 1 ? argv[1] : "08_config_client.json";
-    config_t cfg;
-    config_error_t err;
-    node_t *node = NULL;
-    proxy_t *proxy = NULL;
-    response_t response;
-    payload_t request;
+    nb_config_t cfg;
+    nb_config_error_t err;
+    nb_node_t *node = NULL;
+    nb_proxy_t *proxy = NULL;
+    nb_response_t response;
+    nb_payload_t request;
     int rc;
 
-    rc = config_load_file_ex(path, &cfg, &err);
-    if (rc != OK) {
-        rpc_log_error(
+    rc = nb_config_load_file_ex(path, &cfg, &err);
+    if (rc != NB_OK) {
+        nb_log_error(
             "load config failed: %s (%d) path=%s reason=%s", path, rc, err.path, err.reason);
         return 1;
     }
-    rc = node_create_from_config(&cfg, &node);
-    if (rc == OK) {
-        rc = proxy_create(node, NULL, &proxy);
+    rc = nb_node_create_from_config(&cfg, &node);
+    if (rc == NB_OK) {
+        rc = nb_proxy_create(node, NULL, &proxy);
     }
-    if (rc != OK) {
-        rpc_log_error("client setup failed: %d", rc);
-        node_destroy(node);
+    if (rc != NB_OK) {
+        nb_log_error("client setup failed: %d", rc);
+        nb_node_destroy(node);
         return 1;
     }
 
@@ -42,15 +42,15 @@ int main(int argc, char **argv)
     request.len = strlen((const char *)request.data);
     request.encoding = 0;
     memset(&response, 0, sizeof(response));
-    rc = proxy_call_sync(proxy, "EchoService", "echo", &request, &response, 3000, NULL);
-    if (rc == OK) {
-        rpc_log_info(
+    rc = nb_proxy_call_sync(proxy, "EchoService", "echo", &request, &response, 3000, NULL);
+    if (rc == NB_OK) {
+        nb_log_info(
             "response: %.*s", (int)response.payload.len, (const char *)response.payload.data);
     } else {
-        rpc_log_error("call failed: %d (server running?)", rc);
+        nb_log_error("call failed: %d (server running?)", rc);
     }
-    response_release(&response);
-    proxy_destroy(proxy);
-    node_destroy(node);
-    return rc == OK ? 0 : 1;
+    nb_response_release(&response);
+    nb_proxy_destroy(proxy);
+    nb_node_destroy(node);
+    return rc == NB_OK ? 0 : 1;
 }

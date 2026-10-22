@@ -3,7 +3,7 @@
 
 #include <string.h>
 
-static metadata_entry_t *metadata_find(metadata_t *metadata, const char *key)
+static nb_metadata_entry_t *nb_metadata_find(nb_metadata_t *metadata, const char *key)
 {
     uint16_t i;
     if (!metadata || !key) {
@@ -17,30 +17,30 @@ static metadata_entry_t *metadata_find(metadata_t *metadata, const char *key)
     return NULL;
 }
 
-void metadata_init(metadata_t *metadata)
+void nb_metadata_init(nb_metadata_t *metadata)
 {
     if (metadata) {
         metadata->count = 0;
     }
 }
 
-int metadata_set(metadata_t *metadata, const char *key, const void *value, size_t len)
+int nb_metadata_set(nb_metadata_t *metadata, const char *key, const void *value, size_t len)
 {
-    metadata_entry_t *entry;
+    nb_metadata_entry_t *entry;
     size_t key_len;
 
     if (!metadata || !key) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
     key_len = strlen(key);
-    if (key_len == 0 || key_len >= METADATA_KEY_MAX || len > METADATA_VALUE_MAX ||
+    if (key_len == 0 || key_len >= NB_METADATA_KEY_MAX || len > NB_METADATA_VALUE_MAX ||
         (len > 0 && !value)) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
-    entry = metadata_find(metadata, key);
+    entry = nb_metadata_find(metadata, key);
     if (!entry) {
-        if (metadata->count >= METADATA_MAX_ENTRIES) {
-            return ERR_TOOBIG;
+        if (metadata->count >= NB_METADATA_MAX_ENTRIES) {
+            return NB_ERR_TOOBIG;
         }
         entry = &metadata->entries[metadata->count++];
         memcpy(entry->key, key, key_len + 1);
@@ -49,21 +49,21 @@ int metadata_set(metadata_t *metadata, const char *key, const void *value, size_
         memcpy(entry->value, value, len);
     }
     entry->value_len = (uint16_t)len;
-    return OK;
+    return NB_OK;
 }
 
-int metadata_set_string(metadata_t *metadata, const char *key, const char *value)
+int nb_metadata_set_string(nb_metadata_t *metadata, const char *key, const char *value)
 {
     if (!value) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
-    /* 连同结尾 '\0' 一起存，metadata_get_string 可直接返回。 */
-    return metadata_set(metadata, key, value, strlen(value) + 1);
+    /* 连同结尾 '\0' 一起存，nb_metadata_get_string 可直接返回。 */
+    return nb_metadata_set(metadata, key, value, strlen(value) + 1);
 }
 
-const void *metadata_get(const metadata_t *metadata, const char *key, size_t *len)
+const void *nb_metadata_get(const nb_metadata_t *metadata, const char *key, size_t *len)
 {
-    metadata_entry_t *entry = metadata_find((metadata_t *)metadata, key);
+    nb_metadata_entry_t *entry = nb_metadata_find((nb_metadata_t *)metadata, key);
     if (!entry) {
         return NULL;
     }
@@ -73,20 +73,20 @@ const void *metadata_get(const metadata_t *metadata, const char *key, size_t *le
     return entry->value;
 }
 
-const char *metadata_get_string(const metadata_t *metadata, const char *key)
+const char *nb_metadata_get_string(const nb_metadata_t *metadata, const char *key)
 {
-    metadata_entry_t *entry = metadata_find((metadata_t *)metadata, key);
+    nb_metadata_entry_t *entry = nb_metadata_find((nb_metadata_t *)metadata, key);
     if (!entry || entry->value_len == 0) {
         return NULL;
     }
     return (const char *)entry->value;
 }
 
-int metadata_remove(metadata_t *metadata, const char *key)
+int nb_metadata_remove(nb_metadata_t *metadata, const char *key)
 {
     uint16_t i;
     if (!metadata || !key) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
     for (i = 0; i < metadata->count; i++) {
         if (strcmp(metadata->entries[i].key, key) == 0) {
@@ -96,24 +96,24 @@ int metadata_remove(metadata_t *metadata, const char *key)
                         (size_t)(metadata->count - i - 1) * sizeof(metadata->entries[0]));
             }
             metadata->count--;
-            return OK;
+            return NB_OK;
         }
     }
-    return ERR_NOTFOUND;
+    return NB_ERR_NOTFOUND;
 }
 
-static void put_u16(uint8_t *p, uint16_t v)
+static void nb_put_u16(uint8_t *p, uint16_t v)
 {
     p[0] = (uint8_t)(v >> 8);
     p[1] = (uint8_t)v;
 }
 
-static uint16_t get_u16(const uint8_t *p)
+static uint16_t nb_get_u16(const uint8_t *p)
 {
     return (uint16_t)(((uint16_t)p[0] << 8) | p[1]);
 }
 
-int metadata_encode(const metadata_t *metadata, void *buf, size_t cap, size_t *out_len)
+int nb_metadata_encode(const nb_metadata_t *metadata, void *buf, size_t cap, size_t *out_len)
 {
     uint8_t *p = (uint8_t *)buf;
     size_t off = 0;
@@ -123,17 +123,17 @@ int metadata_encode(const metadata_t *metadata, void *buf, size_t cap, size_t *o
         *out_len = 0;
     }
     if (!metadata || !buf) {
-        return metadata && metadata->count == 0 ? OK : ERR_INVALID;
+        return metadata && metadata->count == 0 ? NB_OK : NB_ERR_INVALID;
     }
     for (i = 0; i < metadata->count; i++) {
-        const metadata_entry_t *entry = &metadata->entries[i];
+        const nb_metadata_entry_t *entry = &metadata->entries[i];
         size_t key_len = strlen(entry->key);
         size_t need = 4 + key_len + entry->value_len;
-        if (off + need > cap || need > METADATA_WIRE_MAX) {
-            return ERR_TOOBIG;
+        if (off + need > cap || need > NB_METADATA_WIRE_MAX) {
+            return NB_ERR_TOOBIG;
         }
-        put_u16(p + off, (uint16_t)key_len);
-        put_u16(p + off + 2, entry->value_len);
+        nb_put_u16(p + off, (uint16_t)key_len);
+        nb_put_u16(p + off + 2, entry->value_len);
         memcpy(p + off + 4, entry->key, key_len);
         memcpy(p + off + 4 + key_len, entry->value, entry->value_len);
         off += need;
@@ -141,40 +141,40 @@ int metadata_encode(const metadata_t *metadata, void *buf, size_t cap, size_t *o
     if (out_len) {
         *out_len = off;
     }
-    return OK;
+    return NB_OK;
 }
 
-int metadata_decode(metadata_t *metadata, const void *buf, size_t len)
+int nb_metadata_decode(nb_metadata_t *metadata, const void *buf, size_t len)
 {
     const uint8_t *p = (const uint8_t *)buf;
     size_t off = 0;
     if (!metadata || (len > 0 && !buf)) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
-    metadata_init(metadata);
+    nb_metadata_init(metadata);
     while (off < len) {
         uint16_t key_len;
         uint16_t value_len;
-        char key[METADATA_KEY_MAX];
+        char key[NB_METADATA_KEY_MAX];
         int rc;
         if (len - off < 4) {
-            return ERR_INVALID;
+            return NB_ERR_INVALID;
         }
-        key_len = get_u16(p + off);
-        value_len = get_u16(p + off + 2);
+        key_len = nb_get_u16(p + off);
+        value_len = nb_get_u16(p + off + 2);
         off += 4;
-        if (key_len == 0 || key_len >= METADATA_KEY_MAX ||
+        if (key_len == 0 || key_len >= NB_METADATA_KEY_MAX ||
             len - off < (size_t)key_len + value_len) {
-            return ERR_INVALID;
+            return NB_ERR_INVALID;
         }
         memcpy(key, p + off, key_len);
         key[key_len] = '\0';
         off += key_len;
-        rc = metadata_set(metadata, key, p + off, value_len);
-        if (rc != OK) {
+        rc = nb_metadata_set(metadata, key, p + off, value_len);
+        if (rc != NB_OK) {
             return rc;
         }
         off += value_len;
     }
-    return OK;
+    return NB_OK;
 }

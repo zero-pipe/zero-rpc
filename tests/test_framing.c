@@ -1,7 +1,7 @@
 #include "envelope.h"
 #include "framing.h"
 
-#define RPC_LOG_TAG "test"
+#define NB_LOG_TAG "test"
 #include <log.h>
 
 #include <stdio.h>
@@ -12,7 +12,7 @@ static int g_fail;
 #define CHECK(cond)                                                     \
     do {                                                                \
         if (!(cond)) {                                                  \
-            rpc_log_error("FAIL %s:%d: %s", __FILE__, __LINE__, #cond); \
+            nb_log_error("FAIL %s:%d: %s", __FILE__, __LINE__, #cond); \
             g_fail = 1;                                                 \
         }                                                               \
     } while (0)
@@ -24,8 +24,8 @@ static void test_envelope_roundtrip(void)
     const uint8_t payload[5] = { 1, 2, 3, 4, 5 };
     const uint8_t metadata[3] = { 0xde, 0xad, 0xbe };
     const char status_msg[] = "boom";
-    zri_envelope_t envelope;
-    zri_envelope_t view;
+    nb_envelope_t envelope;
+    nb_envelope_t view;
     size_t n;
 
     memset(&envelope, 0, sizeof(envelope));
@@ -45,9 +45,9 @@ static void test_envelope_roundtrip(void)
     envelope.status_msg_len = (uint16_t)strlen(status_msg);
     envelope.payload = payload;
     envelope.payload_len = sizeof(payload);
-    n = zri_envelope_encode(buf, sizeof(buf), &envelope);
-    CHECK(n == zri_envelope_size(&envelope));
-    CHECK(zri_envelope_decode(buf, n, &view) == OK);
+    n = nb_envelope_encode(buf, sizeof(buf), &envelope);
+    CHECK(n == nb_envelope_size(&envelope));
+    CHECK(nb_envelope_decode(buf, n, &view) == NB_OK);
     CHECK(view.kind == KIND_REQUEST);
     CHECK(view.encoding == 3);
     CHECK(view.status == -7);
@@ -73,14 +73,14 @@ static void test_envelope_control_kinds(void)
         uint8_t kind;
         uint8_t opcode;
     } cases[] = {
-        { KIND_CANCEL, ZRI_CTRL_CANCEL },
-        { KIND_GOAWAY, ZRI_CTRL_GOAWAY },
-        { KIND_PING, ZRI_CTRL_PING },
+        { KIND_CANCEL, NB_CTRL_CANCEL },
+        { KIND_GOAWAY, NB_CTRL_GOAWAY },
+        { KIND_PING, NB_CTRL_PING },
     };
     uint8_t buf[64];
-    zri_envelope_t envelope;
-    zri_envelope_t view;
-    zri_frame_t frame;
+    nb_envelope_t envelope;
+    nb_envelope_t view;
+    nb_frame_t frame;
     size_t i;
 
     for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
@@ -89,12 +89,12 @@ static void test_envelope_control_kinds(void)
         memset(&envelope, 0, sizeof(envelope));
         envelope.kind = cases[i].kind;
         envelope.request_id = 77;
-        n = zri_envelope_encode(buf, sizeof(buf), &envelope);
+        n = nb_envelope_encode(buf, sizeof(buf), &envelope);
         CHECK(n > 0);
-        CHECK(zri_frame_decode(buf, n, &frame) == OK);
-        CHECK(frame.header.frame_type == ZRI_FRAME_CONTROL);
+        CHECK(nb_frame_decode(buf, n, &frame) == NB_OK);
+        CHECK(frame.header.frame_type == NB_FRAME_CONTROL);
         CHECK(frame.header.kind == cases[i].opcode);
-        CHECK(zri_envelope_decode(buf, n, &view) == OK);
+        CHECK(nb_envelope_decode(buf, n, &view) == NB_OK);
         CHECK(view.kind == cases[i].kind);
         CHECK(view.request_id == 77);
     }
@@ -107,45 +107,45 @@ static void test_frame_ext_roundtrip(void)
     const uint8_t payload[3] = { 9, 8, 7 };
     const uint8_t deadline[4] = { 0x00, 0x00, 0x05, 0xdc };
     const char route[] = "echo.ping";
-    zri_ext_set_t set;
-    zri_ext_t got;
-    zri_frame_header_t header;
-    zri_frame_t frame;
+    nb_ext_set_t set;
+    nb_ext_t got;
+    nb_frame_header_t header;
+    nb_frame_t frame;
     size_t ext_len;
     size_t n;
 
-    zri_ext_set_init(&set, ext, sizeof(ext));
-    CHECK(zri_ext_set_add(&set, ZRI_EXT_ROUTE, route, strlen(route)));
-    CHECK(zri_ext_set_add(&set, ZRI_EXT_DEADLINE, deadline, sizeof(deadline)));
-    CHECK(zri_ext_set_add(&set, ZRI_EXT_APP_BASE, "x", 1));
+    nb_ext_set_init(&set, ext, sizeof(ext));
+    CHECK(nb_ext_set_add(&set, NB_EXT_ROUTE, route, strlen(route)));
+    CHECK(nb_ext_set_add(&set, NB_EXT_DEADLINE, deadline, sizeof(deadline)));
+    CHECK(nb_ext_set_add(&set, NB_EXT_APP_BASE, "x", 1));
     ext_len = set.len;
 
     memset(&header, 0, sizeof(header));
-    header.frame_type = ZRI_FRAME_DATA;
-    header.kind = ZRI_KIND_REQUEST;
+    header.frame_type = NB_FRAME_DATA;
+    header.kind = NB_KIND_REQUEST;
     header.request_id = 7;
     header.ext_len = (uint32_t)ext_len;
     header.payload_len = sizeof(payload);
-    n = zri_frame_encode(buf, sizeof(buf), &header, ext, ext_len, payload, sizeof(payload));
-    CHECK(n == zri_frame_size(ext_len, sizeof(payload)));
-    CHECK(n == (size_t)ZRI_FRAME_HDR_LEN + ext_len + sizeof(payload));
-    CHECK(zri_frame_decode(buf, n, &frame) == OK);
-    CHECK(frame.header.frame_type == ZRI_FRAME_DATA);
+    n = nb_frame_encode(buf, sizeof(buf), &header, ext, ext_len, payload, sizeof(payload));
+    CHECK(n == nb_frame_size(ext_len, sizeof(payload)));
+    CHECK(n == (size_t)NB_FRAME_HDR_LEN + ext_len + sizeof(payload));
+    CHECK(nb_frame_decode(buf, n, &frame) == NB_OK);
+    CHECK(frame.header.frame_type == NB_FRAME_DATA);
     CHECK(frame.header.request_id == 7);
     CHECK(frame.header.payload_len == sizeof(payload));
     CHECK(memcmp(frame.payload, payload, sizeof(payload)) == 0);
 
-    CHECK(zri_ext_get(frame.ext, frame.header.ext_len, ZRI_EXT_ROUTE, &got) == 1);
+    CHECK(nb_ext_get(frame.ext, frame.header.ext_len, NB_EXT_ROUTE, &got) == 1);
     CHECK(got.len == strlen(route));
     CHECK(memcmp(got.value, route, got.len) == 0);
-    CHECK(zri_ext_get(frame.ext, frame.header.ext_len, ZRI_EXT_DEADLINE, &got) == 1);
+    CHECK(nb_ext_get(frame.ext, frame.header.ext_len, NB_EXT_DEADLINE, &got) == 1);
     CHECK(got.len == sizeof(deadline));
-    CHECK(zri_ext_get(frame.ext, frame.header.ext_len, ZRI_EXT_APP_BASE, &got) == 1);
-    CHECK(zri_ext_get(frame.ext, frame.header.ext_len, 0x0999, &got) == 0);
+    CHECK(nb_ext_get(frame.ext, frame.header.ext_len, NB_EXT_APP_BASE, &got) == 1);
+    CHECK(nb_ext_get(frame.ext, frame.header.ext_len, 0x0999, &got) == 0);
 
     /* 篡改扩展长度必须被拒绝（越界或 CRC）。 */
-    buf[ZRI_FRAME_HDR_LEN + 2] = 0x10;
-    CHECK(zri_frame_decode(buf, n, &frame) == ERR_INVALID);
+    buf[NB_FRAME_HDR_LEN + 2] = 0x10;
+    CHECK(nb_frame_decode(buf, n, &frame) == NB_ERR_INVALID);
 }
 
 static void test_envelope_rejects_bad_header(void)
@@ -154,8 +154,8 @@ static void test_envelope_rejects_bad_header(void)
     uint8_t bad[128];
     const char *route = "echo.ping";
     const uint8_t payload[4] = { 1, 2, 3, 4 };
-    zri_envelope_t envelope;
-    zri_envelope_t view;
+    nb_envelope_t envelope;
+    nb_envelope_t view;
     size_t n;
 
     memset(&envelope, 0, sizeof(envelope));
@@ -163,34 +163,34 @@ static void test_envelope_rejects_bad_header(void)
     envelope.route = route;
     envelope.payload = payload;
     envelope.payload_len = sizeof(payload);
-    n = zri_envelope_encode(buf, sizeof(buf), &envelope);
+    n = nb_envelope_encode(buf, sizeof(buf), &envelope);
     CHECK(n > 0);
-    CHECK(zri_envelope_decode(buf, n, &view) == OK);
+    CHECK(nb_envelope_decode(buf, n, &view) == NB_OK);
 
     memcpy(bad, buf, n);
     bad[0] ^= 0xff;
-    CHECK(zri_envelope_decode(bad, n, &view) == ERR_INVALID);
+    CHECK(nb_envelope_decode(bad, n, &view) == NB_ERR_INVALID);
 
     memcpy(bad, buf, n);
     bad[2] = (uint8_t)(ENVELOPE_VERSION + 1u);
-    CHECK(zri_envelope_decode(bad, n, &view) == ERR_INVALID);
+    CHECK(nb_envelope_decode(bad, n, &view) == NB_ERR_INVALID);
 
     /* 控制段（route 首字节）被篡改必须被 CRC 检出。 */
     memcpy(bad, buf, n);
     bad[ENVELOPE_HDR_LEN] ^= 0x01;
-    CHECK(zri_envelope_decode(bad, n, &view) == ERR_INVALID);
+    CHECK(nb_envelope_decode(bad, n, &view) == NB_ERR_INVALID);
 
     memcpy(bad, buf, n);
     bad[ENVELOPE_OFF_CHECKSUM] ^= 0x01;
-    CHECK(zri_envelope_decode(bad, n, &view) == ERR_INVALID);
+    CHECK(nb_envelope_decode(bad, n, &view) == NB_ERR_INVALID);
 }
 
 static void test_udp_fragment_roundtrip(void)
 {
     uint8_t buf[256];
     const uint8_t chunk[5] = { 1, 2, 3, 4, 5 };
-    zri_frag_t desc;
-    zri_frag_t view;
+    nb_frag_t desc;
+    nb_frag_t view;
     size_t n;
 
     memset(&desc, 0, sizeof(desc));
@@ -204,9 +204,9 @@ static void test_udp_fragment_roundtrip(void)
     desc.frag_len = sizeof(chunk);
     desc.flags = FLAG_FIRST | FLAG_LAST;
     desc.chunk = chunk;
-    n = zri_frame_build_data(buf, sizeof(buf), &desc);
+    n = nb_frame_build_data(buf, sizeof(buf), &desc);
     CHECK(n > 0);
-    CHECK(zri_frame_parse_data(buf, n, &view) == 1);
+    CHECK(nb_frame_parse_data(buf, n, &view) == 1);
     CHECK(view.marker == 1);
     CHECK(view.seq == 0x1234);
     CHECK(view.ssrc == 0x0a0b0c0du);
@@ -225,9 +225,9 @@ static void test_tcp_opaque_frame(void)
     size_t parsed_len = 0;
     size_t n;
 
-    n = zri_tcp_build(buf, sizeof(buf), body, sizeof(body));
+    n = nb_tcp_build(buf, sizeof(buf), body, sizeof(body));
     CHECK(n == sizeof(body) + TCP_HDR_LEN);
-    CHECK(zri_tcp_parse(buf, n, &parsed, &parsed_len) == 1);
+    CHECK(nb_tcp_parse(buf, n, &parsed, &parsed_len) == 1);
     CHECK(parsed_len == sizeof(body));
     CHECK(memcmp(parsed, body, sizeof(body)) == 0);
 }
@@ -240,9 +240,9 @@ static void test_nack_roundtrip(void)
     size_t n;
     int c;
 
-    n = zri_frame_build_nack(buf, sizeof(buf), 0x11111111u, 0x22222222u, seqs, 4);
+    n = nb_frame_build_nack(buf, sizeof(buf), 0x11111111u, 0x22222222u, seqs, 4);
     CHECK(n > 0);
-    c = zri_frame_parse_nack(buf, n, NULL, NULL, out, 64);
+    c = nb_frame_parse_nack(buf, n, NULL, NULL, out, 64);
     CHECK(c == 4);
     CHECK(out[0] == 100);
     CHECK(out[1] == 101);
@@ -253,18 +253,18 @@ static void test_nack_roundtrip(void)
 static void test_parse_rejects_rtcp(void)
 {
     uint8_t rtcp[12];
-    zri_frag_t view;
+    nb_frag_t view;
     memset(rtcp, 0, sizeof(rtcp));
     rtcp[0] = (uint8_t)(2u << 6);
     rtcp[1] = RTCP_RTPFB;
-    CHECK(zri_frame_parse_data(rtcp, sizeof(rtcp), &view) == 0);
+    CHECK(nb_frame_parse_data(rtcp, sizeof(rtcp), &view) == 0);
 }
 
 static void test_rtcp_sr_roundtrip(void)
 {
     uint8_t buf[256];
-    zri_rtcp_report_block_t rb;
-    zri_rtcp_sr_t sr;
+    nb_rtcp_report_block_t rb;
+    nb_rtcp_sr_t sr;
     size_t n;
 
     memset(&rb, 0, sizeof(rb));
@@ -276,11 +276,11 @@ static void test_rtcp_sr_roundtrip(void)
     rb.lsr = 0x11223344u;
     rb.dlsr = 0x55667788u;
 
-    n = zri_frame_build_sr(
+    n = nb_frame_build_sr(
         buf, sizeof(buf), 0xdeadbeefu, 0x11111111u, 0x22222222u, 0x33333333u, 100, 2000, &rb, 1);
     CHECK(n == 52);
     memset(&sr, 0, sizeof(sr));
-    CHECK(zri_frame_parse_sr(buf, n, &sr) == 1);
+    CHECK(nb_frame_parse_sr(buf, n, &sr) == 1);
     CHECK(sr.ssrc == 0xdeadbeefu);
     CHECK(sr.ntp_msw == 0x11111111u && sr.ntp_lsw == 0x22222222u);
     CHECK(sr.rtp_ts == 0x33333333u);
@@ -298,17 +298,17 @@ static void test_rtcp_sr_roundtrip(void)
 static void test_rtcp_rr_roundtrip(void)
 {
     uint8_t buf[128];
-    zri_rtcp_report_block_t rb;
-    zri_rtcp_rr_t rr;
+    nb_rtcp_report_block_t rb;
+    nb_rtcp_rr_t rr;
     size_t n;
 
     memset(&rb, 0, sizeof(rb));
     rb.ssrc = 0x01010101u;
     rb.cumulative_lost = 5;
-    n = zri_frame_build_rr(buf, sizeof(buf), 0x0f0f0f0fu, &rb, 1);
+    n = nb_frame_build_rr(buf, sizeof(buf), 0x0f0f0f0fu, &rb, 1);
     CHECK(n == 32);
     memset(&rr, 0, sizeof(rr));
-    CHECK(zri_frame_parse_rr(buf, n, &rr) == 1);
+    CHECK(nb_frame_parse_rr(buf, n, &rr) == 1);
     CHECK(rr.ssrc == 0x0f0f0f0fu);
     CHECK(rr.rb_count == 1);
     CHECK(rr.rb[0].ssrc == 0x01010101u);
@@ -318,17 +318,17 @@ static void test_rtcp_rr_roundtrip(void)
 static void test_rtcp_sdes_and_dispatch(void)
 {
     uint8_t buf[128];
-    zri_frag_t view;
+    nb_frag_t view;
     size_t n;
 
-    n = zri_frame_build_sdes_cname(buf, sizeof(buf), 0xabcdef01u, "rpc");
+    n = nb_frame_build_sdes_cname(buf, sizeof(buf), 0xabcdef01u, "rpc");
     CHECK(n == 16);                                  /* 4 头 + 4 ssrc + 2 项头 + 4 名 + 2 填充 */
-    CHECK(zri_frame_parse_data(buf, n, &view) == 0); /* SDES 不是数据包 */
+    CHECK(nb_frame_parse_data(buf, n, &view) == 0); /* SDES 不是数据包 */
 
     memset(buf, 0, sizeof(buf));
     buf[0] = (uint8_t)(2u << 6);
     buf[1] = RTCP_SR;
-    CHECK(zri_frame_parse_sr(buf, 3, NULL) == 0);
+    CHECK(nb_frame_parse_sr(buf, 3, NULL) == 0);
 }
 
 static void test_rtcp_bye_roundtrip(void)
@@ -337,11 +337,11 @@ static void test_rtcp_bye_roundtrip(void)
     uint32_t ssrc = 0;
     size_t n;
 
-    n = zri_frame_build_bye(buf, sizeof(buf), 0x0badf00du);
+    n = nb_frame_build_bye(buf, sizeof(buf), 0x0badf00du);
     CHECK(n == 8);
-    CHECK(zri_frame_parse_bye(buf, n, &ssrc) == 1);
+    CHECK(nb_frame_parse_bye(buf, n, &ssrc) == 1);
     CHECK(ssrc == 0x0badf00du);
-    CHECK(zri_frame_parse_bye(buf, 4, NULL) == 0);
+    CHECK(nb_frame_parse_bye(buf, 4, NULL) == 0);
 }
 
 int main(void)
@@ -359,9 +359,9 @@ int main(void)
     test_rtcp_sdes_and_dispatch();
     test_rtcp_bye_roundtrip();
     if (g_fail) {
-        rpc_log_error("zri_framing: FAIL");
+        nb_log_error("nb_framing: FAIL");
         return 1;
     }
-    rpc_log_info("zri_framing: OK");
+    nb_log_info("nb_framing: NB_OK");
     return 0;
 }

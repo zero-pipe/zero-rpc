@@ -11,16 +11,16 @@
 #define WINDOW_WORDS (WINDOW_BITS / 64)
 
 /* Wrap-safe receive sequence window used by unreliable datagram providers. */
-typedef struct zri_rx_window {
+typedef struct nb_rx_window {
     int initialized;
     uint16_t base;
     uint16_t max;
     uint64_t bits[WINDOW_WORDS];
-} zri_rx_window_t;
+} nb_rx_window_t;
 
-void zri_rx_window_reset(zri_rx_window_t *window);
+void nb_rx_window_reset(nb_rx_window_t *window);
 /* Returns 1 for a new sequence, 0 for a duplicate (old or still in-window). */
-int zri_rx_window_accept(zri_rx_window_t *window, uint16_t seq);
-size_t zri_rx_window_missing(const zri_rx_window_t *window, uint16_t *out, size_t cap);
+int nb_rx_window_accept(nb_rx_window_t *window, uint16_t seq);
+size_t nb_rx_window_missing(const nb_rx_window_t *window, uint16_t *out, size_t cap);
 
 #endif /* RX_WINDOW_H */

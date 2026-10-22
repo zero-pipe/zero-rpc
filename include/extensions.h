@@ -1,5 +1,5 @@
-#ifndef EXTENSIONS_H
-#define EXTENSIONS_H
+#ifndef NB_EXTENSIONS_H
+#define NB_EXTENSIONS_H
 
 /*
  * 可插拔扩展 API：payload 编解码、消息视图和服务/方法声明表。
@@ -9,4 +9,4 @@
 #include <message_view.h>
 #include <service_table.h>
 
-#endif /* EXTENSIONS_H */
+#endif /* NB_EXTENSIONS_H */

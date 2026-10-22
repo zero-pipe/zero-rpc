@@ -2,7 +2,7 @@
 
 #include <stdlib.h>
 
-int zri_tx_ring_ensure(zri_tx_ring_t *ring, uint32_t stride)
+int nb_tx_ring_ensure(nb_tx_ring_t *ring, uint32_t stride)
 {
     if (!ring || stride == 0) {
         return 0;
@@ -21,7 +21,7 @@ int zri_tx_ring_ensure(zri_tx_ring_t *ring, uint32_t stride)
     return 1;
 }
 
-uint8_t *zri_tx_ring_slot(zri_tx_ring_t *ring, uint16_t seq)
+uint8_t *nb_tx_ring_slot(nb_tx_ring_t *ring, uint16_t seq)
 {
     uint32_t index;
     if (!ring || !ring->arena || ring->stride == 0) {
@@ -31,10 +31,10 @@ uint8_t *zri_tx_ring_slot(zri_tx_ring_t *ring, uint16_t seq)
     return ring->arena + (size_t)index * ring->stride;
 }
 
-void zri_tx_ring_commit(zri_tx_ring_t *ring, uint16_t seq, uint32_t len)
+void nb_tx_ring_commit(nb_tx_ring_t *ring, uint16_t seq, uint32_t len)
 {
     uint32_t index;
-    zri_tx_slot_t *slot;
+    nb_tx_slot_t *slot;
     if (!ring || !ring->arena || len == 0 || len > ring->stride) {
         return;
     }
@@ -47,9 +47,9 @@ void zri_tx_ring_commit(zri_tx_ring_t *ring, uint16_t seq, uint32_t len)
     slot->sent_ms = 0;
 }
 
-const uint8_t *zri_tx_ring_get(const zri_tx_ring_t *ring, uint16_t seq, uint32_t *out_len)
+const uint8_t *nb_tx_ring_get(const nb_tx_ring_t *ring, uint16_t seq, uint32_t *out_len)
 {
-    const zri_tx_slot_t *slot;
+    const nb_tx_slot_t *slot;
     uint32_t index;
     if (!ring || !ring->arena) {
         return NULL;
@@ -65,10 +65,10 @@ const uint8_t *zri_tx_ring_get(const zri_tx_ring_t *ring, uint16_t seq, uint32_t
     return ring->arena + slot->off;
 }
 
-void zri_tx_ring_mark_sent(zri_tx_ring_t *ring, uint16_t seq, uint64_t ms)
+void nb_tx_ring_mark_sent(nb_tx_ring_t *ring, uint16_t seq, uint64_t ms)
 {
     uint32_t index;
-    zri_tx_slot_t *slot;
+    nb_tx_slot_t *slot;
     if (!ring || !ring->arena) {
         return;
     }
@@ -79,10 +79,10 @@ void zri_tx_ring_mark_sent(zri_tx_ring_t *ring, uint16_t seq, uint64_t ms)
     }
 }
 
-uint64_t zri_tx_ring_sent_ms(const zri_tx_ring_t *ring, uint16_t seq)
+uint64_t nb_tx_ring_sent_ms(const nb_tx_ring_t *ring, uint16_t seq)
 {
     uint32_t index;
-    const zri_tx_slot_t *slot;
+    const nb_tx_slot_t *slot;
     if (!ring || !ring->arena) {
         return 0;
     }
@@ -94,7 +94,7 @@ uint64_t zri_tx_ring_sent_ms(const zri_tx_ring_t *ring, uint16_t seq)
     return 0;
 }
 
-void zri_tx_ring_cleanup(zri_tx_ring_t *ring)
+void nb_tx_ring_cleanup(nb_tx_ring_t *ring)
 {
     if (!ring) {
         return;

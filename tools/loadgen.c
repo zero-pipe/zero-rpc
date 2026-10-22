@@ -8,7 +8,7 @@
 #include <platform.h>
 #include <thread/sem.h>
 
-#define RPC_LOG_TAG "loadgen"
+#define NB_LOG_TAG "loadgen"
 #include <log.h>
 
 #include <stdio.h>
@@ -101,7 +101,7 @@ typedef struct options {
     uint16_t frag_bytes;
     uint32_t max_msg_bytes;
     uint32_t backpressure_bytes;
-    transport_kind_t transport;
+    nb_transport_kind_t transport;
     uint64_t window; /* 0 = 收一发一；>0 = 滑动窗口在途上限 */
 } options_t;
 
@@ -124,15 +124,15 @@ static int g_status;
 static const uint8_t *g_expect_data;
 static size_t g_expect_len;
 
-static void on_response(int status, const response_t *resp, void *user)
+static void on_response(int status, const nb_response_t *resp, void *user)
 {
     callout_t *co = (callout_t *)user;
     co->status = status;
     co->app_status = resp ? resp->status : status;
-    co->resp_len = (status == OK && resp) ? resp->payload.len : 0;
+    co->resp_len = (status == NB_OK && resp) ? resp->payload.len : 0;
     co->latency_ns = now_ns() - co->send_ns;
     co->verify_ok = 1;
-    if (g_expect_data && status == OK && resp) {
+    if (g_expect_data && status == NB_OK && resp) {
         co->verify_ok = (resp->payload.len == g_expect_len &&
                          memcmp(resp->payload.data, g_expect_data, g_expect_len) == 0);
     }
@@ -183,7 +183,7 @@ static int parse_size(const char *s, size_t *out)
 
 static void usage(const char *argv0)
 {
-    rpc_log_error("usage: %s [--service s] [--method m] [--duration-seconds n]\n"
+    nb_log_error("usage: %s [--service s] [--method m] [--duration-seconds n]\n"
                   "          [--transport udp|tcp]\n"
                   "          [--max-requests n] [--payload-bytes n] [--expect-response-bytes n]\n"
                   "          [--timeout-ms n] [--rate qps] [--window n] [--verify-response]\n"
@@ -212,8 +212,8 @@ static void error_add(error_entry_t *errors, int *error_count, int code)
 
 /* ---- 事件驱动（closed-loop）：全程在 poller 线程内联发送，无跨线程/sem 开销 ---- */
 
-static node_t *g_node;
-static proxy_t *g_proxy;
+static nb_node_t *g_node;
+static nb_proxy_t *g_proxy;
 static ntk_sem *g_done;
 static options_t g_opt;
 static const uint8_t *g_payload;
@@ -241,7 +241,7 @@ static void ed_finish(void)
     ntk_sem_post(g_done, 1);
 }
 
-static void ed_resp(int status, const response_t *resp, void *user)
+static void ed_resp(int status, const nb_response_t *resp, void *user)
 {
     int inline_cb = g_in_issue;
     uint64_t send_ns = (uint64_t)(uintptr_t)user;
@@ -256,7 +256,7 @@ static void ed_resp(int status, const response_t *resp, void *user)
 
     g_lat_hist[hidx]++;
 
-    ok = (status == OK) && resp && resp->status == OK &&
+    ok = (status == NB_OK) && resp && resp->status == NB_OK &&
         (g_opt.expect_response_bytes == 0 ||
          (resp && resp->payload.len == g_opt.expect_response_bytes));
     if (ok && g_opt.verify_response && resp) {
@@ -277,7 +277,7 @@ static void ed_resp(int status, const response_t *resp, void *user)
     } else {
         g_failed++;
         error_add(
-            g_errors, &g_error_count, status != OK ? status : (resp ? resp->status : ERR_STATE));
+            g_errors, &g_error_count, status != NB_OK ? status : (resp ? resp->status : NB_ERR_STATE));
     }
 
     if (now_ns() >= g_deadline_ns ||
@@ -289,12 +289,12 @@ static void ed_resp(int status, const response_t *resp, void *user)
         }
         return;
     }
-    if (status == ERR_NOTFOUND) {
+    if (status == NB_ERR_NOTFOUND) {
         /* 尚未发现：稍后重试，避免忙转 */
         if (inline_cb) {
             g_pause = 1;
         }
-        (void)node_post_delay(g_node, 1, ed_issue, NULL);
+        (void)nb_node_post_delay(g_node, 1, ed_issue, NULL);
         return;
     }
     if (!inline_cb) {
@@ -330,11 +330,11 @@ static void ed_issue(void *user)
             g_inflight_peak = g_inflight;
         }
         {
-            payload_t pl;
+            nb_payload_t pl;
             pl.data = g_payload;
             pl.len = g_opt.payload_bytes;
             pl.encoding = 0;
-            rc = proxy_call_async(g_proxy,
+            rc = nb_proxy_call_async(g_proxy,
                                   g_opt.service,
                                   g_opt.method,
                                   &pl,
@@ -343,11 +343,11 @@ static void ed_issue(void *user)
                                   g_opt.timeout_ms,
                                   &id);
         }
-        if (rc != OK) {
+        if (rc != NB_OK) {
             g_failed++;
             error_add(g_errors, &g_error_count, rc);
             g_inflight--;
-            (void)node_post_delay(g_node, 1, ed_issue, NULL);
+            (void)nb_node_post_delay(g_node, 1, ed_issue, NULL);
             break;
         }
         if (g_pause) {
@@ -360,9 +360,9 @@ static void ed_issue(void *user)
 int main(int argc, char **argv)
 {
     options_t opt;
-    node_config_t cfg;
-    node_t *node = NULL;
-    proxy_t *proxy = NULL;
+    nb_node_config_t cfg;
+    nb_node_t *node = NULL;
+    nb_proxy_t *proxy = NULL;
     ntk_sem *sem = NULL;
     callout_t co;
     uint8_t *payload = NULL;
@@ -377,7 +377,7 @@ int main(int argc, char **argv)
     char target_host[64];
     int i;
     int rc;
-    node_mode_t mode = MODE_MESH;
+    nb_node_mode_t mode = NB_MODE_MESH;
     FILE *out = stdout;
 
     memset(&opt, 0, sizeof(opt));
@@ -395,11 +395,11 @@ int main(int argc, char **argv)
         if (strcmp(a, "--transport") == 0 && i + 1 < argc) {
             const char *t = argv[++i];
             opt.transport =
-                (strcmp(t, "tcp") == 0 || strcmp(t, "TCP") == 0) ? TRANSPORT_TCP : TRANSPORT_UDP;
+                (strcmp(t, "tcp") == 0 || strcmp(t, "TCP") == 0) ? NB_TRANSPORT_TCP : NB_TRANSPORT_UDP;
         } else if (strcmp(a, "--service") == 0 && i + 1 < argc) {
             opt.service = argv[++i];
         } else if (strcmp(a, "--mode") == 0 && i + 1 < argc) {
-            mode = (strcmp(argv[++i], "static") == 0) ? MODE_STATIC : MODE_MESH;
+            mode = (strcmp(argv[++i], "static") == 0) ? NB_MODE_STATIC : NB_MODE_MESH;
         } else if (strcmp(a, "--method") == 0 && i + 1 < argc) {
             opt.method = argv[++i];
         } else if (strcmp(a, "--worker-id") == 0 && i + 1 < argc) {
@@ -470,7 +470,7 @@ int main(int argc, char **argv)
         }
     }
 
-    node_config_default(&cfg);
+    nb_node_config_default(&cfg);
     cfg.name = opt.worker_id ? opt.worker_id : "loadgen";
     cfg.transport.transport = opt.transport;
     cfg.transport.bind_host = opt.bind;
@@ -487,7 +487,7 @@ int main(int argc, char **argv)
 
     sem = ntk_sem_create(0);
     if (!sem) {
-        rpc_log_error("sem create failed");
+        nb_log_error("sem create failed");
         return 1;
     }
     if (opt.payload_bytes > 0) {
@@ -500,21 +500,21 @@ int main(int argc, char **argv)
         }
     }
 
-    rc = node_create(&cfg, &node);
-    if (rc != OK) {
-        rpc_log_error("node create failed: %d", rc);
+    rc = nb_node_create(&cfg, &node);
+    if (rc != NB_OK) {
+        nb_log_error("node create failed: %d", rc);
         return 1;
     }
     if (opt.peer_ip) {
-        (void)node_add_discovery_peer(node, opt.peer_ip, opt.peer_port);
+        (void)nb_node_add_discovery_peer(node, opt.peer_ip, opt.peer_port);
     }
-    rc = proxy_create(node, NULL, &proxy);
-    if (rc != OK) {
-        rpc_log_error("proxy create failed: %d", rc);
+    rc = nb_proxy_create(node, NULL, &proxy);
+    if (rc != NB_OK) {
+        nb_log_error("proxy create failed: %d", rc);
         return 1;
     }
     if (opt.target_ip && opt.target_port) {
-        (void)proxy_set_endpoint(proxy, opt.target_ip, opt.target_port, node_transport(node));
+        (void)nb_proxy_set_endpoint(proxy, opt.target_ip, opt.target_port, nb_node_transport(node));
     }
 
     memset(&co, 0, sizeof(co));
@@ -522,7 +522,7 @@ int main(int argc, char **argv)
 
     /* MESH：先等目标服务进入路由表（启动等待），再做预热。 */
     if (!(opt.target_ip && opt.target_port)) {
-        (void)node_wait_for_service(
+        (void)nb_node_wait_for_service(
             node, opt.service, (uint64_t)opt.connect_timeout_seconds * 1000ull);
     }
 
@@ -532,21 +532,21 @@ int main(int argc, char **argv)
         uint64_t id = 0;
         int warmed = 0;
         while (now_ns() < wdeadline) {
-            payload_t pl;
+            nb_payload_t pl;
             pl.data = payload;
             pl.len = opt.payload_bytes;
             pl.encoding = 0;
             co.status = -999;
             co.send_ns = now_ns();
-            rc = proxy_call_async(
+            rc = nb_proxy_call_async(
                 proxy, opt.service, opt.method, &pl, on_response, &co, opt.timeout_ms, &id);
-            if (rc != OK) {
-                rpc_log_error("proxy_call_async failed: %d", rc);
-                node_destroy(node);
+            if (rc != NB_OK) {
+                nb_log_error("nb_proxy_call_async failed: %d", rc);
+                nb_node_destroy(node);
                 return 1;
             }
             (void)ntk_sem_timedwait(sem, (unsigned)(opt.timeout_ms + 100));
-            if (co.status != ERR_NOTFOUND) {
+            if (co.status != NB_ERR_NOTFOUND) {
                 warmed = 1;
                 break;
             }
@@ -573,7 +573,7 @@ int main(int argc, char **argv)
                 uint64_t id = 0;
                 uint64_t us;
                 uint64_t target = start_ns + (uint64_t)((double)index * 1000000000.0 / opt.rate);
-                payload_t pl;
+                nb_payload_t pl;
                 sleep_until_ns(target);
                 pl.data = payload;
                 pl.len = opt.payload_bytes;
@@ -582,10 +582,10 @@ int main(int argc, char **argv)
                 co.resp_len = 0;
                 co.verify_ok = 1;
                 co.send_ns = now_ns();
-                rc = proxy_call_async(
+                rc = nb_proxy_call_async(
                     proxy, opt.service, opt.method, &pl, on_response, &co, opt.timeout_ms, &id);
                 attempted++;
-                if (rc != OK) {
+                if (rc != NB_OK) {
                     failed++;
                     error_add(errors, &error_count, rc);
                     index++;
@@ -593,7 +593,7 @@ int main(int argc, char **argv)
                 }
                 if (ntk_sem_timedwait(sem, (unsigned)(opt.timeout_ms + 100)) != NTK_OK) {
                     failed++;
-                    error_add(errors, &error_count, ERR_TIMEOUT);
+                    error_add(errors, &error_count, NB_ERR_TIMEOUT);
                     index++;
                     continue;
                 }
@@ -602,7 +602,7 @@ int main(int argc, char **argv)
                     uint64_t hidx = (uint64_t)lat_hist_index(us);
                     g_lat_hist[hidx]++;
                 }
-                if (co.status == OK && co.app_status == OK && co.verify_ok &&
+                if (co.status == NB_OK && co.app_status == NB_OK && co.verify_ok &&
                     (opt.expect_response_bytes == 0 || co.resp_len == opt.expect_response_bytes)) {
                     succeeded++;
                     response_bytes += co.resp_len;
@@ -616,7 +616,7 @@ int main(int argc, char **argv)
                     lat_count++;
                 } else {
                     failed++;
-                    error_add(errors, &error_count, co.status != OK ? co.status : co.app_status);
+                    error_add(errors, &error_count, co.status != NB_OK ? co.status : co.app_status);
                 }
                 index++;
             }
@@ -636,7 +636,7 @@ int main(int argc, char **argv)
             g_finished = 0;
             g_done = ntk_sem_create(0);
             if (g_done) {
-                (void)node_post(node, ed_issue, NULL);
+                (void)nb_node_post(node, ed_issue, NULL);
                 (void)ntk_sem_timedwait(
                     g_done, (unsigned)(opt.duration_seconds * 1000 + opt.timeout_ms + 2000));
                 ntk_sem_destroy(g_done);
@@ -713,10 +713,10 @@ int main(int argc, char **argv)
             }
         }
         {
-            metrics_t metrics;
+            nb_metrics_t metrics;
             memset(&metrics, 0, sizeof(metrics));
             if (node) {
-                node_metrics(node, &metrics);
+                nb_node_metrics(node, &metrics);
             }
             fprintf(out,
                     "},\"metrics\":{\"requests_sent\":%llu,\"responses_received\":%llu,"
@@ -758,7 +758,7 @@ int main(int argc, char **argv)
     }
     free(payload);
     ntk_sem_destroy(sem);
-    proxy_destroy(proxy);
-    node_destroy(node);
+    nb_proxy_destroy(proxy);
+    nb_node_destroy(node);
     return 0;
 }

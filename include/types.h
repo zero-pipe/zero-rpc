@@ -1,12 +1,12 @@
-#ifndef TYPES_H
-#define TYPES_H
+#ifndef NB_TYPES_H
+#define NB_TYPES_H
 
 /*
  * rpc 公共基础类型。
  *
  * 分层约定：
  *   - 传输层（UDP/TCP）只搬运字节，不解释业务语义；
- *   - 应用层的 payload 对框架完全透明（见 payload_t）；
+ *   - 应用层的 payload 对框架完全透明（见 nb_payload_t）；
  *   - 客户端响应回调与 INLINE handler 在 ntk poller 线程触发，禁止阻塞；
  *     WORKER / EXECUTOR handler 在对应执行线程运行（见 service.h）。
  */
@@ -19,95 +19,95 @@ extern "C" {
 #endif
 
 /* ---- 状态码 ---- */
-#define OK 0
-#define ERR_INVALID (-1)
-#define ERR_NOMEM (-2)
-#define ERR_NOTFOUND (-3) /* 服务未发现 / 请求已失效 */
-#define ERR_TIMEOUT (-4)
-#define ERR_IO (-5)
-#define ERR_STATE (-6)
-#define ERR_AGAIN (-7)
-#define ERR_TOOBIG (-8)
-#define ERR_CLOSED (-9)
+#define NB_OK 0
+#define NB_ERR_INVALID (-1)
+#define NB_ERR_NOMEM (-2)
+#define NB_ERR_NOTFOUND (-3) /* 服务未发现 / 请求已失效 */
+#define NB_ERR_TIMEOUT (-4)
+#define NB_ERR_IO (-5)
+#define NB_ERR_STATE (-6)
+#define NB_ERR_AGAIN (-7)
+#define NB_ERR_TOOBIG (-8)
+#define NB_ERR_CLOSED (-9)
 
 /* ---- 消息标志 ---- */
 /*
- * 响应包的 status 字段承载框架错误码（如 ERR_AGAIN），而非应用状态。
- * 应用状态码仍只通过 response_t.status 传递。
+ * 响应包的 status 字段承载框架错误码（如 NB_ERR_AGAIN），而非应用状态。
+ * 应用状态码仍只通过 nb_response_t.status 传递。
  */
-#define MSG_FLAG_FRAMEWORK_STATUS 0x01u
+#define NB_MSG_FLAG_FRAMEWORK_STATUS 0x01u
 
 /* ---- 元数据（对齐 gRPC metadata：字符串 key + 二进制 value） ---- */
-#define METADATA_MAX_ENTRIES 16
-#define METADATA_KEY_MAX 64
-#define METADATA_VALUE_MAX 256
-#define METADATA_WIRE_MAX 4096
-#define STATUS_MSG_MAX 512
+#define NB_METADATA_MAX_ENTRIES 16
+#define NB_METADATA_KEY_MAX 64
+#define NB_METADATA_VALUE_MAX 256
+#define NB_METADATA_WIRE_MAX 4096
+#define NB_STATUS_MSG_MAX 512
 
-typedef struct metadata_entry {
-    char key[METADATA_KEY_MAX];
-    uint8_t value[METADATA_VALUE_MAX];
+typedef struct nb_metadata_entry {
+    char key[NB_METADATA_KEY_MAX];
+    uint8_t value[NB_METADATA_VALUE_MAX];
     uint16_t value_len;
-} metadata_entry_t;
+} nb_metadata_entry_t;
 
-typedef struct metadata {
+typedef struct nb_metadata {
     uint16_t count;
-    metadata_entry_t entries[METADATA_MAX_ENTRIES];
-} metadata_t;
+    nb_metadata_entry_t entries[NB_METADATA_MAX_ENTRIES];
+} nb_metadata_t;
 
-void metadata_init(metadata_t *metadata);
-int metadata_set(metadata_t *metadata, const char *key, const void *value, size_t len);
-int metadata_set_string(metadata_t *metadata, const char *key, const char *value);
-const void *metadata_get(const metadata_t *metadata, const char *key, size_t *len);
-const char *metadata_get_string(const metadata_t *metadata, const char *key);
-int metadata_remove(metadata_t *metadata, const char *key);
-int metadata_encode(const metadata_t *metadata, void *buf, size_t cap, size_t *out_len);
-int metadata_decode(metadata_t *metadata, const void *buf, size_t len);
+void nb_metadata_init(nb_metadata_t *metadata);
+int nb_metadata_set(nb_metadata_t *metadata, const char *key, const void *value, size_t len);
+int nb_metadata_set_string(nb_metadata_t *metadata, const char *key, const char *value);
+const void *nb_metadata_get(const nb_metadata_t *metadata, const char *key, size_t *len);
+const char *nb_metadata_get_string(const nb_metadata_t *metadata, const char *key);
+int nb_metadata_remove(nb_metadata_t *metadata, const char *key);
+int nb_metadata_encode(const nb_metadata_t *metadata, void *buf, size_t cap, size_t *out_len);
+int nb_metadata_decode(nb_metadata_t *metadata, const void *buf, size_t len);
 
 /* ---- 不透明句柄 ---- */
-typedef struct node node_t;
-typedef struct service service_t;
-typedef struct proxy proxy_t;
-typedef struct call call_t;
-typedef struct stream stream_t;
+typedef struct nb_node nb_node_t;
+typedef struct nb_service nb_service_t;
+typedef struct nb_proxy nb_proxy_t;
+typedef struct nb_call nb_call_t;
+typedef struct nb_stream nb_stream_t;
 
 /* ---- 流式消息 ---- */
-#define STREAM_FIRST 0x01u
-#define STREAM_LAST 0x02u
-#define STREAM_CANCEL 0x04u
+#define NB_STREAM_FIRST 0x01u
+#define NB_STREAM_LAST 0x02u
+#define NB_STREAM_CANCEL 0x04u
 
 /* 单向数据 chunk；data 仅在回调/发送调用期间有效。 */
-typedef struct chunk {
+typedef struct nb_chunk {
     const void *data;
     size_t len;
     uint64_t offset;
-    const metadata_t *metadata; /* 可为 NULL；仅在本次回调内有效 */
+    const nb_metadata_t *metadata; /* 可为 NULL；仅在本次回调内有效 */
     const char *message;        /* 状态消息，可为 NULL */
     unsigned flags;
     uint8_t encoding;
-} chunk_t;
+} nb_chunk_t;
 
 /* 传输层透传的 stream 元数据；unary 消息为 NULL。 */
-typedef struct stream_meta {
-    unsigned flags; /* STREAM_FIRST / STREAM_LAST */
+typedef struct nb_stream_meta {
+    unsigned flags; /* NB_STREAM_FIRST / NB_STREAM_LAST */
     uint32_t stream_id;
     uint64_t offset;
     uint64_t total_size;
-} stream_meta_t;
+} nb_stream_meta_t;
 
 /* ---- 传输与节点模式 ---- */
 /* 传输种类。默认 binding 使用 UDP；显式 bindings 可按 scheme 选择不同传输。 */
-typedef enum transport_kind {
-    TRANSPORT_UDP = 0,
-    TRANSPORT_TCP = 1,
-    TRANSPORT_CUSTOM = 255
-} transport_kind_t;
+typedef enum nb_transport_kind {
+    NB_TRANSPORT_UDP = 0,
+    NB_TRANSPORT_TCP = 1,
+    NB_TRANSPORT_CUSTOM = 255
+} nb_transport_kind_t;
 
 /* 节点发现模式：MESH 广播发现；STATIC 只用静态路由，不启动发现。 */
-typedef enum node_mode {
-    MODE_MESH = 0,
-    MODE_STATIC = 1
-} node_mode_t;
+typedef enum nb_node_mode {
+    NB_MODE_MESH = 0,
+    NB_MODE_STATIC = 1
+} nb_node_mode_t;
 
 /* ---- 应用消息视图 ---- */
 /*
@@ -119,28 +119,28 @@ typedef enum node_mode {
  *
  * 生命周期：回调参数里的 payload 仅在本次回调内有效，需要跨回调保存时请自行拷贝。
  *
- * 发送侧所有权：proxy_call_async / stub_call_async / proxy_call_event 会在
+ * 发送侧所有权：nb_proxy_call_async / nb_stub_call_async / nb_proxy_call_event 会在
  * 返回前复制 payload（跨线程调用时同样如此），调用方始终保留自己缓冲区的
  * 所有权，可在调用返回后立即释放，无需等回调。框架不会 free 调用方内存。
- * 服务端 reply() 也只在调用期间借用响应 payload，返回后即可释放。
+ * 服务端 nb_reply() 也只在调用期间借用响应 payload，返回后即可释放。
  */
-typedef struct payload {
+typedef struct nb_payload {
     const void *data;
     size_t len;
     uint8_t encoding;
-} payload_t;
+} nb_payload_t;
 
 /*
  * 请求/响应视图（对框架不透明）。请求带有路由与对端信息；响应带有应用状态码
- * 与 payload。两者共享同一个 payload_t 视图，对齐 fastcall-c 的
+ * 与 payload。两者共享同一个 nb_payload_t 视图，对齐 fastcall-c 的
  * fc_message_view 设计。
  *
  * 生命周期：回调参数里的视图（含 payload）仅在本次回调内有效。
  */
-typedef struct request {
+typedef struct nb_request {
     const char *service;
     const char *method;
-    payload_t payload; /* 对框架透明的业务字节 */
+    nb_payload_t payload; /* 对框架透明的业务字节 */
     const char *peer_ip;
     uint16_t peer_port;
     /*
@@ -149,44 +149,44 @@ typedef struct request {
      * 放弃注定会被客户端丢弃的重活；框架也会在 handler 启动前跳过已过期请求。
      */
     uint64_t deadline_ms;
-    const metadata_t *metadata; /* 请求 metadata，可为 NULL；仅本次回调内有效 */
-} request_t;
+    const nb_metadata_t *metadata; /* 请求 metadata，可为 NULL；仅本次回调内有效 */
+} nb_request_t;
 
-typedef struct response {
+typedef struct nb_response {
     int status;          /* 应用定义，0 建议表示成功 */
     const char *message; /* 状态消息，可为 NULL；仅回调内有效 */
-    payload_t payload;
-    const metadata_t *metadata; /* 响应 metadata，可为 NULL；仅回调内有效 */
-} response_t;
+    nb_payload_t payload;
+    const nb_metadata_t *metadata; /* 响应 metadata，可为 NULL；仅回调内有效 */
+} nb_response_t;
 
 /* ---- 回调 ---- */
-/* 客户端响应回调。status：OK 或错误码；resp 仅在回调内有效。 */
-typedef void (*response_fn)(int status, const response_t *resp, void *user);
-typedef void (*response_chunk_fn)(int status, const chunk_t *chunk, void *user);
+/* 客户端响应回调。status：NB_OK 或错误码；resp 仅在回调内有效。 */
+typedef void (*response_fn)(int status, const nb_response_t *resp, void *user);
+typedef void (*response_chunk_fn)(int status, const nb_chunk_t *chunk, void *user);
 typedef void (*stream_done_fn)(int status, void *user);
 
 /* ---- 默认值与容量 ---- */
 /* 默认发现端口（广播） */
-#ifndef DISCOVERY_PORT
-#define DISCOVERY_PORT 41953
+#ifndef NB_DISCOVERY_PORT
+#define NB_DISCOVERY_PORT 41953
 #endif
 
 /* 默认异步调用超时 */
-#ifndef DEFAULT_TIMEOUT_MS
-#define DEFAULT_TIMEOUT_MS 5000
+#ifndef NB_DEFAULT_TIMEOUT_MS
+#define NB_DEFAULT_TIMEOUT_MS 5000
 #endif
 
 /* 名称与地址长度上限 */
-#define ZRI_NAME_MAX 64
-#define SERVICE_NAME_MAX 64
-#define METHOD_NAME_MAX 64
-#define ENDPOINT_MAX 64
-#define SCHEME_MAX 16
-#define MAX_BINDINGS 8
-#define MAX_ENDPOINTS 32
+#define NB_NAME_MAX 64
+#define NB_SERVICE_NAME_MAX 64
+#define NB_METHOD_NAME_MAX 64
+#define NB_ENDPOINT_MAX 64
+#define NB_SCHEME_MAX 16
+#define NB_MAX_BINDINGS 8
+#define NB_MAX_ENDPOINTS 32
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* TYPES_H */
+#endif /* NB_TYPES_H */

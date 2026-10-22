@@ -10,17 +10,17 @@
 
 #define MAX_SERVICE_TABLES 16
 
-static const service_table_t *g_tables[MAX_SERVICE_TABLES];
-static size_t g_table_count;
+static const nb_service_table_t *nb_g_tables[MAX_SERVICE_TABLES];
+static size_t nb_g_table_count;
 
-static const method_descriptor_t *find_method(const char *service, const char *method)
+static const nb_method_descriptor_t *nb_find_method(const char *service, const char *method)
 {
     size_t t;
-    for (t = 0; t < g_table_count; t++) {
-        const service_table_t *table = g_tables[t];
+    for (t = 0; t < nb_g_table_count; t++) {
+        const nb_service_table_t *table = nb_g_tables[t];
         size_t s;
         for (s = 0; s < table->service_count; s++) {
-            const service_descriptor_t *svc = &table->services[s];
+            const nb_service_descriptor_t *svc = &table->services[s];
             size_t m;
             if (strcmp(svc->name, service) != 0) {
                 continue;
@@ -37,33 +37,33 @@ static const method_descriptor_t *find_method(const char *service, const char *m
 
 /* ---- 安装 ---- */
 
-int install_service_table(const service_table_t *table)
+int nb_install_service_table(const nb_service_table_t *table)
 {
     size_t i;
     if (!table || (!table->services && table->service_count > 0)) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
     /* 幂等：已经装过的同一张表直接成功。 */
-    for (i = 0; i < g_table_count; i++) {
-        if (g_tables[i] == table) {
-            return OK;
+    for (i = 0; i < nb_g_table_count; i++) {
+        if (nb_g_tables[i] == table) {
+            return NB_OK;
         }
     }
     /* 校验声明不与已安装表冲突（同名不同 ID 或重复 ID）。 */
-    for (i = 0; i < g_table_count; i++) {
-        const service_table_t *other = g_tables[i];
+    for (i = 0; i < nb_g_table_count; i++) {
+        const nb_service_table_t *other = nb_g_tables[i];
         size_t s;
         for (s = 0; s < table->service_count; s++) {
-            const service_descriptor_t *a = &table->services[s];
+            const nb_service_descriptor_t *a = &table->services[s];
             size_t o;
             for (o = 0; o < other->service_count; o++) {
-                const service_descriptor_t *b = &other->services[o];
+                const nb_service_descriptor_t *b = &other->services[o];
                 size_t m;
                 if (strcmp(a->name, b->name) != 0) {
                     continue;
                 }
                 for (m = 0; m < a->method_count; m++) {
-                    const method_descriptor_t *bm = NULL;
+                    const nb_method_descriptor_t *bm = NULL;
                     size_t n;
                     for (n = 0; n < b->method_count; n++) {
                         if (strcmp(a->methods[m].name, b->methods[n].name) == 0) {
@@ -72,43 +72,43 @@ int install_service_table(const service_table_t *table)
                         }
                     }
                     if (bm && bm->id != a->methods[m].id) {
-                        return ERR_INVALID;
+                        return NB_ERR_INVALID;
                     }
                 }
             }
         }
     }
-    if (g_table_count >= MAX_SERVICE_TABLES) {
-        return ERR_NOMEM;
+    if (nb_g_table_count >= MAX_SERVICE_TABLES) {
+        return NB_ERR_NOMEM;
     }
-    g_tables[g_table_count++] = table;
-    return OK;
+    nb_g_tables[nb_g_table_count++] = table;
+    return NB_OK;
 }
 
 /* ---- 状态与查询 ---- */
 
-void reset_service_table(void)
+void nb_reset_service_table(void)
 {
-    g_table_count = 0;
+    nb_g_table_count = 0;
 }
 
-int service_table_active(void)
+int nb_service_table_active(void)
 {
-    return g_table_count > 0;
+    return nb_g_table_count > 0;
 }
 
-int service_table_find_id(const char *service, const char *method, uint16_t *out_id)
+int nb_service_table_find_id(const char *service, const char *method, uint16_t *out_id)
 {
-    const method_descriptor_t *found;
+    const nb_method_descriptor_t *found;
     if (!service || !method) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
-    found = find_method(service, method);
+    found = nb_find_method(service, method);
     if (!found) {
-        return ERR_NOTFOUND;
+        return NB_ERR_NOTFOUND;
     }
     if (out_id) {
         *out_id = found->id;
     }
-    return OK;
+    return NB_OK;
 }

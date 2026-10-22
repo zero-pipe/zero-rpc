@@ -4,40 +4,40 @@
 
 #define PROVIDER_MAX 32
 
-static const transport_provider_t *g_providers[PROVIDER_MAX];
-static size_t g_provider_count;
+static const nb_transport_provider_t *nb_g_providers[PROVIDER_MAX];
+static size_t nb_g_provider_count;
 
 /* ---- Provider 注册 ---- */
 
-int transport_provider_register(const transport_provider_t *provider)
+int nb_transport_provider_register(const nb_transport_provider_t *provider)
 {
     size_t i;
     if (!provider || !provider->scheme || !provider->scheme[0] || !provider->ops ||
         !provider->ops->create || !provider->ops->start || !provider->ops->stop ||
         !provider->ops->destroy || !provider->ops->send || !provider->ops->reply) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
-    for (i = 0; i < g_provider_count; i++) {
-        if (strcmp(g_providers[i]->scheme, provider->scheme) == 0) {
-            return ERR_STATE;
+    for (i = 0; i < nb_g_provider_count; i++) {
+        if (strcmp(nb_g_providers[i]->scheme, provider->scheme) == 0) {
+            return NB_ERR_STATE;
         }
     }
-    if (g_provider_count >= PROVIDER_MAX) {
-        return ERR_NOMEM;
+    if (nb_g_provider_count >= PROVIDER_MAX) {
+        return NB_ERR_NOMEM;
     }
-    g_providers[g_provider_count++] = provider;
-    return OK;
+    nb_g_providers[nb_g_provider_count++] = provider;
+    return NB_OK;
 }
 
-const transport_provider_t *zri_transport_provider_find(const char *scheme)
+const nb_transport_provider_t *nb_transport_provider_find(const char *scheme)
 {
     size_t i;
     if (!scheme) {
         return NULL;
     }
-    for (i = 0; i < g_provider_count; i++) {
-        if (strcmp(g_providers[i]->scheme, scheme) == 0) {
-            return g_providers[i];
+    for (i = 0; i < nb_g_provider_count; i++) {
+        if (strcmp(nb_g_providers[i]->scheme, scheme) == 0) {
+            return nb_g_providers[i];
         }
     }
     return NULL;

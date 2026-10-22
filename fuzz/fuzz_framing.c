@@ -10,29 +10,29 @@
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
-    zri_frag_t frag;
+    nb_frag_t frag;
     const uint8_t *body = NULL;
     size_t body_len = 0;
     uint32_t ssrc = 0;
     uint32_t sender_ssrc = 0;
     uint32_t media_ssrc = 0;
     uint16_t seqs[MAX_NACK_SEQS];
-    zri_rtcp_sr_t sr;
-    zri_rtcp_rr_t rr;
+    nb_rtcp_sr_t sr;
+    nb_rtcp_rr_t rr;
 
     if (!data || size == 0) {
         return 0;
     }
     memset(&frag, 0, sizeof(frag));
-    (void)zri_frame_parse_data(data, size, &frag);
-    (void)zri_frame_parse_nack(
+    (void)nb_frame_parse_data(data, size, &frag);
+    (void)nb_frame_parse_nack(
         data, size, &sender_ssrc, &media_ssrc, seqs, sizeof(seqs) / sizeof(seqs[0]));
     memset(&sr, 0, sizeof(sr));
     memset(&rr, 0, sizeof(rr));
-    (void)zri_frame_parse_sr(data, size, &sr);
-    (void)zri_frame_parse_rr(data, size, &rr);
-    (void)zri_frame_parse_bye(data, size, &ssrc);
-    (void)zri_tcp_frame_size(data, size);
-    (void)zri_tcp_parse(data, size, &body, &body_len);
+    (void)nb_frame_parse_sr(data, size, &sr);
+    (void)nb_frame_parse_rr(data, size, &rr);
+    (void)nb_frame_parse_bye(data, size, &ssrc);
+    (void)nb_tcp_frame_size(data, size);
+    (void)nb_tcp_parse(data, size, &body, &body_len);
     return 0;
 }

@@ -1,4 +1,4 @@
-/* 节点：生命周期、传输装配、线程/发现配置与阻塞运行（分发见 zri_dispatch.c）。 */
+/* 节点：生命周期、传输装配、线程/发现配置与阻塞运行（分发见 nb_dispatch.c）。 */
 #include "node_internal.h"
 
 #include <config.h>
@@ -16,13 +16,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-uint64_t zri_now_ms(void)
+uint64_t nb_now_ms(void)
 {
     return ntk_monotonic_ms();
 }
 
 /* 出站分片：按 key 稳定选择 poller；未启用池时回退到 node->poller。 */
-ntk_poller *zri_node_pick_poller(const node_t *node, uint64_t key)
+ntk_poller *nb_node_pick_poller(const nb_node_t *node, uint64_t key)
 {
     ntk_poller *poller = NULL;
     if (!node) {
@@ -35,7 +35,7 @@ ntk_poller *zri_node_pick_poller(const node_t *node, uint64_t key)
 }
 
 /* poller 在 node 出站分片中的下标；找不到返回 -1。 */
-int zri_node_poller_index(const node_t *node, ntk_poller *poller)
+int nb_node_poller_index(const nb_node_t *node, ntk_poller *poller)
 {
     unsigned i;
     if (!node || !poller) {
@@ -52,7 +52,7 @@ int zri_node_poller_index(const node_t *node, ntk_poller *poller)
     return -1;
 }
 
-static uint32_t zri_rand(void)
+static uint32_t nb_rand(void)
 {
     static uint32_t st;
     if (st == 0) {
@@ -66,18 +66,18 @@ static uint32_t zri_rand(void)
 
 /* ---- 定长对象复用池 ---- */
 
-int zri_obj_pool_init(zri_obj_pool_t *pool, unsigned limit)
+int nb_obj_pool_init(nb_obj_pool_t *pool, unsigned limit)
 {
     if (!pool) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
     memset(pool, 0, sizeof(*pool));
     pool->limit = limit ? limit : 256;
     pool->lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    return pool->lock ? OK : ERR_NOMEM;
+    return pool->lock ? NB_OK : NB_ERR_NOMEM;
 }
 
-void zri_obj_pool_destroy(zri_obj_pool_t *pool)
+void nb_obj_pool_destroy(nb_obj_pool_t *pool)
 {
     void *obj;
     if (!pool) {
@@ -97,7 +97,7 @@ void zri_obj_pool_destroy(zri_obj_pool_t *pool)
     }
 }
 
-void *zri_obj_pool_alloc(zri_obj_pool_t *pool, size_t size)
+void *nb_obj_pool_alloc(nb_obj_pool_t *pool, size_t size)
 {
     void *obj = NULL;
     if (!pool || !pool->lock) {
@@ -116,7 +116,7 @@ void *zri_obj_pool_alloc(zri_obj_pool_t *pool, size_t size)
     return obj ? obj : malloc(size);
 }
 
-void zri_obj_pool_free(zri_obj_pool_t *pool, void *obj)
+void nb_obj_pool_free(nb_obj_pool_t *pool, void *obj)
 {
     if (!obj) {
         return;
@@ -137,60 +137,60 @@ void zri_obj_pool_free(zri_obj_pool_t *pool, void *obj)
 
 /* ---- 定时器 ---- */
 
-static void hello_timer_cb(void *user)
+static void nb_hello_timer_cb(void *user)
 {
-    node_t *node = (node_t *)user;
+    nb_node_t *node = (nb_node_t *)user;
     if (node && node->registry_backend && node->registry_backend->ops->announce) {
         node->registry_backend->ops->announce(node, 0);
     }
 }
 
-static void node_timer_cb(void *user)
+static void nb_node_timer_cb(void *user)
 {
-    node_t *node = (node_t *)user;
-    uint64_t now = zri_now_ms();
+    nb_node_t *node = (nb_node_t *)user;
+    uint64_t now = nb_now_ms();
     if (node->registry_backend && node->registry_backend->ops->tick) {
         node->registry_backend->ops->tick(node, now);
     }
-    zri_service_expire_streams(node, now);
-    zri_node_expire_cancels(node, now);
-    zri_dedup_expire(&node->dedup, now);
+    nb_service_expire_streams(node, now);
+    nb_node_expire_cancels(node, now);
+    nb_dedup_expire(&node->dedup, now);
 }
 
 /* 每个 poller 各自驱动本 lane 上 pending 的超时/重传。 */
-static void pending_timer_cb(void *user)
+static void nb_pending_timer_cb(void *user)
 {
-    node_t *node = (node_t *)user;
-    zri_pending_tick(node, zri_now_ms(), ntk_poller_current());
+    nb_node_t *node = (nb_node_t *)user;
+    nb_pending_tick(node, nb_now_ms(), ntk_poller_current());
 }
 
 /* ---- 公共 API ---- */
 
-int node_create(const node_config_t *cfg, node_t **out)
+int nb_node_create(const nb_node_config_t *cfg, nb_node_t **out)
 {
-    node_t *node;
-    node_config_t local;
+    nb_node_t *node;
+    nb_node_config_t local;
     ntk_poller_pool_opts_t popts;
     static int platform_inited = 0;
 
     if (!cfg || !out) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
     local = *cfg;
-    node_config_normalize(&local);
+    nb_node_config_normalize(&local);
     cfg = &local;
     *out = NULL;
-    node = (node_t *)calloc(1, sizeof(*node));
+    node = (nb_node_t *)calloc(1, sizeof(*node));
     if (!node) {
-        return ERR_NOMEM;
+        return NB_ERR_NOMEM;
     }
-    if (cfg->service_table && install_service_table(cfg->service_table) != OK) {
+    if (cfg->service_table && nb_install_service_table(cfg->service_table) != NB_OK) {
         free(node);
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
-    zri_copy_str(node->name, sizeof(node->name), cfg->name, NULL);
-    zri_copy_str(node->bind_host, sizeof(node->bind_host), cfg->transport.bind_host, NULL);
-    zri_copy_str(node->discovery_host, sizeof(node->discovery_host), cfg->discovery.host, NULL);
+    nb_copy_str(node->name, sizeof(node->name), cfg->name, NULL);
+    nb_copy_str(node->bind_host, sizeof(node->bind_host), cfg->transport.bind_host, NULL);
+    nb_copy_str(node->discovery_host, sizeof(node->discovery_host), cfg->discovery.host, NULL);
     node->discovery_port = cfg->discovery.port;
     node->io_threads = cfg->runtime.io_threads;
     node->hello_interval_ms = cfg->discovery.hello_interval_ms;
@@ -209,10 +209,10 @@ int node_create(const node_config_t *cfg, node_t **out)
      * metrics / log 运行期开关：关闭后热路径只多一次全局标志判断（见 atomic.h /
      * log.h）。sample_every 只作用于延迟直方图采样。
      */
-    g_zri_metrics_enabled = cfg->metrics.disabled ? 0 : 1;
-    g_zri_latency_enabled = (cfg->metrics.disabled || cfg->metrics.latency_disabled) ? 0 : 1;
-    g_zri_metrics_sample_every = cfg->metrics.sample_every;
-    rpc_log_configure(cfg->log.disabled ? 0 : 1, cfg->log.level);
+    nb_metrics_enabled = cfg->metrics.disabled ? 0 : 1;
+    nb_latency_enabled = (cfg->metrics.disabled || cfg->metrics.latency_disabled) ? 0 : 1;
+    nb_metrics_sample_every = cfg->metrics.sample_every;
+    nb_log_configure(cfg->log.disabled ? 0 : 1, cfg->log.level);
     {
         const char *dp = getenv("DROP_PERCENT");
         int v = dp ? atoi(dp) : 0;
@@ -224,41 +224,41 @@ int node_create(const node_config_t *cfg, node_t **out)
         }
         node->drop_percent = (uint8_t)v;
     }
-    node->node_id = zri_rand();
+    node->node_id = nb_rand();
     if (node->node_id == 0) {
         node->node_id = 1;
     }
     node->next_request_id = 1;
-    zri_route_init(&node->routes);
-    zri_registry_init(&node->registry);
-    node->registry_backend = (cfg->mode == MODE_MESH) ? zri_registry_backend_mesh() : NULL;
+    nb_route_init(&node->routes);
+    nb_registry_init(&node->registry);
+    node->registry_backend = (cfg->mode == NB_MODE_MESH) ? nb_registry_backend_mesh() : NULL;
     node->id_lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
     if (!node->id_lock) {
-        node_destroy(node);
-        return ERR_NOMEM;
+        nb_node_destroy(node);
+        return NB_ERR_NOMEM;
     }
     node->services_lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
     node->codecs_lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
     node->pending_lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
     node->rate_lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
     if (!node->services_lock || !node->codecs_lock || !node->pending_lock || !node->rate_lock) {
-        node_destroy(node);
-        return ERR_NOMEM;
+        nb_node_destroy(node);
+        return NB_ERR_NOMEM;
     }
     /* 保护 worker 限流计数与自定义 executor 诊断计数。 */
     node->handler_limit_mutex = ntk_mutex_create(NTK_MUTEX_NORMAL);
     if (!node->handler_limit_mutex) {
-        node_destroy(node);
-        return ERR_NOMEM;
+        nb_node_destroy(node);
+        return NB_ERR_NOMEM;
     }
-    if (zri_obj_pool_init(&node->worker_call_pool, 256) != OK) {
-        node_destroy(node);
-        return ERR_NOMEM;
+    if (nb_obj_pool_init(&node->worker_call_pool, 256) != NB_OK) {
+        nb_node_destroy(node);
+        return NB_ERR_NOMEM;
     }
-    if (zri_obj_pool_init(&node->handler_task_pool, 256) != OK ||
-        zri_obj_pool_init(&node->reply_task_pool, 256) != OK) {
-        node_destroy(node);
-        return ERR_NOMEM;
+    if (nb_obj_pool_init(&node->handler_task_pool, 256) != NB_OK ||
+        nb_obj_pool_init(&node->reply_task_pool, 256) != NB_OK) {
+        nb_node_destroy(node);
+        return NB_ERR_NOMEM;
     }
 
     if (!platform_inited) {
@@ -271,8 +271,8 @@ int node_create(const node_config_t *cfg, node_t **out)
     popts.thread_priority = NTK_THREAD_PRIO_NORMAL;
     node->pool = ntk_poller_pool_create(&popts);
     if (!node->pool || ntk_poller_pool_start(node->pool) != NTK_OK) {
-        node_destroy(node);
-        return ERR_IO;
+        nb_node_destroy(node);
+        return NB_ERR_IO;
     }
     {
         unsigned i;
@@ -297,8 +297,8 @@ int node_create(const node_config_t *cfg, node_t **out)
         bopts.max_per_bucket = BUF_POOL_MAX_PER_BUCKET;
         bopts.thread_safe = 0; /* poller 本地，热路径无锁 */
         if (ntk_poller_pool_attach_buf_pools(node->pool, &bopts) != NTK_OK) {
-            node_destroy(node);
-            return ERR_NOMEM;
+            nb_node_destroy(node);
+            return NB_ERR_NOMEM;
         }
     }
 
@@ -314,75 +314,75 @@ int node_create(const node_config_t *cfg, node_t **out)
         hopts.auto_start = 1;
         node->handler_pool = ntk_thread_pool_create(&hopts);
         if (!node->handler_pool) {
-            node_destroy(node);
-            return ERR_NOMEM;
+            nb_node_destroy(node);
+            return NB_ERR_NOMEM;
         }
     }
 
     if (cfg->transport.bindings && cfg->transport.binding_count > 0) {
         size_t i;
         for (i = 0; i < cfg->transport.binding_count; i++) {
-            endpoint_t endpoint;
-            const binding_config_t *binding = &cfg->transport.bindings[i];
-            if (!binding->endpoint || endpoint_parse(binding->endpoint, &endpoint) != OK) {
-                node_destroy(node);
-                return ERR_INVALID;
+            nb_endpoint_t endpoint;
+            const nb_binding_config_t *binding = &cfg->transport.bindings[i];
+            if (!binding->endpoint || nb_endpoint_parse(binding->endpoint, &endpoint) != NB_OK) {
+                nb_node_destroy(node);
+                return NB_ERR_INVALID;
             }
-            if (zri_node_transport_add(node, endpoint.scheme, endpoint.host, endpoint.port) != OK) {
-                node_destroy(node);
-                return ERR_IO;
+            if (nb_node_transport_add(node, endpoint.scheme, endpoint.host, endpoint.port) != NB_OK) {
+                nb_node_destroy(node);
+                return NB_ERR_IO;
             }
         }
     } else {
-        const char *scheme = cfg->transport.transport == TRANSPORT_TCP ? "tcp" : "udp";
-        if (zri_node_transport_add(node, scheme, node->bind_host, cfg->transport.data_port) != OK) {
-            node_destroy(node);
-            return ERR_IO;
+        const char *scheme = cfg->transport.transport == NB_TRANSPORT_TCP ? "tcp" : "udp";
+        if (nb_node_transport_add(node, scheme, node->bind_host, cfg->transport.data_port) != NB_OK) {
+            nb_node_destroy(node);
+            return NB_ERR_IO;
         }
     }
 
-    if (node->mode == MODE_MESH) {
+    if (node->mode == NB_MODE_MESH) {
         if (!node->registry_backend || !node->registry_backend->ops->start ||
-            node->registry_backend->ops->start(node) != OK) {
-            node_destroy(node);
-            return ERR_IO;
+            node->registry_backend->ops->start(node) != NB_OK) {
+            nb_node_destroy(node);
+            return NB_ERR_IO;
         }
         node->hello_timer =
-            ntk_timer_start(node->poller, node->hello_interval_ms, 1, hello_timer_cb, node);
+            ntk_timer_start(node->poller, node->hello_interval_ms, 1, nb_hello_timer_cb, node);
     }
     node->node_timer =
-        ntk_timer_start(node->poller, zri_tick_interval_ms(), 1, node_timer_cb, node);
+        ntk_timer_start(node->poller, nb_tick_interval_ms(), 1, nb_node_timer_cb, node);
     {
         unsigned i;
         for (i = 0; i < node->io_count; i++) {
             node->pending_timers[i] = ntk_timer_start(
-                node->io_pollers[i], zri_tick_interval_ms(), 1, pending_timer_cb, node);
+                node->io_pollers[i], nb_tick_interval_ms(), 1, nb_pending_timer_cb, node);
         }
     }
     node->started = 1;
 
-    if (node->mode == MODE_MESH) {
+    if (node->mode == NB_MODE_MESH) {
         if (node->registry_backend && node->registry_backend->ops->announce) {
             node->registry_backend->ops->announce(node, 0);
         }
     }
     *out = node;
-    return OK;
+    return NB_OK;
 }
 
-void node_destroy(node_t *node)
+void nb_node_destroy(nb_node_t *node)
 {
     if (!node) {
         return;
     }
     node->shutting_down = 1;
-    if (node->started && node->mode == MODE_MESH) {
+    if (node->started && node->mode == NB_MODE_MESH) {
         if (node->registry_backend && node->registry_backend->ops->announce) {
             node->registry_backend->ops->announce(node, 1); /* BYE */
         }
     }
     /*
-     * 先销毁 handler 线程池：drain 队列并 join worker。worker 期间的 reply 会
+     * 先销毁 handler 线程池：drain 队列并 join worker。worker 期间的 nb_reply 会
      * 回投仍运行的 poller，从而在传输/路由销毁前完成发送。
      */
     if (node->handler_pool) {
@@ -390,8 +390,8 @@ void node_destroy(node_t *node)
         node->handler_pool = NULL;
     }
     /* 池已 drain，worker task/call 已归还；此时销毁复用池。 */
-    zri_obj_pool_destroy(&node->handler_task_pool);
-    zri_obj_pool_destroy(&node->worker_call_pool);
+    nb_obj_pool_destroy(&node->handler_task_pool);
+    nb_obj_pool_destroy(&node->worker_call_pool);
     /* Quiesce poller callbacks before destroying sockets or transport state. */
     if (node->pool) {
         ntk_poller_pool_stop(node->pool);
@@ -408,7 +408,7 @@ void node_destroy(node_t *node)
         }
     }
     /* 回投的回复任务已排空，任务头可安全回收。 */
-    zri_obj_pool_destroy(&node->reply_task_pool);
+    nb_obj_pool_destroy(&node->reply_task_pool);
     /*
      * poller 已停：取消登记/限流计数不再被定时器或 worker 访问，可以安全销毁。
      * 内置池已 drain 并 join，inflight 归零；自定义 executor 由调用者负责排空，
@@ -417,7 +417,7 @@ void node_destroy(node_t *node)
     if (node->handler_limit_mutex) {
         ntk_mutex_lock(node->handler_limit_mutex);
         if (node->external_inflight > 0) {
-            rpc_log_error("node_destroy: %u custom-executor task(s) still in flight; "
+            nb_log_error("nb_node_destroy: %u custom-executor task(s) still in flight; "
                           "caller must drain the executor before destroy",
                           node->external_inflight);
         }
@@ -446,14 +446,14 @@ void node_destroy(node_t *node)
         size_t i;
         for (i = 0; i < node->transport_count; i++) {
             if (node->transports[i]) {
-                zri_transport_stop(node->transports[i]);
+                nb_transport_stop(node->transports[i]);
             }
         }
     }
     if (node->registry_backend && node->registry_backend->ops->stop) {
         node->registry_backend->ops->stop(node);
     }
-    zri_pending_cleanup(node);
+    nb_pending_cleanup(node);
     if (node->pending_lock) {
         ntk_mutex_destroy(node->pending_lock);
         node->pending_lock = NULL;
@@ -462,13 +462,13 @@ void node_destroy(node_t *node)
         ntk_mutex_destroy(node->rate_lock);
         node->rate_lock = NULL;
     }
-    zri_route_cleanup(&node->routes);
-    zri_registry_cleanup(&node->registry);
+    nb_route_cleanup(&node->routes);
+    nb_registry_cleanup(&node->registry);
     {
         size_t i;
         for (i = 0; i < node->transport_count; i++) {
             if (node->transports[i]) {
-                zri_transport_destroy(node->transports[i]);
+                nb_transport_destroy(node->transports[i]);
                 node->transports[i] = NULL;
             }
         }
@@ -479,12 +479,12 @@ void node_destroy(node_t *node)
         node->pool = NULL;
     }
     {
-        service_t *svc = node->services;
+        nb_service_t *svc = node->services;
         while (svc) {
-            service_t *next = svc->next;
-            zri_method_t *m = svc->methods;
+            nb_service_t *next = svc->next;
+            nb_method_t *m = svc->methods;
             while (m) {
-                zri_method_t *mn = m->next;
+                nb_method_t *mn = m->next;
                 if (m->owns_user) {
                     free(m->user);
                 }
@@ -497,9 +497,9 @@ void node_destroy(node_t *node)
         node->services = NULL;
     }
     {
-        zri_codec_entry_t *c = node->codecs;
+        nb_codec_entry_t *c = node->codecs;
         while (c) {
-            zri_codec_entry_t *next = c->next;
+            nb_codec_entry_t *next = c->next;
             free(c);
             c = next;
         }
@@ -520,7 +520,7 @@ void node_destroy(node_t *node)
         int i;
         for (i = 0; i < MAX_RECV_STREAMS; i++) {
             if (node->recv_streams[i].used && node->recv_streams[i].call) {
-                zri_mem_free(node->recv_streams[i].call);
+                nb_mem_free(node->recv_streams[i].call);
                 node->recv_streams[i].call = NULL;
                 node->recv_streams[i].used = 0;
             }
@@ -533,52 +533,52 @@ void node_destroy(node_t *node)
 
 /* ---- 节点状态与端点 ---- */
 
-const char *node_name(const node_t *node)
+const char *nb_node_name(const nb_node_t *node)
 {
     return node ? node->name : NULL;
 }
 
-transport_kind_t node_transport(const node_t *node)
+nb_transport_kind_t nb_node_transport(const nb_node_t *node)
 {
     return (node && node->transport_count > 0 && node->transports[0]) ? node->transports[0]->kind :
-                                                                        TRANSPORT_UDP;
+                                                                        NB_TRANSPORT_UDP;
 }
 
-uint16_t node_discovery_port(const node_t *node)
+uint16_t nb_node_discovery_port(const nb_node_t *node)
 {
     return node ? node->discovery_port : 0;
 }
 
-uint16_t node_data_port(const node_t *node)
+uint16_t nb_node_data_port(const nb_node_t *node)
 {
     return (node && node->transport_count > 0 && node->transports[0]) ? node->transports[0]->port :
                                                                         0;
 }
 
-size_t node_binding_count(const node_t *node)
+size_t nb_node_binding_count(const nb_node_t *node)
 {
     return node ? node->transport_count : 0;
 }
 
-int node_binding_endpoint(const node_t *node, size_t index, char *out, size_t cap)
+int nb_node_binding_endpoint(const nb_node_t *node, size_t index, char *out, size_t cap)
 {
-    endpoint_t endpoint;
+    nb_endpoint_t endpoint;
     if (!node || index >= node->transport_count || !node->transports[index]) {
-        return ERR_NOTFOUND;
+        return NB_ERR_NOTFOUND;
     }
     memset(&endpoint, 0, sizeof(endpoint));
-    zri_copy_str(endpoint.scheme, sizeof(endpoint.scheme), node->transports[index]->scheme, "udp");
-    zri_copy_str(
+    nb_copy_str(endpoint.scheme, sizeof(endpoint.scheme), node->transports[index]->scheme, "udp");
+    nb_copy_str(
         endpoint.host, sizeof(endpoint.host), node->transports[index]->bind_host, "0.0.0.0");
     endpoint.port = node->transports[index]->port;
     endpoint.transport = node->transports[index]->kind;
-    return endpoint_format(&endpoint, out, cap);
+    return nb_endpoint_format(&endpoint, out, cap);
 }
 
 /* ---- 指标与对端质量 ---- */
 
 /* 从累计直方图估算分位值；最后一桶返回 10000（表示 >=10s）。 */
-static uint64_t latency_percentile(const uint64_t *hist, uint64_t total, uint32_t pct)
+static uint64_t nb_latency_percentile(const uint64_t *hist, uint64_t total, uint32_t pct)
 {
     uint64_t target;
     uint64_t cumulative = 0;
@@ -587,16 +587,16 @@ static uint64_t latency_percentile(const uint64_t *hist, uint64_t total, uint32_
         return 0;
     }
     target = (total * (uint64_t)pct + 99u) / 100u;
-    for (i = 0; i < LATENCY_HIST_BUCKETS; i++) {
+    for (i = 0; i < NB_LATENCY_HIST_BUCKETS; i++) {
         cumulative += hist[i];
         if (cumulative >= target) {
-            return i < LATENCY_HIST_BUCKETS - 1 ? zri_latency_bounds[i] : 10000u;
+            return i < NB_LATENCY_HIST_BUCKETS - 1 ? nb_latency_bounds[i] : 10000u;
         }
     }
     return 10000u;
 }
 
-void node_metrics(const node_t *node, metrics_t *out)
+void nb_node_metrics(const nb_node_t *node, nb_metrics_t *out)
 {
     unsigned i;
     if (!out) {
@@ -607,46 +607,46 @@ void node_metrics(const node_t *node, metrics_t *out)
         return;
     }
     /* 逐字段原子读，避免与多个 poller 的增量并发时读到撕裂值。 */
-#define ZRI_METRICS_SNAPSHOT_U64(field) \
-    out->field = zri_atomic_load_u64(&node->metrics.field)
-    ZRI_METRICS_SNAPSHOT_U64(requests_sent);
-    ZRI_METRICS_SNAPSHOT_U64(responses_received);
-    ZRI_METRICS_SNAPSHOT_U64(requests_failed);
-    ZRI_METRICS_SNAPSHOT_U64(timeouts);
-    ZRI_METRICS_SNAPSHOT_U64(retries);
-    ZRI_METRICS_SNAPSHOT_U64(bytes_sent);
-    ZRI_METRICS_SNAPSHOT_U64(bytes_received);
-    ZRI_METRICS_SNAPSHOT_U64(udp_packets_sent);
-    ZRI_METRICS_SNAPSHOT_U64(udp_packets_received);
-    ZRI_METRICS_SNAPSHOT_U64(udp_retransmissions);
-    ZRI_METRICS_SNAPSHOT_U64(udp_nacks_sent);
-    ZRI_METRICS_SNAPSHOT_U64(udp_reassembly_expired);
-    ZRI_METRICS_SNAPSHOT_U64(tcp_frames_sent);
-    ZRI_METRICS_SNAPSHOT_U64(tcp_frames_received);
-    ZRI_METRICS_SNAPSHOT_U64(backpressure_events);
-    ZRI_METRICS_SNAPSHOT_U64(rtcp_sr_sent);
-    ZRI_METRICS_SNAPSHOT_U64(rtcp_rr_sent);
-    ZRI_METRICS_SNAPSHOT_U64(rtcp_sr_received);
-    ZRI_METRICS_SNAPSHOT_U64(rtcp_rr_received);
-    ZRI_METRICS_SNAPSHOT_U64(rtcp_bye_sent);
-    ZRI_METRICS_SNAPSHOT_U64(rtcp_bye_received);
-    out->rtcp_rtt_ms = zri_atomic_load_u32(&node->metrics.rtcp_rtt_ms);
-    out->rtcp_jitter_ms = zri_atomic_load_u32(&node->metrics.rtcp_jitter_ms);
+#define NB_METRICS_SNAPSHOT_U64(field) \
+    out->field = nb_atomic_load_u64(&node->metrics.field)
+    NB_METRICS_SNAPSHOT_U64(requests_sent);
+    NB_METRICS_SNAPSHOT_U64(responses_received);
+    NB_METRICS_SNAPSHOT_U64(requests_failed);
+    NB_METRICS_SNAPSHOT_U64(timeouts);
+    NB_METRICS_SNAPSHOT_U64(retries);
+    NB_METRICS_SNAPSHOT_U64(bytes_sent);
+    NB_METRICS_SNAPSHOT_U64(bytes_received);
+    NB_METRICS_SNAPSHOT_U64(udp_packets_sent);
+    NB_METRICS_SNAPSHOT_U64(udp_packets_received);
+    NB_METRICS_SNAPSHOT_U64(udp_retransmissions);
+    NB_METRICS_SNAPSHOT_U64(udp_nacks_sent);
+    NB_METRICS_SNAPSHOT_U64(udp_reassembly_expired);
+    NB_METRICS_SNAPSHOT_U64(tcp_frames_sent);
+    NB_METRICS_SNAPSHOT_U64(tcp_frames_received);
+    NB_METRICS_SNAPSHOT_U64(backpressure_events);
+    NB_METRICS_SNAPSHOT_U64(rtcp_sr_sent);
+    NB_METRICS_SNAPSHOT_U64(rtcp_rr_sent);
+    NB_METRICS_SNAPSHOT_U64(rtcp_sr_received);
+    NB_METRICS_SNAPSHOT_U64(rtcp_rr_received);
+    NB_METRICS_SNAPSHOT_U64(rtcp_bye_sent);
+    NB_METRICS_SNAPSHOT_U64(rtcp_bye_received);
+    out->rtcp_rtt_ms = nb_atomic_load_u32(&node->metrics.rtcp_rtt_ms);
+    out->rtcp_jitter_ms = nb_atomic_load_u32(&node->metrics.rtcp_jitter_ms);
     out->rtcp_remote_lost =
-        (int32_t)zri_atomic_load_u32((const uint32_t *)&node->metrics.rtcp_remote_lost);
-    ZRI_METRICS_SNAPSHOT_U64(connections);
-    ZRI_METRICS_SNAPSHOT_U64(latency_count);
-    ZRI_METRICS_SNAPSHOT_U64(latency_sum_ms);
-    ZRI_METRICS_SNAPSHOT_U64(rate_limited);
-    ZRI_METRICS_SNAPSHOT_U64(streams_rejected);
-    for (i = 0; i < LATENCY_HIST_BUCKETS; i++) {
-        out->latency_hist[i] = zri_atomic_load_u64(&node->metrics.latency_hist[i]);
+        (int32_t)nb_atomic_load_u32((const uint32_t *)&node->metrics.rtcp_remote_lost);
+    NB_METRICS_SNAPSHOT_U64(connections);
+    NB_METRICS_SNAPSHOT_U64(latency_count);
+    NB_METRICS_SNAPSHOT_U64(latency_sum_ms);
+    NB_METRICS_SNAPSHOT_U64(rate_limited);
+    NB_METRICS_SNAPSHOT_U64(streams_rejected);
+    for (i = 0; i < NB_LATENCY_HIST_BUCKETS; i++) {
+        out->latency_hist[i] = nb_atomic_load_u64(&node->metrics.latency_hist[i]);
     }
-#undef ZRI_METRICS_SNAPSHOT_U64
-    out->latency_p50_ms = latency_percentile(out->latency_hist, out->latency_count, 50u);
-    out->latency_p90_ms = latency_percentile(out->latency_hist, out->latency_count, 90u);
-    out->latency_p99_ms = latency_percentile(out->latency_hist, out->latency_count, 99u);
-    out->inflight_requests = zri_atomic_load_u32((const uint32_t *)&node->pending_count);
+#undef NB_METRICS_SNAPSHOT_U64
+    out->latency_p50_ms = nb_latency_percentile(out->latency_hist, out->latency_count, 50u);
+    out->latency_p90_ms = nb_latency_percentile(out->latency_hist, out->latency_count, 90u);
+    out->latency_p99_ms = nb_latency_percentile(out->latency_hist, out->latency_count, 99u);
+    out->inflight_requests = nb_atomic_load_u32((const uint32_t *)&node->pending_count);
     if (node->handler_limit_mutex) {
         ntk_mutex_lock(node->handler_limit_mutex);
         out->inflight_handlers = (uint64_t)node->handler_inflight + node->external_inflight;
@@ -654,35 +654,35 @@ void node_metrics(const node_t *node, metrics_t *out)
     }
 }
 
-int node_peer_stats(const node_t *node, const char *ip, uint16_t port, peer_stats_t *out)
+int nb_node_peer_stats(const nb_node_t *node, const char *ip, uint16_t port, nb_peer_stats_t *out)
 {
     size_t i;
     if (!node || !ip || !out) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
     memset(out, 0, sizeof(*out));
     for (i = 0; i < node->transport_count; i++) {
-        zri_transport_t *t = node->transports[i];
+        nb_transport_t *t = node->transports[i];
         if (t && t->ops && t->ops->peer_stats && t->ops->peer_stats(t, ip, port, out) == 1) {
-            return OK;
+            return NB_OK;
         }
     }
     memset(out, 0, sizeof(*out));
-    return ERR_NOTFOUND;
+    return NB_ERR_NOTFOUND;
 }
 
 /* ---- 发现与路由 ---- */
 
-int node_add_discovery_peer(node_t *node, const char *ip, uint16_t discovery_port)
+int nb_node_add_discovery_peer(nb_node_t *node, const char *ip, uint16_t discovery_port)
 {
     int i;
     if (!node || !ip || !discovery_port) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
     for (i = 0; i < DISC_TARGET_MAX; i++) {
         if (!node->discovery.targets[i].used) {
             node->discovery.targets[i].used = 1;
-            zri_copy_str(node->discovery.targets[i].ip,
+            nb_copy_str(node->discovery.targets[i].ip,
                          sizeof(node->discovery.targets[i].ip),
                          ip,
                          "127.0.0.1");
@@ -690,49 +690,49 @@ int node_add_discovery_peer(node_t *node, const char *ip, uint16_t discovery_por
             if (node->registry_backend && node->registry_backend->ops->announce) {
                 node->registry_backend->ops->announce(node, 0);
             }
-            return OK;
+            return NB_OK;
         }
     }
-    return ERR_NOMEM;
+    return NB_ERR_NOMEM;
 }
 
-int node_add_static_route(
-    node_t *node, const char *service, const char *ip, uint16_t port, transport_kind_t transport)
+int nb_node_add_static_route(
+    nb_node_t *node, const char *service, const char *ip, uint16_t port, nb_transport_kind_t transport)
 {
-    return zri_route_set(&node->routes, service, ip, port, transport);
+    return nb_route_set(&node->routes, service, ip, port, transport);
 }
 
-int node_add_static_endpoint(node_t *node, const char *service, const char *endpoint)
+int nb_node_add_static_endpoint(nb_node_t *node, const char *service, const char *endpoint)
 {
-    return zri_route_add_endpoint(&node->routes, service, endpoint, 1);
+    return nb_route_add_endpoint(&node->routes, service, endpoint, 1);
 }
 
 /* ---- 服务等待与调度 ---- */
 
-int node_wait_for_service(node_t *node, const char *service, uint64_t timeout_ms)
+int nb_node_wait_for_service(nb_node_t *node, const char *service, uint64_t timeout_ms)
 {
     uint64_t deadline;
-    char ip[ENDPOINT_MAX];
+    char ip[NB_ENDPOINT_MAX];
     uint16_t port = 0;
     if (!node || !service) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
-    if (node->mode == MODE_STATIC) {
-        return OK;
+    if (node->mode == NB_MODE_STATIC) {
+        return NB_OK;
     }
-    deadline = zri_now_ms() + (timeout_ms ? timeout_ms : DEFAULT_TIMEOUT_MS);
+    deadline = nb_now_ms() + (timeout_ms ? timeout_ms : NB_DEFAULT_TIMEOUT_MS);
     for (;;) {
-        if (zri_route_lookup(&node->routes, service, ip, sizeof(ip), &port, NULL, NULL, 0) == OK) {
-            return OK;
+        if (nb_route_lookup(&node->routes, service, ip, sizeof(ip), &port, NULL, NULL, 0) == NB_OK) {
+            return NB_OK;
         }
         {
-            endpoint_t endpoint;
-            if (zri_registry_select(&node->registry, service, &endpoint) == OK) {
-                return OK;
+            nb_endpoint_t endpoint;
+            if (nb_registry_select(&node->registry, service, &endpoint) == NB_OK) {
+                return NB_OK;
             }
         }
-        if (zri_now_ms() >= deadline) {
-            return ERR_TIMEOUT;
+        if (nb_now_ms() >= deadline) {
+            return NB_ERR_TIMEOUT;
         }
         ntk_sleep_ms(10);
     }
@@ -740,99 +740,99 @@ int node_wait_for_service(node_t *node, const char *service, uint64_t timeout_ms
 
 /* ---- 在 poller 线程投递任务 ---- */
 
-typedef struct zri_post_task {
+typedef struct nb_post_task {
     void (*fn)(void *user);
     void *user;
-} zri_post_task_t;
+} nb_post_task_t;
 
-static void post_trampoline(void *user)
+static void nb_post_trampoline(void *user)
 {
-    zri_post_task_t *t = (zri_post_task_t *)user;
+    nb_post_task_t *t = (nb_post_task_t *)user;
     t->fn(t->user);
-    zri_mem_free(t);
+    nb_mem_free(t);
 }
 
-int node_post(node_t *node, void (*fn)(void *user), void *user)
+int nb_node_post(nb_node_t *node, void (*fn)(void *user), void *user)
 {
-    zri_post_task_t *t;
+    nb_post_task_t *t;
     if (!node || !fn) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
-    t = (zri_post_task_t *)zri_mem_alloc(sizeof(*t));
+    t = (nb_post_task_t *)nb_mem_alloc(sizeof(*t));
     if (!t) {
-        return ERR_NOMEM;
+        return NB_ERR_NOMEM;
     }
     memset(t, 0, sizeof(*t));
     t->fn = fn;
     t->user = user;
-    if (ntk_poller_async(node->poller, post_trampoline, t, 1) != NTK_OK) {
-        zri_mem_free(t);
-        return ERR_IO;
+    if (ntk_poller_async(node->poller, nb_post_trampoline, t, 1) != NTK_OK) {
+        nb_mem_free(t);
+        return NB_ERR_IO;
     }
-    return OK;
+    return NB_OK;
 }
 
-static uint64_t post_delay_cb(void *user)
+static uint64_t nb_post_delay_cb(void *user)
 {
-    zri_post_task_t *t = (zri_post_task_t *)user;
+    nb_post_task_t *t = (nb_post_task_t *)user;
     t->fn(t->user);
-    zri_mem_free(t);
+    nb_mem_free(t);
     return 0; /* 单次 */
 }
 
-int node_post_delay(node_t *node, uint64_t delay_ms, void (*fn)(void *user), void *user)
+int nb_node_post_delay(nb_node_t *node, uint64_t delay_ms, void (*fn)(void *user), void *user)
 {
-    zri_post_task_t *t;
+    nb_post_task_t *t;
     if (!node || !fn) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
-    t = (zri_post_task_t *)zri_mem_alloc(sizeof(*t));
+    t = (nb_post_task_t *)nb_mem_alloc(sizeof(*t));
     if (!t) {
-        return ERR_NOMEM;
+        return NB_ERR_NOMEM;
     }
     memset(t, 0, sizeof(*t));
     t->fn = fn;
     t->user = user;
-    if (ntk_poller_do_delay(node->poller, delay_ms, post_delay_cb, t) == NULL) {
-        zri_mem_free(t);
-        return ERR_IO;
+    if (ntk_poller_do_delay(node->poller, delay_ms, nb_post_delay_cb, t) == NULL) {
+        nb_mem_free(t);
+        return NB_ERR_IO;
     }
-    return OK;
+    return NB_OK;
 }
 
 /* ---- 阻塞运行 ---- */
 
-static volatile sig_atomic_t g_signal;
+static volatile sig_atomic_t nb_g_signal;
 
-static void zri_signal_handler(int signo)
+static void nb_signal_handler(int signo)
 {
     (void)signo;
-    g_signal = 1;
+    nb_g_signal = 1;
 }
 
-int node_spin_once(node_t *node, uint64_t timeout_ms)
+int nb_node_spin_once(nb_node_t *node, uint64_t timeout_ms)
 {
     uint64_t deadline;
     int installed = 0;
     if (!node) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
-    if (!g_signal && signal(SIGINT, zri_signal_handler) != SIG_ERR) {
-        (void)signal(SIGTERM, zri_signal_handler);
+    if (!nb_g_signal && signal(SIGINT, nb_signal_handler) != SIG_ERR) {
+        (void)signal(SIGTERM, nb_signal_handler);
         installed = 1;
     }
     (void)installed;
-    deadline = zri_now_ms() + timeout_ms;
-    while (!g_signal) {
-        if (timeout_ms && zri_now_ms() >= deadline) {
-            return ERR_TIMEOUT;
+    deadline = nb_now_ms() + timeout_ms;
+    while (!nb_g_signal) {
+        if (timeout_ms && nb_now_ms() >= deadline) {
+            return NB_ERR_TIMEOUT;
         }
         ntk_sleep_ms(20);
     }
-    return OK;
+    return NB_OK;
 }
 
-int node_spin(node_t *node)
+int nb_node_spin(nb_node_t *node)
 {
-    return node_spin_once(node, 0);
+    return nb_node_spin_once(node, 0);
 }

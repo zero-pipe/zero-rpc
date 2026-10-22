@@ -2,7 +2,7 @@
  * UDP 传输驱动：RTP 承载 + 分片/重组 + 乱序窗口 + NACK/RTX + AIMD。
  *
  * 每个 io 分片有独立的 socket 与会话表（钉核，无锁）；发现面不在这里。
- * 上层通过 zri_node_on_message 收到完整消息。
+ * 上层通过 nb_node_on_message 收到完整消息。
  */
 #include "transport_internal.h"
 
@@ -22,22 +22,22 @@
 #endif
 
 /* 出站拥塞排空队列节点：一条尚未发完的消息（连续逻辑缓冲）。 */
-typedef struct zri_udp_txq {
-    struct zri_udp_txq *next;
+typedef struct nb_udp_txq {
+    struct nb_udp_txq *next;
     uint8_t *buf;
     uint32_t sent;
     uint32_t total;
     uint32_t msgid;
-} zri_udp_txq_t;
+} nb_udp_txq_t;
 
 /* 每个对端一个会话（仅在所属 io 分片上访问，无锁） */
-typedef struct zri_session {
+typedef struct nb_session {
     int used;
     int io;
-    metrics_t *metrics;
+    nb_metrics_t *metrics;
     ntk_socket *sock;
     uint32_t peer_ip;
-    char peer_ip_s[ENDPOINT_MAX];
+    char peer_ip_s[NB_ENDPOINT_MAX];
     uint16_t peer_port;
     uint64_t last_use_ms;
     uint32_t ssrc_local;
@@ -48,21 +48,21 @@ typedef struct zri_session {
     uint16_t acked_upto;      /* highest send seq inferred received by peer */
     uint8_t rto_attempts;     /* idle-RTO retransmit rounds; reset on peer data */
 
-    zri_rx_window_t rx_window;
+    nb_rx_window_t rx_window;
     uint64_t last_nack_ms;
     uint64_t first_gap_ms;
 
-    zri_tx_ring_t tx_ring;
+    nb_tx_ring_t tx_ring;
 
-    zri_udp_txq_t *txq_head; /* 拥塞排队消息（FIFO）；backpressure 按字节高水位 */
-    zri_udp_txq_t *txq_tail;
+    nb_udp_txq_t *txq_head; /* 拥塞排队消息（FIFO）；backpressure 按字节高水位 */
+    nb_udp_txq_t *txq_tail;
     uint32_t txq_pending_bytes; /* 队列中尚未发送的字节数 */
     uint32_t cc_burst;
     uint32_t cc_burst_max;
     uint64_t cc_last_loss_ms;
     uint64_t cc_last_grow_ms;
 
-    zri_reasm_t reasm;
+    nb_reasm_t reasm;
 
     uint64_t rx_pkts;
     uint64_t tx_pkts;
@@ -101,28 +101,28 @@ typedef struct zri_session {
     uint64_t rtcp_rr_sent;
     uint64_t rtcp_sr_received;
     uint64_t rtcp_rr_received;
-} zri_session_t;
+} nb_session_t;
 
-typedef struct zri_udp_io_ctx {
-    struct zri_udp_transport *udp;
+typedef struct nb_udp_io_ctx {
+    struct nb_udp_transport *udp;
     int io;
     uint8_t *rx;
-} zri_udp_io_ctx_t;
+} nb_udp_io_ctx_t;
 
-typedef struct zri_udp_transport {
-    zri_transport_t base;
+typedef struct nb_udp_transport {
+    nb_transport_t base;
     ntk_socket *socks[IO_MAX];
     ntk_poller *pollers[IO_MAX];
     ntk_timer *tick_timers[IO_MAX];
-    zri_udp_io_ctx_t io_ctx[IO_MAX];
-    zri_session_t sessions[IO_MAX][PEERS_PER_IO];
+    nb_udp_io_ctx_t io_ctx[IO_MAX];
+    nb_session_t sessions[IO_MAX][PEERS_PER_IO];
     int io_count;
-} zri_udp_transport_t;
+} nb_udp_transport_t;
 
 /* 伪随机：会话可能在任意 poller 上创建，状态必须无数据竞争。 */
-static uint32_t xorshift_next(uint32_t *state)
+static uint32_t nb_xorshift_next(uint32_t *state)
 {
-    uint32_t cur = zri_atomic_load_u32(state);
+    uint32_t cur = nb_atomic_load_u32(state);
     if (cur == 0) {
         cur = (uint32_t)ntk_monotonic_ms() ^ 0x9e3779b9u;
         if (cur == 0) {
@@ -137,39 +137,39 @@ static uint32_t xorshift_next(uint32_t *state)
         if (next == 0) {
             next = 1;
         }
-        if (zri_atomic_cas_u32(state, &cur, next)) {
+        if (nb_atomic_cas_u32(state, &cur, next)) {
             return next;
         }
     }
 }
 
 /* 丢包注入用的确定性伪随机 */
-static uint32_t sess_rand(void)
+static uint32_t nb_sess_rand(void)
 {
     static uint32_t st = 0x9e3779b9u;
-    return xorshift_next(&st);
+    return nb_xorshift_next(&st);
 }
 
-static uint32_t udp_rand(void)
+static uint32_t nb_udp_rand(void)
 {
     static uint32_t st;
-    return xorshift_next(&st);
+    return nb_xorshift_next(&st);
 }
 
-static void session_cleanup(zri_session_t *s)
+static void nb_session_cleanup(nb_session_t *s)
 {
-    zri_udp_txq_t *q;
+    nb_udp_txq_t *q;
     if (!s) {
         return;
     }
     if (s->used && s->metrics) {
-        ZRI_METRIC_SUB(s->metrics->connections, 1u);
+        NB_METRIC_SUB(s->metrics->connections, 1u);
     }
     s->used = 0;
-    zri_tx_ring_cleanup(&s->tx_ring);
+    nb_tx_ring_cleanup(&s->tx_ring);
     q = s->txq_head;
     while (q) {
-        zri_udp_txq_t *next = q->next;
+        nb_udp_txq_t *next = q->next;
         free(q->buf);
         free(q);
         q = next;
@@ -181,14 +181,14 @@ static void session_cleanup(zri_session_t *s)
         free(s->fec_rx_buf);
         s->fec_rx_buf = NULL;
     }
-    zri_reasm_reset(&s->reasm);
-    zri_rx_window_reset(&s->rx_window);
+    nb_reasm_reset(&s->reasm);
+    nb_rx_window_reset(&s->rx_window);
 }
 
-static void session_send_bye(zri_udp_transport_t *udp, zri_session_t *s);
+static void nb_session_send_bye(nb_udp_transport_t *udp, nb_session_t *s);
 
-static void session_init(zri_udp_transport_t *udp,
-                         zri_session_t *s,
+static void nb_session_init(nb_udp_transport_t *udp,
+                         nb_session_t *s,
                          int io,
                          ntk_socket *sock,
                          const char *ip_s,
@@ -200,14 +200,14 @@ static void session_init(zri_udp_transport_t *udp,
     s->io = io;
     s->metrics = udp->base.metrics;
     s->sock = sock;
-    zri_rx_window_reset(&s->rx_window);
-    zri_reasm_init(&s->reasm);
-    zri_reasm_set_budget(&s->reasm, udp->base.bp_high_water);
+    nb_rx_window_reset(&s->rx_window);
+    nb_reasm_init(&s->reasm);
+    nb_reasm_set_budget(&s->reasm, udp->base.bp_high_water);
     s->cc_burst_max = 1024;
     s->cc_burst = 16;
     s->peer_port = port;
-    zri_copy_str(s->peer_ip_s, sizeof(s->peer_ip_s), ip_s, "0.0.0.0");
-    s->ssrc_local = udp_rand();
+    nb_copy_str(s->peer_ip_s, sizeof(s->peer_ip_s), ip_s, "0.0.0.0");
+    s->ssrc_local = nb_udp_rand();
     if (s->ssrc_local == 0) {
         s->ssrc_local = 1;
     }
@@ -215,7 +215,7 @@ static void session_init(zri_udp_transport_t *udp,
     s->last_rx_data_ms = now_ms;
     s->rtcp_last_send_ms = now_ms;
     if (udp->base.metrics) {
-        ZRI_METRIC_INC(udp->base.metrics->connections);
+        NB_METRIC_INC(udp->base.metrics->connections);
     }
 }
 
@@ -224,7 +224,7 @@ static void session_init(zri_udp_transport_t *udp,
  * 而不是直接丢包——否则并发对端数超过 PEERS_PER_IO 时，新对端的首请求
  * 会被静默丢弃且永远建不起会话（表现为首请求超时）。
  */
-static zri_session_t *session_for(zri_udp_transport_t *udp,
+static nb_session_t *nb_session_for(nb_udp_transport_t *udp,
                                   int io,
                                   ntk_socket *sock,
                                   const char *ip_s,
@@ -240,7 +240,7 @@ static zri_session_t *session_for(zri_udp_transport_t *udp,
         return NULL;
     }
     for (i = 0; i < PEERS_PER_IO; i++) {
-        zri_session_t *s = &udp->sessions[io][i];
+        nb_session_t *s = &udp->sessions[io][i];
         if (s->used) {
             if (s->peer_port == port && strcmp(s->peer_ip_s, ip_s) == 0) {
                 s->last_use_ms = now_ms;
@@ -259,12 +259,12 @@ static zri_session_t *session_for(zri_udp_transport_t *udp,
     }
     {
         int slot = free_slot >= 0 ? free_slot : lru_slot;
-        zri_session_t *s = &udp->sessions[io][slot];
+        nb_session_t *s = &udp->sessions[io][slot];
         if (free_slot < 0) {
-            session_send_bye(udp, s); /* 淘汰前通知对端 */
-            session_cleanup(s);       /* 释放被淘汰会话的动态缓冲 */
+            nb_session_send_bye(udp, s); /* 淘汰前通知对端 */
+            nb_session_cleanup(s);       /* 释放被淘汰会话的动态缓冲 */
         }
-        session_init(udp, s, io, sock, ip_s, port, now_ms);
+        nb_session_init(udp, s, io, sock, ip_s, port, now_ms);
         return s;
     }
 }
@@ -275,15 +275,15 @@ static zri_session_t *session_for(zri_udp_transport_t *udp,
  * 逻辑 envelope 视图：[prefix = envelope 头 + route][payload]。
  * prefix 常驻栈/池，payload 借用调用方内存，避免整包 envbuf 的分配与拷贝。
  */
-typedef struct zri_env_view {
+typedef struct nb_env_view {
     const uint8_t *prefix;
     size_t prefix_len;
     const uint8_t *payload;
     size_t payload_len;
-} zri_env_view_t;
+} nb_env_view_t;
 
 /* 从逻辑视图的 off 处拷贝 len 字节到 dst。 */
-static void env_view_copy(const zri_env_view_t *v, size_t off, size_t len, uint8_t *dst)
+static void nb_env_view_copy(const nb_env_view_t *v, size_t off, size_t len, uint8_t *dst)
 {
     if (off < v->prefix_len) {
         size_t n = v->prefix_len - off;
@@ -307,7 +307,7 @@ static void env_view_copy(const zri_env_view_t *v, size_t off, size_t len, uint8
  * 剩余分片必须补发，否则接收端要等到下一个 tick 才 NACK，9 个分片以上会出现
  * 明显的 ~2ms 台阶。这里有限次重试，仍失败则交给 NACK/RTO 兜底。
  */
-static void udp_send_msgs(zri_session_t *s, ntk_udp_dgram_t *msgs, unsigned nm)
+static void nb_udp_send_msgs(nb_session_t *s, ntk_udp_dgram_t *msgs, unsigned nm)
 {
     unsigned off = 0;
     unsigned spins = 0;
@@ -324,28 +324,28 @@ static void udp_send_msgs(zri_session_t *s, ntk_udp_dgram_t *msgs, unsigned nm)
     }
 }
 
-static void emit_frag(zri_udp_transport_t *udp,
-                      zri_session_t *s,
+static void nb_emit_frag(nb_udp_transport_t *udp,
+                      nb_session_t *s,
                       uint32_t msg_id,
                       uint32_t total_len,
                       uint32_t off,
                       uint32_t chunk,
-                      const zri_env_view_t *view,
+                      const nb_env_view_t *view,
                       int last,
                       uint64_t now,
                       ntk_udp_dgram_t *msgs,
                       unsigned *nm)
 {
-    zri_frag_t d;
+    nb_frag_t d;
     uint8_t *dst;
     size_t hdr;
     size_t n;
     uint32_t stride = RTP_HDR_LEN + FRAG_HDR_LEN + udp->base.frag_bytes;
 
-    if (!zri_tx_ring_ensure(&s->tx_ring, stride)) {
+    if (!nb_tx_ring_ensure(&s->tx_ring, stride)) {
         return;
     }
-    dst = zri_tx_ring_slot(&s->tx_ring, s->send_seq);
+    dst = nb_tx_ring_slot(&s->tx_ring, s->send_seq);
 
     memset(&d, 0, sizeof(d));
     d.marker = last ? 1 : 0;
@@ -361,16 +361,16 @@ static void emit_frag(zri_udp_transport_t *udp,
     d.chunk = NULL;
 
     /* 只写分片头，随后从逻辑视图拷贝分片数据（payload 只拷这一次，用于重传环）。 */
-    hdr = zri_frame_build_frag_header(dst, stride, &d);
+    hdr = nb_frame_build_frag_header(dst, stride, &d);
     if (hdr == 0) {
         return;
     }
-    env_view_copy(view, off, chunk, dst + hdr);
+    nb_env_view_copy(view, off, chunk, dst + hdr);
     n = hdr + chunk;
-    zri_tx_ring_commit(&s->tx_ring, s->send_seq, (uint32_t)n);
-    zri_tx_ring_mark_sent(&s->tx_ring, s->send_seq, now);
+    nb_tx_ring_commit(&s->tx_ring, s->send_seq, (uint32_t)n);
+    nb_tx_ring_mark_sent(&s->tx_ring, s->send_seq, now);
     /* 测试用丢包注入：仍填入重传环（NACK 可重传），但不进本批发送 */
-    if (!(udp->base.drop_percent && (sess_rand() % 100u) < udp->base.drop_percent)) {
+    if (!(udp->base.drop_percent && (nb_sess_rand() % 100u) < udp->base.drop_percent)) {
         msgs[*nm].data = dst;
         msgs[*nm].len = n;
         msgs[*nm].ip = s->peer_ip_s;
@@ -379,7 +379,7 @@ static void emit_frag(zri_udp_transport_t *udp,
     }
     s->send_seq++;
     s->tx_pkts++;
-    ZRI_METRIC_INC(udp->base.metrics->udp_packets_sent);
+    NB_METRIC_INC(udp->base.metrics->udp_packets_sent);
     /* RTCP Sender Report 的收发计数与时间戳映射 */
     s->rtcp_pkt_count++;
     s->rtcp_octet_count += chunk;
@@ -391,12 +391,12 @@ static void emit_frag(zri_udp_transport_t *udp,
  * 发送端为每个多分片消息额外发 1 个 XOR 校验包；接收端若该消息恰好缺 1 个分片，
  * 可用校验包 XOR 其余已收分片重建它，省掉一次 NACK/RTX 往返。 */
 
-static int session_on_data(zri_udp_transport_t *udp,
-                           zri_session_t *s,
-                           const zri_frag_t *v,
+static int nb_session_on_data(nb_udp_transport_t *udp,
+                           nb_session_t *s,
+                           const nb_frag_t *v,
                            uint64_t now_ms);
 
-static int udp_fec_enabled(void)
+static int nb_udp_fec_enabled(void)
 {
     static int inited = 0;
     static int on = 0;
@@ -408,9 +408,9 @@ static int udp_fec_enabled(void)
     return on;
 }
 
-static void send_fec(zri_udp_transport_t *udp,
-                     zri_session_t *s,
-                     const zri_env_view_t *view,
+static void nb_send_fec(nb_udp_transport_t *udp,
+                     nb_session_t *s,
+                     const nb_env_view_t *view,
                      size_t env_len,
                      uint32_t msg_id)
 {
@@ -419,7 +419,7 @@ static void send_fec(zri_udp_transport_t *udp,
     size_t frag = udp->base.frag_bytes;
     size_t parity_len = env_len < frag ? env_len : frag;
     size_t p, hdr;
-    zri_frag_t d;
+    nb_frag_t d;
 
     if (frag == 0 || parity_len == 0) {
         return;
@@ -432,13 +432,13 @@ static void send_fec(zri_udp_transport_t *udp,
     memset(&d, 0, sizeof(d));
     d.pt = PT_FEC;
     d.seq = s->fec_seq++;
-    d.ts = (uint32_t)zri_now_ms();
+    d.ts = (uint32_t)nb_now_ms();
     d.ssrc = s->ssrc_local;
     d.msg_id = msg_id;
     d.total_len = (uint32_t)env_len;
     d.frag_off = 0;
     d.frag_len = (uint32_t)parity_len;
-    hdr = zri_frame_build_frag_header(pkt, sizeof(pkt), &d);
+    hdr = nb_frame_build_frag_header(pkt, sizeof(pkt), &d);
     if (hdr == 0) {
         return;
     }
@@ -446,23 +446,23 @@ static void send_fec(zri_udp_transport_t *udp,
     (void)ntk_socket_sendto(s->sock, pkt, hdr + parity_len, s->peer_ip_s, s->peer_port);
 }
 
-static void fec_try_reconstruct(zri_udp_transport_t *udp,
-                                zri_session_t *s,
+static void nb_fec_try_reconstruct(nb_udp_transport_t *udp,
+                                nb_session_t *s,
                                 uint32_t msg_id,
                                 uint64_t now_ms)
 {
-    zri_reasm_slot_t *slot;
+    nb_reasm_slot_t *slot;
     uint32_t frag = udp->base.frag_bytes;
     uint32_t total, frag_count, m = 0, idx, k;
     uint8_t acc[FRAG_MAX];
     int missing = -1;
-    zri_frag_t v2;
+    nb_frag_t v2;
 
-    if (!udp_fec_enabled() || !s->fec_rx_valid || s->fec_rx_msgid != msg_id || !s->fec_rx_buf ||
+    if (!nb_udp_fec_enabled() || !s->fec_rx_valid || s->fec_rx_msgid != msg_id || !s->fec_rx_buf ||
         frag == 0) {
         return;
     }
-    slot = zri_reasm_find(&s->reasm, msg_id);
+    slot = nb_reasm_find(&s->reasm, msg_id);
     if (!slot || !slot->buf) {
         return;
     }
@@ -511,18 +511,18 @@ static void fec_try_reconstruct(zri_udp_transport_t *udp,
         v2.chunk = acc;
         s->fec_rx_valid = 0; /* 已消费 */
         if (s->metrics) {
-            ZRI_METRIC_INC(s->metrics->udp_retransmissions); /* FEC 重建计一次恢复 */
+            NB_METRIC_INC(s->metrics->udp_retransmissions); /* FEC 重建计一次恢复 */
         }
-        (void)session_on_data(udp, s, &v2, now_ms);
+        (void)nb_session_on_data(udp, s, &v2, now_ms);
     }
 }
 
-static void fec_on_parity(zri_udp_transport_t *udp,
-                          zri_session_t *s,
-                          const zri_frag_t *v,
+static void nb_fec_on_parity(nb_udp_transport_t *udp,
+                          nb_session_t *s,
+                          const nb_frag_t *v,
                           uint64_t now_ms)
 {
-    if (!udp_fec_enabled()) {
+    if (!nb_udp_fec_enabled()) {
         return;
     }
     if (!s->fec_rx_buf) {
@@ -538,37 +538,37 @@ static void fec_on_parity(zri_udp_transport_t *udp,
     s->fec_rx_len = v->frag_len;
     s->fec_rx_msgid = v->msg_id;
     s->fec_rx_valid = 1;
-    fec_try_reconstruct(udp, s, v->msg_id, now_ms);
+    nb_fec_try_reconstruct(udp, s, v->msg_id, now_ms);
 }
 
-static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_message_t *msg)
+static int nb_session_send(nb_udp_transport_t *udp, nb_session_t *s, const nb_message_t *msg)
 {
     ntk_udp_dgram_t msgs[TX_BATCH_MAX];
     unsigned nm = 0;
     size_t route_len;
     const uint8_t *data;
     size_t len;
-    zri_envelope_t envelope;
+    nb_envelope_t envelope;
     uint8_t prefix[ENVELOPE_HDR_LEN + MAX_ENVELOPE_EXTRA];
-    zri_env_view_t view;
+    nb_env_view_t view;
     size_t prefix_len;
     size_t env_len;
     uint32_t nfrag;
     size_t off = 0;
     uint32_t i;
-    uint64_t now = zri_now_ms();
+    uint64_t now = nb_now_ms();
 
     if (!s || !s->used || !msg) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
     route_len = msg->route ? strlen(msg->route) : 0;
     data = (const uint8_t *)msg->payload.data;
     len = msg->payload.len;
     if (len > udp->base.max_msg_bytes || route_len >= MAX_ROUTE) {
-        return ERR_TOOBIG;
+        return NB_ERR_TOOBIG;
     }
     if (len > 0 && !data) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
 
     /* 仅把 envelope 头 + route 编进栈上前缀；payload 保持借用，不做整包拷贝。 */
@@ -592,18 +592,18 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_me
         envelope.stream_offset = msg->stream.offset;
         envelope.stream_total_size = msg->stream.total_size;
     }
-    env_len = zri_envelope_size(&envelope);
+    env_len = nb_envelope_size(&envelope);
     if (env_len == 0 || env_len > (size_t)udp->base.max_msg_bytes + MAX_ENVELOPE_EXTRA) {
-        return ERR_TOOBIG;
+        return NB_ERR_TOOBIG;
     }
     if (s->txq_head && s->txq_pending_bytes + env_len > udp->base.bp_high_water) {
         /* 出站拥塞队列超过 backpressure_bytes：返回背压，交给上层退避重试。 */
-        ZRI_METRIC_INC(udp->base.metrics->backpressure_events);
-        return ERR_AGAIN;
+        NB_METRIC_INC(udp->base.metrics->backpressure_events);
+        return NB_ERR_AGAIN;
     }
-    prefix_len = zri_envelope_encode_prefix(prefix, sizeof(prefix), &envelope);
+    prefix_len = nb_envelope_encode_prefix(prefix, sizeof(prefix), &envelope);
     if (prefix_len == 0 || prefix_len + len != env_len) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
     view.prefix = prefix;
     view.prefix_len = prefix_len;
@@ -612,7 +612,7 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_me
 
     nfrag = env_len ? (uint32_t)((env_len + udp->base.frag_bytes - 1) / udp->base.frag_bytes) : 1;
     if (nfrag > MAX_FRAGMENTS) {
-        return ERR_TOOBIG;
+        return NB_ERR_TOOBIG;
     }
     for (i = 0; i < nfrag; i++) {
         size_t chunk = env_len - off;
@@ -625,10 +625,10 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_me
 
         if (i < s->cc_burst && s->txq_head == NULL) {
             if (nm == TX_BATCH_MAX) {
-                udp_send_msgs(s, msgs, nm);
+                nb_udp_send_msgs(s, msgs, nm);
                 nm = 0;
             }
-            emit_frag(udp,
+            nb_emit_frag(udp,
                       s,
                       msg->request_id,
                       (uint32_t)env_len,
@@ -640,7 +640,7 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_me
                       msgs,
                       &nm);
         } else {
-            zri_udp_txq_t *q = (zri_udp_txq_t *)calloc(1, sizeof(*q));
+            nb_udp_txq_t *q = (nb_udp_txq_t *)calloc(1, sizeof(*q));
             if (!q) {
                 break;
             }
@@ -649,7 +649,7 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_me
                 free(q);
                 break;
             }
-            env_view_copy(&view, 0, env_len, q->buf);
+            nb_env_view_copy(&view, 0, env_len, q->buf);
             q->sent = (uint32_t)off;
             q->total = (uint32_t)env_len;
             q->msgid = msg->request_id;
@@ -665,25 +665,25 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_me
         off += chunk;
     }
     if (nm > 0) {
-        udp_send_msgs(s, msgs, nm);
+        nb_udp_send_msgs(s, msgs, nm);
     }
-    if (nfrag >= 2 && s->txq_head == NULL && udp_fec_enabled()) {
-        send_fec(udp, s, &view, env_len, msg->request_id);
+    if (nfrag >= 2 && s->txq_head == NULL && nb_udp_fec_enabled()) {
+        nb_send_fec(udp, s, &view, env_len, msg->request_id);
     }
-    return OK;
+    return NB_OK;
 }
 
-static void session_txq_drain_budget(zri_udp_transport_t *udp,
-                                     zri_session_t *s,
+static void nb_session_txq_drain_budget(nb_udp_transport_t *udp,
+                                     nb_session_t *s,
                                      uint64_t now,
                                      uint32_t budget)
 {
     ntk_udp_dgram_t msgs[TX_BATCH_MAX];
     unsigned nm = 0;
-    zri_env_view_t view;
+    nb_env_view_t view;
 
     while (s->txq_head && budget > 0) {
-        zri_udp_txq_t *q = s->txq_head;
+        nb_udp_txq_t *q = s->txq_head;
         /* 排空时 txq 已是连续逻辑缓冲：整段作为 prefix，无独立 payload。 */
         view.prefix = q->buf;
         view.prefix_len = q->total;
@@ -698,10 +698,10 @@ static void session_txq_drain_budget(zri_udp_transport_t *udp,
             }
             last = (off + chunk) >= q->total;
             if (nm == TX_BATCH_MAX) {
-                udp_send_msgs(s, msgs, nm);
+                nb_udp_send_msgs(s, msgs, nm);
                 nm = 0;
             }
-            emit_frag(udp, s, q->msgid, q->total, off, chunk, &view, last, now, msgs, &nm);
+            nb_emit_frag(udp, s, q->msgid, q->total, off, chunk, &view, last, now, msgs, &nm);
             q->sent += chunk;
             budget--;
             if (s->txq_pending_bytes >= chunk) {
@@ -720,52 +720,52 @@ static void session_txq_drain_budget(zri_udp_transport_t *udp,
         }
     }
     if (nm > 0) {
-        udp_send_msgs(s, msgs, nm);
+        nb_udp_send_msgs(s, msgs, nm);
     }
 }
 
-static void session_txq_drain(zri_udp_transport_t *udp, zri_session_t *s, uint64_t now)
+static void nb_session_txq_drain(nb_udp_transport_t *udp, nb_session_t *s, uint64_t now)
 {
-    session_txq_drain_budget(udp, s, now, s->cc_burst);
+    nb_session_txq_drain_budget(udp, s, now, s->cc_burst);
 }
 
 /* ---- 接收 ---- */
 
 /* 解码 envelope 并以统一消息上下文上抛给 core。 */
-static void deliver_message(zri_udp_transport_t *udp,
-                            zri_session_t *s,
+static void nb_deliver_message(nb_udp_transport_t *udp,
+                            nb_session_t *s,
                             const uint8_t *buf,
                             size_t len)
 {
-    zri_envelope_t env;
-    zri_message_t msg;
+    nb_envelope_t env;
+    nb_message_t msg;
     char route[MAX_ROUTE];
 
-    if (zri_envelope_decode(buf, len, &env) != OK) {
+    if (nb_envelope_decode(buf, len, &env) != NB_OK) {
         return;
     }
-    zri_envelope_to_message(&env, route, sizeof(route), &msg);
+    nb_envelope_to_message(&env, route, sizeof(route), &msg);
     msg.peer_ip = s->peer_ip_s;
     msg.peer_port = s->peer_port;
     msg.peer_token = s;
-    zri_node_on_message(udp->base.node, &udp->base, &msg);
+    nb_node_on_message(udp->base.node, &udp->base, &msg);
 }
 
-static int session_on_data(zri_udp_transport_t *udp,
-                           zri_session_t *s,
-                           const zri_frag_t *v,
+static int nb_session_on_data(nb_udp_transport_t *udp,
+                           nb_session_t *s,
+                           const nb_frag_t *v,
                            uint64_t now_ms)
 {
-    zri_reasm_slot_t *r;
+    nb_reasm_slot_t *r;
     uint32_t frag_count;
     uint32_t fidx;
 
     if (!s || !v) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
     if (v->pt == PT_FEC) {
-        fec_on_parity(udp, s, v, now_ms);
-        return OK;
+        nb_fec_on_parity(udp, s, v, now_ms);
+        return NB_OK;
     }
     s->rx_pkts++;
     /* Peer data arrived: everything we sent so far was received, and we are
@@ -773,14 +773,14 @@ static int session_on_data(zri_udp_transport_t *udp,
     s->last_rx_data_ms = now_ms;
     s->acked_upto = s->send_seq;
     s->rto_attempts = 0;
-    ZRI_METRIC_INC(udp->base.metrics->udp_packets_received);
+    NB_METRIC_INC(udp->base.metrics->udp_packets_received);
     if (!s->ssrc_remote_known) {
         s->ssrc_remote = v->ssrc;
         s->ssrc_remote_known = 1;
     }
 
-    if (!zri_rx_window_accept(&s->rx_window, v->seq)) {
-        return OK;
+    if (!nb_rx_window_accept(&s->rx_window, v->seq)) {
+        return NB_OK;
     }
 
     /* RTCP 接收统计：扩展最高序号 + 抖动估计（RFC 3550 A.8）。 */
@@ -803,7 +803,7 @@ static int session_on_data(zri_udp_transport_t *udp,
             }
             s->jitter += ((double)d - s->jitter) / 16.0;
             if (s->metrics) {
-                zri_atomic_store_u32(&s->metrics->rtcp_jitter_ms, (uint32_t)s->jitter);
+                nb_atomic_store_u32(&s->metrics->rtcp_jitter_ms, (uint32_t)s->jitter);
             }
         }
         s->transit_prev = transit;
@@ -811,46 +811,46 @@ static int session_on_data(zri_udp_transport_t *udp,
     }
 
     if (v->total_len > udp->base.max_msg_bytes + MAX_ENVELOPE_EXTRA) {
-        return ERR_TOOBIG;
+        return NB_ERR_TOOBIG;
     }
     if ((v->frag_off % udp->base.frag_bytes) != 0) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
     frag_count =
         v->total_len ? (v->total_len + udp->base.frag_bytes - 1) / udp->base.frag_bytes : 1;
     fidx = v->frag_off / udp->base.frag_bytes;
     if (fidx >= frag_count || (uint32_t)v->frag_off + v->frag_len > v->total_len) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
 
     /* 单分片快路径：解码完整 envelope 后投递。 */
     if (frag_count == 1) {
-        deliver_message(udp, s, v->chunk, v->frag_len);
-        return OK;
+        nb_deliver_message(udp, s, v->chunk, v->frag_len);
+        return NB_OK;
     }
 
-    r = zri_reasm_acquire(&s->reasm, v->msg_id, v->total_len, frag_count, now_ms);
+    r = nb_reasm_acquire(&s->reasm, v->msg_id, v->total_len, frag_count, now_ms);
     if (!r) {
-        return ERR_NOMEM;
+        return NB_ERR_NOMEM;
     }
     if (!r->base_seq_set) {
         r->base_seq = (uint16_t)(v->seq - fidx);
         r->base_seq_set = 1;
     }
-    (void)zri_reasm_put(r, fidx, v->frag_off, v->chunk, v->frag_len);
+    (void)nb_reasm_put(r, fidx, v->frag_off, v->chunk, v->frag_len);
 
     if (r->got == r->frag_count) {
-        deliver_message(udp, s, r->buf, r->total_len);
-        zri_reasm_release(&s->reasm, r);
-        return OK;
+        nb_deliver_message(udp, s, r->buf, r->total_len);
+        nb_reasm_release(&s->reasm, r);
+        return NB_OK;
     }
     /* FEC：若本消息恰好缺一枚分片且已缓存其校验包，尝试重建补齐。 */
-    fec_try_reconstruct(udp, s, v->msg_id, now_ms);
-    return OK;
+    nb_fec_try_reconstruct(udp, s, v->msg_id, now_ms);
+    return NB_OK;
 }
 
-static void session_on_nack(zri_udp_transport_t *udp,
-                            zri_session_t *s,
+static void nb_session_on_nack(nb_udp_transport_t *udp,
+                            nb_session_t *s,
                             const uint16_t *seqs,
                             size_t n)
 {
@@ -873,13 +873,13 @@ static void session_on_nack(zri_udp_transport_t *udp,
             unsent = 1;
             continue;
         }
-        packet = zri_tx_ring_get(&s->tx_ring, seqs[i], &len);
+        packet = nb_tx_ring_get(&s->tx_ring, seqs[i], &len);
         if (packet) {
             (void)ntk_socket_sendto(s->sock, packet, len, s->peer_ip_s, s->peer_port);
             s->retx++;
             lost_sent = 1;
             if (s->metrics) {
-                ZRI_METRIC_INC(s->metrics->udp_retransmissions);
+                NB_METRIC_INC(s->metrics->udp_retransmissions);
             }
         }
     }
@@ -888,11 +888,11 @@ static void session_on_nack(zri_udp_transport_t *udp,
      * 注意不能用已崩到 1 的 cc_burst 作为预算，否则每次 NACK 只能多发一片。
      */
     if (unsent) {
-        session_txq_drain_budget(udp, s, zri_now_ms(), TX_BATCH_MAX);
+        nb_session_txq_drain_budget(udp, s, nb_now_ms(), TX_BATCH_MAX);
     }
     /* 只有确实重传了已发送分片才视为拥塞丢包并减窗。 */
     if (lost_sent) {
-        uint64_t now = zri_now_ms();
+        uint64_t now = nb_now_ms();
         if (now - s->cc_last_loss_ms > 20) {
             if (s->cc_burst > CC_BURST_MIN) {
                 s->cc_burst = s->cc_burst / 2;
@@ -915,12 +915,12 @@ static uint32_t ntp_lsw(uint64_t wall_ms)
 }
 
 /* NTP 时间戳的中间 32 位：秒低 16 位 + 小数高 16 位（用于 LSR/DLSR）。 */
-static uint32_t ntp_middle32(uint32_t msw, uint32_t lsw)
+static uint32_t nb_ntp_middle32(uint32_t msw, uint32_t lsw)
 {
     return (uint32_t)(((msw & 0xffffu) << 16) | (lsw >> 16));
 }
 
-static void fill_report_block(const zri_session_t *s, zri_rtcp_report_block_t *rb, uint64_t now_ms)
+static void nb_fill_report_block(const nb_session_t *s, nb_rtcp_report_block_t *rb, uint64_t now_ms)
 {
     uint32_t ext = s->rx_max_seq_set ? (s->rx_cycles + (uint32_t)s->rx_max_seq) : 0u;
     uint32_t expected = s->rx_max_seq_set ? (ext + 1u) : 0u;
@@ -948,9 +948,9 @@ static void fill_report_block(const zri_session_t *s, zri_rtcp_report_block_t *r
 }
 
 /* 从对端报告块中提取关于本端流（ssrc_local）的丢包/抖动/RTT。 */
-static void apply_report_blocks(zri_session_t *s, const zri_rtcp_report_block_t *rb, int n)
+static void nb_apply_report_blocks(nb_session_t *s, const nb_rtcp_report_block_t *rb, int n)
 {
-    uint32_t now32 = ntp_middle32(ntp_msw(ntk_wall_ms()), ntp_lsw(ntk_wall_ms()));
+    uint32_t now32 = nb_ntp_middle32(ntp_msw(ntk_wall_ms()), ntp_lsw(ntk_wall_ms()));
     int i;
     for (i = 0; i < n; i++) {
         if (rb[i].ssrc != s->ssrc_local) {
@@ -958,7 +958,7 @@ static void apply_report_blocks(zri_session_t *s, const zri_rtcp_report_block_t 
         }
         s->rtcp_remote_lost = rb[i].cumulative_lost;
         if (s->metrics) {
-        zri_atomic_store_u32((uint32_t *)&s->metrics->rtcp_remote_lost,
+        nb_atomic_store_u32((uint32_t *)&s->metrics->rtcp_remote_lost,
                              (uint32_t)rb[i].cumulative_lost);
         }
         if (rb[i].lsr != 0) {
@@ -967,54 +967,54 @@ static void apply_report_blocks(zri_session_t *s, const zri_rtcp_report_block_t 
             uint32_t rtt_ms = (uint32_t)(((uint64_t)d * 1000ull) >> 16);
             s->last_rtt_ms = rtt_ms;
             if (s->metrics) {
-                zri_atomic_store_u32(&s->metrics->rtcp_rtt_ms, rtt_ms);
+                nb_atomic_store_u32(&s->metrics->rtcp_rtt_ms, rtt_ms);
             }
         }
     }
 }
 
-static void session_on_rtcp(
-    zri_udp_transport_t *udp, zri_session_t *s, const uint8_t *buf, size_t n, uint64_t now_ms)
+static void nb_session_on_rtcp(
+    nb_udp_transport_t *udp, nb_session_t *s, const uint8_t *buf, size_t n, uint64_t now_ms)
 {
     (void)udp;
     if (!s || !buf || n < 4) {
         return;
     }
     if (buf[1] == RTCP_SR) {
-        zri_rtcp_sr_t sr;
-        if (zri_frame_parse_sr(buf, n, &sr) == 1) {
+        nb_rtcp_sr_t sr;
+        if (nb_frame_parse_sr(buf, n, &sr) == 1) {
             s->rtcp_sr_received++;
             if (s->metrics) {
-                ZRI_METRIC_INC(s->metrics->rtcp_sr_received);
+                NB_METRIC_INC(s->metrics->rtcp_sr_received);
             }
             s->ssrc_remote = sr.ssrc;
             s->ssrc_remote_known = 1;
-            s->last_rx_sr_ntp = ntp_middle32(sr.ntp_msw, sr.ntp_lsw);
+            s->last_rx_sr_ntp = nb_ntp_middle32(sr.ntp_msw, sr.ntp_lsw);
             s->last_rx_sr_ms = now_ms;
             s->have_last_rx_sr = 1;
-            apply_report_blocks(s, sr.rb, sr.rb_count);
+            nb_apply_report_blocks(s, sr.rb, sr.rb_count);
         }
     } else if (buf[1] == RTCP_RR) {
-        zri_rtcp_rr_t rr;
-        if (zri_frame_parse_rr(buf, n, &rr) == 1) {
+        nb_rtcp_rr_t rr;
+        if (nb_frame_parse_rr(buf, n, &rr) == 1) {
             s->rtcp_rr_received++;
             if (s->metrics) {
-                ZRI_METRIC_INC(s->metrics->rtcp_rr_received);
+                NB_METRIC_INC(s->metrics->rtcp_rr_received);
             }
             if (!s->ssrc_remote_known) {
                 s->ssrc_remote = rr.ssrc;
                 s->ssrc_remote_known = 1;
             }
-            apply_report_blocks(s, rr.rb, rr.rb_count);
+            nb_apply_report_blocks(s, rr.rb, rr.rb_count);
         }
     }
 }
 
 /* 周期发送复合 RTCP 包：本端有发送记录则 SR，否则 RR；尾部附 SDES CNAME。 */
-static void session_send_rtcp(zri_udp_transport_t *udp, zri_session_t *s, uint64_t now_ms)
+static void nb_session_send_rtcp(nb_udp_transport_t *udp, nb_session_t *s, uint64_t now_ms)
 {
     uint8_t buf[256];
-    zri_rtcp_report_block_t rb;
+    nb_rtcp_report_block_t rb;
     int have_rx = s->ssrc_remote_known && s->rx_pkts > 0;
     size_t n = 0;
     size_t total;
@@ -1022,12 +1022,12 @@ static void session_send_rtcp(zri_udp_transport_t *udp, zri_session_t *s, uint64
 
     memset(&rb, 0, sizeof(rb));
     if (have_rx) {
-        fill_report_block(s, &rb, now_ms);
+        nb_fill_report_block(s, &rb, now_ms);
     }
     if (s->rtcp_pkt_count > 0) {
         uint32_t msw = ntp_msw(s->rtcp_last_rtp_wall);
         uint32_t lsw = ntp_lsw(s->rtcp_last_rtp_wall);
-        n = zri_frame_build_sr(buf,
+        n = nb_frame_build_sr(buf,
                                sizeof(buf),
                                s->ssrc_local,
                                msw,
@@ -1038,33 +1038,33 @@ static void session_send_rtcp(zri_udp_transport_t *udp, zri_session_t *s, uint64
                                have_rx ? &rb : NULL,
                                have_rx ? 1 : 0);
         if (n > 0) {
-            s->rtcp_last_sr_ntp = ntp_middle32(msw, lsw);
+            s->rtcp_last_sr_ntp = nb_ntp_middle32(msw, lsw);
             s->rtcp_sr_sent++;
             if (s->metrics) {
-                ZRI_METRIC_INC(s->metrics->rtcp_sr_sent);
+                NB_METRIC_INC(s->metrics->rtcp_sr_sent);
             }
         }
     } else {
-        n = zri_frame_build_rr(
+        n = nb_frame_build_rr(
             buf, sizeof(buf), s->ssrc_local, have_rx ? &rb : NULL, have_rx ? 1 : 0);
         if (n > 0) {
             s->rtcp_rr_sent++;
             if (s->metrics) {
-                ZRI_METRIC_INC(s->metrics->rtcp_rr_sent);
+                NB_METRIC_INC(s->metrics->rtcp_rr_sent);
             }
         }
     }
     if (n == 0) {
         return;
     }
-    total = n + zri_frame_build_sdes_cname(buf + n, sizeof(buf) - n, s->ssrc_local, "rpc");
+    total = n + nb_frame_build_sdes_cname(buf + n, sizeof(buf) - n, s->ssrc_local, "rpc");
     (void)ntk_socket_sendto(s->sock, buf, total, s->peer_ip_s, s->peer_port);
     s->rx_expected_prior = s->rx_max_seq_set ? (s->rx_cycles + s->rx_max_seq + 1u) : 0u;
     s->rx_received_prior = s->rx_received;
 }
 
 /* 会话结束时尽力发送 RTCP BYE，通知对端本端要离开。 */
-static void session_send_bye(zri_udp_transport_t *udp, zri_session_t *s)
+static void nb_session_send_bye(nb_udp_transport_t *udp, nb_session_t *s)
 {
     uint8_t buf[16];
     size_t n;
@@ -1072,24 +1072,24 @@ static void session_send_bye(zri_udp_transport_t *udp, zri_session_t *s)
     if (!s || !s->sock) {
         return;
     }
-    n = zri_frame_build_bye(buf, sizeof(buf), s->ssrc_local);
+    n = nb_frame_build_bye(buf, sizeof(buf), s->ssrc_local);
     if (n == 0) {
         return;
     }
     (void)ntk_socket_sendto(s->sock, buf, n, s->peer_ip_s, s->peer_port);
     if (s->metrics) {
-        ZRI_METRIC_INC(s->metrics->rtcp_bye_sent);
+        NB_METRIC_INC(s->metrics->rtcp_bye_sent);
     }
 }
 
-static void reasm_on_lost(const zri_reasm_slot_t *slot, void *user)
+static void nb_reasm_on_lost(const nb_reasm_slot_t *slot, void *user)
 {
-    zri_session_t *s = (zri_session_t *)user;
+    nb_session_t *s = (nb_session_t *)user;
     (void)slot;
     if (s) {
         s->lost++;
         if (s->metrics) {
-            ZRI_METRIC_INC(s->metrics->udp_reassembly_expired);
+            NB_METRIC_INC(s->metrics->udp_reassembly_expired);
         }
     }
 }
@@ -1100,7 +1100,7 @@ static void reasm_on_lost(const zri_reasm_slot_t *slot, void *user)
  * RTO is overridable via env RTO_MS (ms), default 100. */
 #define RTO_MAX_ROUNDS 6
 
-static uint32_t udp_rto_env_ms(void)
+static uint32_t nb_udp_rto_env_ms(void)
 {
     static int inited = 0;
     static uint32_t value = 0;
@@ -1120,14 +1120,14 @@ static uint32_t udp_rto_env_ms(void)
 /* Sender-side RTO. Default 10ms (LAN/loopback/nearby); override with
  * RTO_MS for high-RTT WAN links. (RTCP-derived RTT proved too coarse to
  * drive this adaptively on a low-latency link.) */
-static uint32_t session_rto_ms(const zri_session_t *s)
+static uint32_t nb_session_rto_ms(const nb_session_t *s)
 {
-    uint32_t env = udp_rto_env_ms();
+    uint32_t env = nb_udp_rto_env_ms();
     (void)s;
     return env > 0 ? env : 10u;
 }
 
-static void session_tick(zri_udp_transport_t *udp, zri_session_t *s, uint64_t now_ms)
+static void nb_session_tick(nb_udp_transport_t *udp, nb_session_t *s, uint64_t now_ms)
 {
     uint16_t missing[MAX_NACK_SEQS];
     size_t mn = 0;
@@ -1136,13 +1136,13 @@ static void session_tick(zri_udp_transport_t *udp, zri_session_t *s, uint64_t no
         return;
     }
 
-    session_txq_drain(udp, s, now_ms);
+    nb_session_txq_drain(udp, s, now_ms);
 
     /* Plan A: idle sender-side RTO retransmit of the unacked tail. */
     if (s->tx_pkts > 0 && !s->txq_head && s->rto_attempts < RTO_MAX_ROUNDS &&
-        (now_ms - s->last_rx_data_ms) >= session_rto_ms(s) &&
+        (now_ms - s->last_rx_data_ms) >= nb_session_rto_ms(s) &&
         (int16_t)(s->send_seq - s->acked_upto) > 0) {
-        uint32_t rto = session_rto_ms(s);
+        uint32_t rto = nb_session_rto_ms(s);
         unsigned i;
         for (i = 0; i < TX_BATCH_MAX; i++) {
             uint16_t seq = (uint16_t)(s->send_seq - 1u - i);
@@ -1152,19 +1152,19 @@ static void session_tick(zri_udp_transport_t *udp, zri_session_t *s, uint64_t no
             if ((int16_t)(seq - s->acked_upto) < 0) {
                 break;
             }
-            sent = zri_tx_ring_sent_ms(&s->tx_ring, seq);
+            sent = nb_tx_ring_sent_ms(&s->tx_ring, seq);
             if (sent == 0 || now_ms - sent < rto) {
                 continue;
             }
-            pkt = zri_tx_ring_get(&s->tx_ring, seq, &len);
+            pkt = nb_tx_ring_get(&s->tx_ring, seq, &len);
             if (!pkt || len == 0) {
                 continue;
             }
             (void)ntk_socket_sendto(s->sock, pkt, len, s->peer_ip_s, s->peer_port);
-            zri_tx_ring_mark_sent(&s->tx_ring, seq, now_ms);
+            nb_tx_ring_mark_sent(&s->tx_ring, seq, now_ms);
             s->retx++;
             if (s->metrics) {
-                ZRI_METRIC_INC(s->metrics->udp_retransmissions);
+                NB_METRIC_INC(s->metrics->udp_retransmissions);
             }
         }
         s->rto_attempts++;
@@ -1176,8 +1176,8 @@ static void session_tick(zri_udp_transport_t *udp, zri_session_t *s, uint64_t no
         s->cc_last_grow_ms = now_ms;
     }
 
-    mn += zri_rx_window_missing(&s->rx_window, missing + mn, MAX_NACK_SEQS - mn);
-    mn += zri_reasm_missing(&s->reasm, missing + mn, MAX_NACK_SEQS - mn);
+    mn += nb_rx_window_missing(&s->rx_window, missing + mn, MAX_NACK_SEQS - mn);
+    mn += nb_reasm_missing(&s->reasm, missing + mn, MAX_NACK_SEQS - mn);
 
     if (mn > 0) {
         if (s->first_gap_ms == 0) {
@@ -1185,13 +1185,13 @@ static void session_tick(zri_udp_transport_t *udp, zri_session_t *s, uint64_t no
         }
         if (now_ms - s->last_nack_ms >= NACK_INTERVAL_MS) {
             uint8_t nack[256];
-            size_t n = zri_frame_build_nack(
+            size_t n = nb_frame_build_nack(
                 nack, sizeof(nack), s->ssrc_local, s->ssrc_remote, missing, mn);
             if (n > 0) {
                 (void)ntk_socket_sendto(s->sock, nack, n, s->peer_ip_s, s->peer_port);
                 s->last_nack_ms = now_ms;
                 if (s->metrics) {
-                    ZRI_METRIC_INC(s->metrics->udp_nacks_sent);
+                    NB_METRIC_INC(s->metrics->udp_nacks_sent);
                 }
             }
         }
@@ -1202,19 +1202,19 @@ static void session_tick(zri_udp_transport_t *udp, zri_session_t *s, uint64_t no
     if (!udp->base.rtcp_disabled && (s->rx_pkts > 0 || s->tx_pkts > 0) &&
         now_ms - s->rtcp_last_send_ms >=
             (udp->base.rtcp_interval_ms ? udp->base.rtcp_interval_ms : RTCP_INTERVAL_MS)) {
-        session_send_rtcp(udp, s, now_ms);
+        nb_session_send_rtcp(udp, s, now_ms);
         s->rtcp_last_send_ms = now_ms;
     }
 
-    zri_reasm_expire(&s->reasm, now_ms, REASM_TIMEOUT_MS, reasm_on_lost, s);
+    nb_reasm_expire(&s->reasm, now_ms, REASM_TIMEOUT_MS, nb_reasm_on_lost, s);
 }
 
 /* ---- 数据面接收 ---- */
 
-static void data_recv_cb(ntk_socket *sock, void *user)
+static void nb_data_recv_cb(ntk_socket *sock, void *user)
 {
-    zri_udp_io_ctx_t *ctx = (zri_udp_io_ctx_t *)user;
-    zri_udp_transport_t *udp = ctx ? ctx->udp : NULL;
+    nb_udp_io_ctx_t *ctx = (nb_udp_io_ctx_t *)user;
+    nb_udp_transport_t *udp = ctx ? ctx->udp : NULL;
     int io = ctx ? ctx->io : 0;
     ntk_udp_recv_t recvs[RX_BATCH_MAX];
 
@@ -1236,7 +1236,7 @@ static void data_recv_cb(ntk_socket *sock, void *user)
             break;
         }
         {
-            uint64_t now = zri_now_ms();
+            uint64_t now = nb_now_ms();
             for (i = 0; i < (unsigned)got; i++) {
                 uint8_t *buf = (uint8_t *)recvs[i].data;
                 size_t n = recvs[i].len;
@@ -1244,43 +1244,43 @@ static void data_recv_cb(ntk_socket *sock, void *user)
                     continue;
                 }
                 if (buf[1] == RTCP_SR || buf[1] == RTCP_RR) {
-                    zri_session_t *s = session_for(udp, io, sock, recvs[i].ip, recvs[i].port, now);
+                    nb_session_t *s = nb_session_for(udp, io, sock, recvs[i].ip, recvs[i].port, now);
                     if (s) {
-                        session_on_rtcp(udp, s, buf, n, now);
+                        nb_session_on_rtcp(udp, s, buf, n, now);
                     }
                     continue;
                 }
                 if (buf[1] == RTCP_BYE) {
-                    zri_session_t *s = session_for(udp, io, sock, recvs[i].ip, recvs[i].port, now);
+                    nb_session_t *s = nb_session_for(udp, io, sock, recvs[i].ip, recvs[i].port, now);
                     if (s) {
                         s->ssrc_remote_known = 0;
                         s->have_last_rx_sr = 0;
                         if (s->metrics) {
-                            ZRI_METRIC_INC(s->metrics->rtcp_bye_received);
+                            NB_METRIC_INC(s->metrics->rtcp_bye_received);
                         }
                     }
                     continue;
                 }
                 if (buf[1] == RTCP_RTPFB) {
                     uint16_t seqs[MAX_NACK_SEQS];
-                    int c = zri_frame_parse_nack(buf, n, NULL, NULL, seqs, MAX_NACK_SEQS);
+                    int c = nb_frame_parse_nack(buf, n, NULL, NULL, seqs, MAX_NACK_SEQS);
                     if (c > 0) {
-                        zri_session_t *s =
-                            session_for(udp, io, sock, recvs[i].ip, recvs[i].port, now);
+                        nb_session_t *s =
+                            nb_session_for(udp, io, sock, recvs[i].ip, recvs[i].port, now);
                         if (s) {
-                            session_on_nack(udp, s, seqs, (size_t)c);
+                            nb_session_on_nack(udp, s, seqs, (size_t)c);
                         }
                     }
                     continue;
                 }
                 {
-                    zri_frag_t v;
-                    int r = zri_frame_parse_data(buf, n, &v);
+                    nb_frag_t v;
+                    int r = nb_frame_parse_data(buf, n, &v);
                     if (r == 1) {
-                        zri_session_t *s =
-                            session_for(udp, io, sock, recvs[i].ip, recvs[i].port, now);
+                        nb_session_t *s =
+                            nb_session_for(udp, io, sock, recvs[i].ip, recvs[i].port, now);
                         if (s) {
-                            (void)session_on_data(udp, s, &v, now);
+                            (void)nb_session_on_data(udp, s, &v, now);
                         }
                     }
                 }
@@ -1291,19 +1291,19 @@ static void data_recv_cb(ntk_socket *sock, void *user)
 
 /* ---- 定时器 ---- */
 
-static void udp_tick_cb(void *user)
+static void nb_udp_tick_cb(void *user)
 {
-    zri_udp_io_ctx_t *ctx = (zri_udp_io_ctx_t *)user;
-    zri_udp_transport_t *udp = ctx->udp;
-    uint64_t now = zri_now_ms();
+    nb_udp_io_ctx_t *ctx = (nb_udp_io_ctx_t *)user;
+    nb_udp_transport_t *udp = ctx->udp;
+    uint64_t now = nb_now_ms();
     int i;
     for (i = 0; i < PEERS_PER_IO; i++) {
-        session_tick(udp, &udp->sessions[ctx->io][i], now);
+        nb_session_tick(udp, &udp->sessions[ctx->io][i], now);
     }
 }
 
 /* 当前 poller 对应的 io 分片下标；找不到回退 0。 */
-static int udp_io_current(zri_udp_transport_t *udp)
+static int nb_udp_io_current(nb_udp_transport_t *udp)
 {
     ntk_poller *cur = ntk_poller_current();
     int i;
@@ -1319,9 +1319,9 @@ static int udp_io_current(zri_udp_transport_t *udp)
 
 /* ---- 传输接口 ---- */
 
-static int udp_start(zri_transport_t *t)
+static int nb_udp_start(nb_transport_t *t)
 {
-    zri_udp_transport_t *udp = (zri_udp_transport_t *)t;
+    nb_udp_transport_t *udp = (nb_udp_transport_t *)t;
     ntk_socket_callbacks_t cbs;
     uint16_t actual = 0;
     int i;
@@ -1357,7 +1357,7 @@ static int udp_start(zri_transport_t *t)
             break;
         }
         memset(&cbs, 0, sizeof(cbs));
-        cbs.on_readable = data_recv_cb;
+        cbs.on_readable = nb_data_recv_cb;
         udp->pollers[i] = ntk_poller_pool_at(t->pool, (unsigned)i);
         if (ntk_socket_attach_poller(ds, udp->pollers[i], &cbs, &udp->io_ctx[i]) != NTK_OK) {
             free(udp->io_ctx[i].rx);
@@ -1369,18 +1369,18 @@ static int udp_start(zri_transport_t *t)
         udp->io_count++;
     }
     if (udp->io_count == 0) {
-        return ERR_IO;
+        return NB_ERR_IO;
     }
     for (i = 0; i < udp->io_count; i++) {
         udp->tick_timers[i] = ntk_timer_start(
-            udp->pollers[i], zri_tick_interval_ms(), 1, udp_tick_cb, &udp->io_ctx[i]);
+            udp->pollers[i], nb_tick_interval_ms(), 1, nb_udp_tick_cb, &udp->io_ctx[i]);
     }
-    return OK;
+    return NB_OK;
 }
 
-static void udp_stop(zri_transport_t *t)
+static void nb_udp_stop(nb_transport_t *t)
 {
-    zri_udp_transport_t *udp = (zri_udp_transport_t *)t;
+    nb_udp_transport_t *udp = (nb_udp_transport_t *)t;
     int i, j;
     for (i = 0; i < IO_MAX; i++) {
         if (udp->tick_timers[i]) {
@@ -1395,7 +1395,7 @@ static void udp_stop(zri_transport_t *t)
         }
         for (j = 0; j < PEERS_PER_IO; j++) {
             if (udp->sessions[i][j].used) {
-                session_send_bye(udp, &udp->sessions[i][j]);
+                nb_session_send_bye(udp, &udp->sessions[i][j]);
             }
         }
     }
@@ -1411,54 +1411,54 @@ static void udp_stop(zri_transport_t *t)
         }
         for (j = 0; j < PEERS_PER_IO; j++) {
             if (udp->sessions[i][j].used) {
-                session_cleanup(&udp->sessions[i][j]);
+                nb_session_cleanup(&udp->sessions[i][j]);
                 udp->sessions[i][j].used = 0;
             }
         }
     }
 }
 
-static int udp_send(zri_transport_t *t, const zri_message_t *msg)
+static int nb_udp_send(nb_transport_t *t, const nb_message_t *msg)
 {
-    zri_udp_transport_t *udp = (zri_udp_transport_t *)t;
-    zri_session_t *s;
+    nb_udp_transport_t *udp = (nb_udp_transport_t *)t;
+    nb_session_t *s;
     int io;
     if (!msg || !msg->peer_ip || !msg->peer_port || udp->io_count == 0) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
-    io = udp_io_current(udp);
-    s = session_for(udp, io, udp->socks[io], msg->peer_ip, msg->peer_port, zri_now_ms());
+    io = nb_udp_io_current(udp);
+    s = nb_session_for(udp, io, udp->socks[io], msg->peer_ip, msg->peer_port, nb_now_ms());
     if (!s) {
-        return ERR_NOMEM;
+        return NB_ERR_NOMEM;
     }
-    return session_send(udp, s, msg);
+    return nb_session_send(udp, s, msg);
 }
 
-static int udp_reply(zri_transport_t *t, const zri_message_t *msg)
+static int nb_udp_reply(nb_transport_t *t, const nb_message_t *msg)
 {
-    zri_udp_transport_t *udp = (zri_udp_transport_t *)t;
-    zri_session_t *s;
+    nb_udp_transport_t *udp = (nb_udp_transport_t *)t;
+    nb_session_t *s;
     if (!msg) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
-    s = (zri_session_t *)msg->peer_token;
+    s = (nb_session_t *)msg->peer_token;
     if (!s || !s->used) {
         int io;
         if (!msg->peer_ip || !msg->peer_port || udp->io_count == 0) {
-            return ERR_INVALID;
+            return NB_ERR_INVALID;
         }
-        io = udp_io_current(udp);
-        s = session_for(udp, io, udp->socks[io], msg->peer_ip, msg->peer_port, zri_now_ms());
+        io = nb_udp_io_current(udp);
+        s = nb_session_for(udp, io, udp->socks[io], msg->peer_ip, msg->peer_port, nb_now_ms());
         if (!s) {
-            return ERR_NOMEM;
+            return NB_ERR_NOMEM;
         }
     }
-    return session_send(udp, s, msg);
+    return nb_session_send(udp, s, msg);
 }
 
-static int udp_peer_stats(zri_transport_t *t, const char *ip, uint16_t port, peer_stats_t *out)
+static int nb_udp_peer_stats(nb_transport_t *t, const char *ip, uint16_t port, nb_peer_stats_t *out)
 {
-    zri_udp_transport_t *udp = (zri_udp_transport_t *)t;
+    nb_udp_transport_t *udp = (nb_udp_transport_t *)t;
     int io;
     int i;
     if (!udp || !ip || !out) {
@@ -1466,7 +1466,7 @@ static int udp_peer_stats(zri_transport_t *t, const char *ip, uint16_t port, pee
     }
     for (io = 0; io < udp->io_count; io++) {
         for (i = 0; i < PEERS_PER_IO; i++) {
-            zri_session_t *s = &udp->sessions[io][i];
+            nb_session_t *s = &udp->sessions[io][i];
             if (s->used && s->peer_port == port && strcmp(s->peer_ip_s, ip) == 0) {
                 out->local_id = s->ssrc_local;
                 out->remote_id = s->ssrc_remote;
@@ -1482,18 +1482,18 @@ static int udp_peer_stats(zri_transport_t *t, const char *ip, uint16_t port, pee
     return 0;
 }
 
-static const zri_transport_ops_t g_udp_ops = {
-    udp_start, udp_stop, udp_send, udp_reply, udp_peer_stats,
+static const nb_transport_ops_t nb_g_udp_ops = {
+    nb_udp_start, nb_udp_stop, nb_udp_send, nb_udp_reply, nb_udp_peer_stats,
 };
 
-zri_transport_t *zri_udp_transport_create(void)
+nb_transport_t *nb_udp_transport_create(void)
 {
-    zri_udp_transport_t *udp = (zri_udp_transport_t *)calloc(1, sizeof(*udp));
+    nb_udp_transport_t *udp = (nb_udp_transport_t *)calloc(1, sizeof(*udp));
     if (!udp) {
         return NULL;
     }
-    udp->base.ops = &g_udp_ops;
-    udp->base.kind = TRANSPORT_UDP;
-    zri_copy_str(udp->base.scheme, sizeof(udp->base.scheme), "udp", "udp");
+    udp->base.ops = &nb_g_udp_ops;
+    udp->base.kind = NB_TRANSPORT_UDP;
+    nb_copy_str(udp->base.scheme, sizeof(udp->base.scheme), "udp", "udp");
     return &udp->base;
 }

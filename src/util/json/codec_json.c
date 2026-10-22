@@ -7,15 +7,15 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void* field_ptr(void* obj, size_t offset) {
+static void* nb_field_ptr(void* obj, size_t offset) {
     return (char*)obj + offset;
 }
 
-static const void* field_cptr(const void* obj, size_t offset) {
+static const void* nb_field_cptr(const void* obj, size_t offset) {
     return (const char*)obj + offset;
 }
 
-static int model_obj_size(const nb_codec_json_model_t* model, size_t n, size_t* size) {
+static int nb_model_obj_size(const nb_codec_json_model_t* model, size_t n, size_t* size) {
     size_t i;
 
     if (!model || !size || n == 0) {
@@ -33,7 +33,7 @@ static int model_obj_size(const nb_codec_json_model_t* model, size_t n, size_t* 
     return NB_CODEC_INVALID_ARGUMENT;
 }
 
-static int model_elem_size(const nb_codec_json_model_t* field, size_t* size) {
+static int nb_model_elem_size(const nb_codec_json_model_t* field, size_t* size) {
     nb_codec_json_type_t type;
 
     if (field->param.array.elem_size != 0) {
@@ -67,13 +67,13 @@ static int model_elem_size(const nb_codec_json_model_t* field, size_t* size) {
         *size = sizeof(void*);
         return NB_CODEC_OK;
     case NB_CODEC_JSON_INLINE:
-        return model_obj_size(field->param.array.model, field->param.array.model_count, size);
+        return nb_model_obj_size(field->param.array.model, field->param.array.model_count, size);
     default:
         return NB_CODEC_INVALID_ARGUMENT;
     }
 }
 
-static int dup_string(const char* src, size_t n, char** out) {
+static int nb_dup_string(const char* src, size_t n, char** out) {
     char* copy = (char*)malloc(n + 1u);
     if (!copy) {
         return NB_CODEC_OUT_OF_MEMORY;
@@ -86,7 +86,7 @@ static int dup_string(const char* src, size_t n, char** out) {
     return NB_CODEC_OK;
 }
 
-static int json_as_i64(const cJSON* v, int64_t* out) {
+static int nb_json_as_i64(const cJSON* v, int64_t* out) {
     double d;
     int64_t i;
 
@@ -105,7 +105,7 @@ static int json_as_i64(const cJSON* v, int64_t* out) {
     return NB_CODEC_OK;
 }
 
-static int json_as_u64(const cJSON* v, uint64_t* out) {
+static int nb_json_as_u64(const cJSON* v, uint64_t* out) {
     double d;
     uint64_t u;
 
@@ -124,16 +124,16 @@ static int json_as_u64(const cJSON* v, uint64_t* out) {
     return NB_CODEC_OK;
 }
 
-static int fill_object(const cJSON* json, void* obj, const nb_codec_json_model_t* model,
+static int nb_fill_object(const cJSON* json, void* obj, const nb_codec_json_model_t* model,
                        size_t model_count);
-static int encode_object(const void* obj, const nb_codec_json_model_t* model, size_t model_count,
+static int nb_encode_object(const void* obj, const nb_codec_json_model_t* model, size_t model_count,
                          cJSON** out);
-static void clear_object(void* obj, const nb_codec_json_model_t* model, size_t model_count,
+static void nb_clear_object(void* obj, const nb_codec_json_model_t* model, size_t model_count,
                          int free_root);
-static void clear_array_items(void* base, size_t count, const nb_codec_json_model_t* field);
-static void clear_map(nb_codec_json_map_t* map, const nb_codec_json_model_t* field);
+static void nb_clear_array_items(void* base, size_t count, const nb_codec_json_model_t* field);
+static void nb_clear_map(nb_codec_json_map_t* map, const nb_codec_json_model_t* field);
 
-static int decode_elem(const cJSON* v, nb_codec_json_type_t type, void* dest,
+static int nb_decode_elem(const cJSON* v, nb_codec_json_type_t type, void* dest,
                        const nb_codec_json_model_t* sub, size_t sub_n) {
     int status;
     size_t size;
@@ -145,7 +145,7 @@ static int decode_elem(const cJSON* v, nb_codec_json_type_t type, void* dest,
             return NB_CODEC_OK;
         }
         if (type == NB_CODEC_JSON_INLINE) {
-            status = model_obj_size(sub, sub_n, &size);
+            status = nb_model_obj_size(sub, sub_n, &size);
             if (status != NB_CODEC_OK) {
                 return status;
             }
@@ -192,7 +192,7 @@ static int decode_elem(const cJSON* v, nb_codec_json_type_t type, void* dest,
     case NB_CODEC_JSON_I32:
     case NB_CODEC_JSON_I64: {
         int64_t i;
-        status = json_as_i64(v, &i);
+        status = nb_json_as_i64(v, &i);
         if (status != NB_CODEC_OK) {
             return status;
         }
@@ -227,7 +227,7 @@ static int decode_elem(const cJSON* v, nb_codec_json_type_t type, void* dest,
     case NB_CODEC_JSON_U32:
     case NB_CODEC_JSON_U64: {
         uint64_t u;
-        status = json_as_u64(v, &u);
+        status = nb_json_as_u64(v, &u);
         if (status != NB_CODEC_OK) {
             return status;
         }
@@ -281,18 +281,18 @@ static int decode_elem(const cJSON* v, nb_codec_json_type_t type, void* dest,
             return NB_CODEC_TYPE_MISMATCH;
         }
         s = v->valuestring;
-        return dup_string(s, strlen(s), (char**)dest);
+        return nb_dup_string(s, strlen(s), (char**)dest);
     }
     case NB_CODEC_JSON_RAW: {
         char* printed;
         if (cJSON_IsString(v) && v->valuestring) {
-            return dup_string(v->valuestring, strlen(v->valuestring), (char**)dest);
+            return nb_dup_string(v->valuestring, strlen(v->valuestring), (char**)dest);
         }
         printed = cJSON_PrintUnformatted(v);
         if (!printed) {
             return NB_CODEC_OUT_OF_MEMORY;
         }
-        status = dup_string(printed, strlen(printed), (char**)dest);
+        status = nb_dup_string(printed, strlen(printed), (char**)dest);
         cJSON_free(printed);
         return status;
     }
@@ -301,7 +301,7 @@ static int decode_elem(const cJSON* v, nb_codec_json_type_t type, void* dest,
         if (!cJSON_IsObject(v)) {
             return NB_CODEC_TYPE_MISMATCH;
         }
-        status = model_obj_size(sub, sub_n, &size);
+        status = nb_model_obj_size(sub, sub_n, &size);
         if (status != NB_CODEC_OK) {
             return status;
         }
@@ -309,9 +309,9 @@ static int decode_elem(const cJSON* v, nb_codec_json_type_t type, void* dest,
         if (!nested) {
             return NB_CODEC_OUT_OF_MEMORY;
         }
-        status = fill_object(v, nested, sub, sub_n);
+        status = nb_fill_object(v, nested, sub, sub_n);
         if (status != NB_CODEC_OK) {
-            clear_object(nested, sub, sub_n, 1);
+            nb_clear_object(nested, sub, sub_n, 1);
             return status;
         }
         *(void**)dest = nested;
@@ -321,13 +321,13 @@ static int decode_elem(const cJSON* v, nb_codec_json_type_t type, void* dest,
         if (!cJSON_IsObject(v)) {
             return NB_CODEC_TYPE_MISMATCH;
         }
-        return fill_object(v, dest, sub, sub_n);
+        return nb_fill_object(v, dest, sub, sub_n);
     default:
         return NB_CODEC_INVALID_ARGUMENT;
     }
 }
 
-static int decode_array(const cJSON* v, void* base, const nb_codec_json_model_t* field) {
+static int nb_decode_array(const cJSON* v, void* base, const nb_codec_json_model_t* field) {
     size_t i;
     size_t elem_size;
     size_t count;
@@ -337,7 +337,7 @@ static int decode_array(const cJSON* v, void* base, const nb_codec_json_model_t*
     if (!cJSON_IsArray(v)) {
         return NB_CODEC_TYPE_MISMATCH;
     }
-    status = model_elem_size(field, &elem_size);
+    status = nb_model_elem_size(field, &elem_size);
     if (status != NB_CODEC_OK) {
         return status;
     }
@@ -350,7 +350,7 @@ static int decode_array(const cJSON* v, void* base, const nb_codec_json_model_t*
         return NB_CODEC_LIMIT_EXCEEDED;
     }
     for (i = 0; i < (size_t)n; i++) {
-        status = decode_elem(cJSON_GetArrayItem(v, (int)i), field->param.array.elem_type,
+        status = nb_decode_elem(cJSON_GetArrayItem(v, (int)i), field->param.array.elem_type,
                              (char*)base + i * elem_size, field->param.array.model,
                              field->param.array.model_count);
         if (status != NB_CODEC_OK) {
@@ -360,7 +360,7 @@ static int decode_array(const cJSON* v, void* base, const nb_codec_json_model_t*
     return NB_CODEC_OK;
 }
 
-static int decode_vec(const cJSON* v, nb_codec_json_vec_t* vec, const nb_codec_json_model_t* field) {
+static int nb_decode_vec(const cJSON* v, nb_codec_json_vec_t* vec, const nb_codec_json_model_t* field) {
     size_t i;
     size_t elem_size;
     size_t n;
@@ -371,7 +371,7 @@ static int decode_vec(const cJSON* v, nb_codec_json_vec_t* vec, const nb_codec_j
     if (!cJSON_IsArray(v)) {
         return NB_CODEC_TYPE_MISMATCH;
     }
-    status = model_elem_size(field, &elem_size);
+    status = nb_model_elem_size(field, &elem_size);
     if (status != NB_CODEC_OK) {
         return status;
     }
@@ -393,11 +393,11 @@ static int decode_vec(const cJSON* v, nb_codec_json_vec_t* vec, const nb_codec_j
         return NB_CODEC_OUT_OF_MEMORY;
     }
     for (i = 0; i < n; i++) {
-        status = decode_elem(cJSON_GetArrayItem(v, (int)i), field->param.array.elem_type,
+        status = nb_decode_elem(cJSON_GetArrayItem(v, (int)i), field->param.array.elem_type,
                              (char*)items + i * elem_size, field->param.array.model,
                              field->param.array.model_count);
         if (status != NB_CODEC_OK) {
-            clear_array_items(items, i, field);
+            nb_clear_array_items(items, i, field);
             free(items);
             return status;
         }
@@ -407,7 +407,7 @@ static int decode_vec(const cJSON* v, nb_codec_json_vec_t* vec, const nb_codec_j
     return NB_CODEC_OK;
 }
 
-static int decode_map(const cJSON* v, nb_codec_json_map_t* map, const nb_codec_json_model_t* field) {
+static int nb_decode_map(const cJSON* v, nb_codec_json_map_t* map, const nb_codec_json_model_t* field) {
     size_t size;
     size_t index = 0;
     nb_codec_json_map_entry_t* entries;
@@ -418,7 +418,7 @@ static int decode_map(const cJSON* v, nb_codec_json_map_t* map, const nb_codec_j
     if (!cJSON_IsObject(v)) {
         return NB_CODEC_TYPE_MISMATCH;
     }
-    status = model_obj_size(field->param.sub.model, field->param.sub.count, &size);
+    status = nb_model_obj_size(field->param.sub.model, field->param.sub.count, &size);
     if (status != NB_CODEC_OK) {
         return status;
     }
@@ -441,23 +441,23 @@ static int decode_map(const cJSON* v, nb_codec_json_map_t* map, const nb_codec_j
         void* value;
 
         if (!item->string) {
-            clear_map(map, field);
+            nb_clear_map(map, field);
             return NB_CODEC_MALFORMED;
         }
-        status = dup_string(item->string, strlen(item->string), &entries[index].key);
+        status = nb_dup_string(item->string, strlen(item->string), &entries[index].key);
         if (status != NB_CODEC_OK) {
-            clear_map(map, field);
+            nb_clear_map(map, field);
             return status;
         }
         value = calloc(1, size);
         if (!value) {
-            clear_map(map, field);
+            nb_clear_map(map, field);
             return NB_CODEC_OUT_OF_MEMORY;
         }
         entries[index].value = value;
-        status = fill_object(item, value, field->param.sub.model, field->param.sub.count);
+        status = nb_fill_object(item, value, field->param.sub.model, field->param.sub.count);
         if (status != NB_CODEC_OK) {
-            clear_map(map, field);
+            nb_clear_map(map, field);
             return status;
         }
         index++;
@@ -465,7 +465,7 @@ static int decode_map(const cJSON* v, nb_codec_json_map_t* map, const nb_codec_j
     return NB_CODEC_OK;
 }
 
-static int fill_object(const cJSON* json, void* obj, const nb_codec_json_model_t* model,
+static int nb_fill_object(const cJSON* json, void* obj, const nb_codec_json_model_t* model,
                        size_t model_count) {
     size_t i;
     int status;
@@ -488,9 +488,9 @@ static int fill_object(const cJSON* json, void* obj, const nb_codec_json_model_t
         if (!item) {
             continue;
         }
-        dest = field_ptr(obj, field->offset);
+        dest = nb_field_ptr(obj, field->offset);
         if (field->presence_offset != 0) {
-            *(uint8_t*)field_ptr(obj, field->presence_offset) = 1u;
+            *(uint8_t*)nb_field_ptr(obj, field->presence_offset) = 1u;
         }
         switch (field->type) {
         case NB_CODEC_JSON_CHARS: {
@@ -514,25 +514,25 @@ static int fill_object(const cJSON* json, void* obj, const nb_codec_json_model_t
             break;
         }
         case NB_CODEC_JSON_ARRAY:
-            status = decode_array(item, dest, field);
+            status = nb_decode_array(item, dest, field);
             if (status != NB_CODEC_OK) {
                 return status;
             }
             break;
         case NB_CODEC_JSON_VEC:
-            status = decode_vec(item, (nb_codec_json_vec_t*)dest, field);
+            status = nb_decode_vec(item, (nb_codec_json_vec_t*)dest, field);
             if (status != NB_CODEC_OK) {
                 return status;
             }
             break;
         case NB_CODEC_JSON_MAP:
-            status = decode_map(item, (nb_codec_json_map_t*)dest, field);
+            status = nb_decode_map(item, (nb_codec_json_map_t*)dest, field);
             if (status != NB_CODEC_OK) {
                 return status;
             }
             break;
         default:
-            status = decode_elem(item, field->type, dest, field->param.sub.model,
+            status = nb_decode_elem(item, field->type, dest, field->param.sub.model,
                                  field->param.sub.count);
             if (status != NB_CODEC_OK) {
                 return status;
@@ -543,13 +543,13 @@ static int fill_object(const cJSON* json, void* obj, const nb_codec_json_model_t
     return NB_CODEC_OK;
 }
 
-static int should_skip_field(const void* obj, const nb_codec_json_model_t* field) {
+static int nb_should_skip_field(const void* obj, const nb_codec_json_model_t* field) {
     const void* dest;
 
     if (field->presence_offset != 0) {
-        return *(const uint8_t*)field_cptr(obj, field->presence_offset) == 0;
+        return *(const uint8_t*)nb_field_cptr(obj, field->presence_offset) == 0;
     }
-    dest = field_cptr(obj, field->offset);
+    dest = nb_field_cptr(obj, field->offset);
     if (field->type == NB_CODEC_JSON_STRING || field->type == NB_CODEC_JSON_RAW ||
         field->type == NB_CODEC_JSON_STRUCT) {
         return *(void* const*)dest == NULL;
@@ -557,17 +557,17 @@ static int should_skip_field(const void* obj, const nb_codec_json_model_t* field
     return 0;
 }
 
-static int encode_elem(const void* src, nb_codec_json_type_t type, const nb_codec_json_model_t* sub,
+static int nb_encode_elem(const void* src, nb_codec_json_type_t type, const nb_codec_json_model_t* sub,
                        size_t sub_n, cJSON** out);
 
-static int encode_array(const void* base, const nb_codec_json_model_t* field, size_t count,
+static int nb_encode_array(const void* base, const nb_codec_json_model_t* field, size_t count,
                         cJSON** out) {
     size_t i;
     size_t elem_size;
     cJSON* array;
     int status;
 
-    status = model_elem_size(field, &elem_size);
+    status = nb_model_elem_size(field, &elem_size);
     if (status != NB_CODEC_OK) {
         return status;
     }
@@ -577,7 +577,7 @@ static int encode_array(const void* base, const nb_codec_json_model_t* field, si
     }
     for (i = 0; i < count; i++) {
         cJSON* item = NULL;
-        status = encode_elem((const char*)base + i * elem_size, field->param.array.elem_type,
+        status = nb_encode_elem((const char*)base + i * elem_size, field->param.array.elem_type,
                              field->param.array.model, field->param.array.model_count, &item);
         if (status != NB_CODEC_OK || !cJSON_AddItemToArray(array, item)) {
             cJSON_Delete(item);
@@ -589,7 +589,7 @@ static int encode_array(const void* base, const nb_codec_json_model_t* field, si
     return NB_CODEC_OK;
 }
 
-static int encode_elem(const void* src, nb_codec_json_type_t type, const nb_codec_json_model_t* sub,
+static int nb_encode_elem(const void* src, nb_codec_json_type_t type, const nb_codec_json_model_t* sub,
                        size_t sub_n, cJSON** out) {
     cJSON* item = NULL;
 
@@ -689,10 +689,10 @@ static int encode_elem(const void* src, nb_codec_json_type_t type, const nb_code
             item = cJSON_CreateNull();
             break;
         }
-        return encode_object(nested, sub, sub_n, out);
+        return nb_encode_object(nested, sub, sub_n, out);
     }
     case NB_CODEC_JSON_INLINE:
-        return encode_object(src, sub, sub_n, out);
+        return nb_encode_object(src, sub, sub_n, out);
     default:
         return NB_CODEC_INVALID_ARGUMENT;
     }
@@ -704,7 +704,7 @@ static int encode_elem(const void* src, nb_codec_json_type_t type, const nb_code
     return NB_CODEC_OK;
 }
 
-static int encode_map(const nb_codec_json_map_t* map, const nb_codec_json_model_t* field, cJSON** out) {
+static int nb_encode_map(const nb_codec_json_map_t* map, const nb_codec_json_model_t* field, cJSON** out) {
     cJSON* root;
     size_t i;
 
@@ -723,7 +723,7 @@ static int encode_map(const nb_codec_json_map_t* map, const nb_codec_json_model_
             cJSON_Delete(root);
             return NB_CODEC_INVALID_ARGUMENT;
         }
-        status = encode_object(map->entries[i].value, field->param.sub.model,
+        status = nb_encode_object(map->entries[i].value, field->param.sub.model,
                                field->param.sub.count, &item);
         if (status != NB_CODEC_OK || !cJSON_AddItemToObject(root, map->entries[i].key, item)) {
             cJSON_Delete(item);
@@ -735,7 +735,7 @@ static int encode_map(const nb_codec_json_map_t* map, const nb_codec_json_model_
     return NB_CODEC_OK;
 }
 
-static int encode_object(const void* obj, const nb_codec_json_model_t* model, size_t model_count,
+static int nb_encode_object(const void* obj, const nb_codec_json_model_t* model, size_t model_count,
                          cJSON** out) {
     cJSON* root;
     size_t i;
@@ -765,10 +765,10 @@ static int encode_object(const void* obj, const nb_codec_json_model_t* model, si
             cJSON_Delete(root);
             return NB_CODEC_INVALID_ARGUMENT;
         }
-        if (should_skip_field(obj, field)) {
+        if (nb_should_skip_field(obj, field)) {
             continue;
         }
-        dest = field_cptr(obj, field->offset);
+        dest = nb_field_cptr(obj, field->offset);
         switch (field->type) {
         case NB_CODEC_JSON_CHARS: {
             const char* s = (const char*)dest;
@@ -793,7 +793,7 @@ static int encode_object(const void* obj, const nb_codec_json_model_t* model, si
             break;
         }
         case NB_CODEC_JSON_ARRAY:
-            status = encode_array(dest, field, field->param.array.elem_count, &item);
+            status = nb_encode_array(dest, field, field->param.array.elem_count, &item);
             break;
         case NB_CODEC_JSON_VEC: {
             const nb_codec_json_vec_t* vec = (const nb_codec_json_vec_t*)dest;
@@ -801,14 +801,14 @@ static int encode_object(const void* obj, const nb_codec_json_model_t* model, si
                 cJSON_Delete(root);
                 return NB_CODEC_INVALID_ARGUMENT;
             }
-            status = encode_array(vec->items, field, vec->count, &item);
+            status = nb_encode_array(vec->items, field, vec->count, &item);
             break;
         }
         case NB_CODEC_JSON_MAP:
-            status = encode_map((const nb_codec_json_map_t*)dest, field, &item);
+            status = nb_encode_map((const nb_codec_json_map_t*)dest, field, &item);
             break;
         default:
-            status = encode_elem(dest, field->type, field->param.sub.model, field->param.sub.count,
+            status = nb_encode_elem(dest, field->type, field->param.sub.model, field->param.sub.count,
                                  &item);
             break;
         }
@@ -822,11 +822,11 @@ static int encode_object(const void* obj, const nb_codec_json_model_t* model, si
     return NB_CODEC_OK;
 }
 
-static void clear_array_items(void* base, size_t count, const nb_codec_json_model_t* field) {
+static void nb_clear_array_items(void* base, size_t count, const nb_codec_json_model_t* field) {
     size_t i;
     size_t elem_size;
 
-    if (!base || model_elem_size(field, &elem_size) != NB_CODEC_OK) {
+    if (!base || nb_model_elem_size(field, &elem_size) != NB_CODEC_OK) {
         return;
     }
     for (i = 0; i < count; i++) {
@@ -839,13 +839,13 @@ static void clear_array_items(void* base, size_t count, const nb_codec_json_mode
             break;
         case NB_CODEC_JSON_STRUCT:
             if (*(void**)elem) {
-                clear_object(*(void**)elem, field->param.array.model,
+                nb_clear_object(*(void**)elem, field->param.array.model,
                              field->param.array.model_count, 1);
                 *(void**)elem = NULL;
             }
             break;
         case NB_CODEC_JSON_INLINE:
-            clear_object(elem, field->param.array.model, field->param.array.model_count, 0);
+            nb_clear_object(elem, field->param.array.model, field->param.array.model_count, 0);
             break;
         default:
             break;
@@ -853,7 +853,7 @@ static void clear_array_items(void* base, size_t count, const nb_codec_json_mode
     }
 }
 
-static void clear_object(void* obj, const nb_codec_json_model_t* model, size_t model_count,
+static void nb_clear_object(void* obj, const nb_codec_json_model_t* model, size_t model_count,
                          int free_root) {
     size_t i;
 
@@ -867,9 +867,9 @@ static void clear_object(void* obj, const nb_codec_json_model_t* model, size_t m
         if (field->type == NB_CODEC_JSON_OBJ) {
             continue;
         }
-        dest = field_ptr(obj, field->offset);
+        dest = nb_field_ptr(obj, field->offset);
         if (field->presence_offset != 0) {
-            *(uint8_t*)field_ptr(obj, field->presence_offset) = 0u;
+            *(uint8_t*)nb_field_ptr(obj, field->presence_offset) = 0u;
         }
         switch (field->type) {
         case NB_CODEC_JSON_STRING:
@@ -879,26 +879,26 @@ static void clear_object(void* obj, const nb_codec_json_model_t* model, size_t m
             break;
         case NB_CODEC_JSON_STRUCT:
             if (*(void**)dest) {
-                clear_object(*(void**)dest, field->param.sub.model, field->param.sub.count, 1);
+                nb_clear_object(*(void**)dest, field->param.sub.model, field->param.sub.count, 1);
                 *(void**)dest = NULL;
             }
             break;
         case NB_CODEC_JSON_INLINE:
-            clear_object(dest, field->param.sub.model, field->param.sub.count, 0);
+            nb_clear_object(dest, field->param.sub.model, field->param.sub.count, 0);
             break;
         case NB_CODEC_JSON_ARRAY:
-            clear_array_items(dest, field->param.array.elem_count, field);
+            nb_clear_array_items(dest, field->param.array.elem_count, field);
             break;
         case NB_CODEC_JSON_VEC: {
             nb_codec_json_vec_t* vec = (nb_codec_json_vec_t*)dest;
-            clear_array_items(vec->items, vec->count, field);
+            nb_clear_array_items(vec->items, vec->count, field);
             free(vec->items);
             vec->items = NULL;
             vec->count = 0;
             break;
         }
         case NB_CODEC_JSON_MAP:
-            clear_map((nb_codec_json_map_t*)dest, field);
+            nb_clear_map((nb_codec_json_map_t*)dest, field);
             break;
         default:
             break;
@@ -909,7 +909,7 @@ static void clear_object(void* obj, const nb_codec_json_model_t* model, size_t m
     }
 }
 
-static void clear_map(nb_codec_json_map_t* map, const nb_codec_json_model_t* field) {
+static void nb_clear_map(nb_codec_json_map_t* map, const nb_codec_json_model_t* field) {
     size_t i;
 
     if (!map) {
@@ -918,7 +918,7 @@ static void clear_map(nb_codec_json_map_t* map, const nb_codec_json_model_t* fie
     for (i = 0; i < map->count; i++) {
         free(map->entries[i].key);
         if (map->entries[i].value) {
-            clear_object(map->entries[i].value, field->param.sub.model,
+            nb_clear_object(map->entries[i].value, field->param.sub.model,
                          field->param.sub.count, 1);
         }
     }
@@ -953,7 +953,7 @@ static int nb_codec_json_parse(const char* json, cJSON** out) {
     return *out ? NB_CODEC_OK : NB_CODEC_MALFORMED;
 }
 
-static int decode_root(const char* json, const nb_codec_json_model_t* model, size_t model_count,
+static int nb_decode_root(const char* json, const nb_codec_json_model_t* model, size_t model_count,
                        void* into, void** allocated) {
     cJSON* root;
     size_t size = 0;
@@ -964,7 +964,7 @@ static int decode_root(const char* json, const nb_codec_json_model_t* model, siz
         (into != NULL && allocated != NULL)) {
         return NB_CODEC_INVALID_ARGUMENT;
     }
-    status = model_obj_size(model, model_count, &size);
+    status = nb_model_obj_size(model, model_count, &size);
     if (status != NB_CODEC_OK) {
         return status;
     }
@@ -990,10 +990,10 @@ static int decode_root(const char* json, const nb_codec_json_model_t* model, siz
             return NB_CODEC_OUT_OF_MEMORY;
         }
     }
-    status = fill_object(root, obj, model, model_count);
+    status = nb_fill_object(root, obj, model, model_count);
     cJSON_Delete(root);
     if (status != NB_CODEC_OK) {
-        clear_object(obj, model, model_count, allocated != NULL);
+        nb_clear_object(obj, model, model_count, allocated != NULL);
         return status;
     }
     if (allocated) {
@@ -1008,7 +1008,7 @@ int nb_codec_json_decode(const char* json, const nb_codec_json_model_t* model, s
         return NB_CODEC_INVALID_ARGUMENT;
     }
     *obj = NULL;
-    return decode_root(json, model, model_count, NULL, obj);
+    return nb_decode_root(json, model, model_count, NULL, obj);
 }
 
 int nb_codec_json_decode_into(const char* json, const nb_codec_json_model_t* model,
@@ -1016,7 +1016,7 @@ int nb_codec_json_decode_into(const char* json, const nb_codec_json_model_t* mod
     if (!obj) {
         return NB_CODEC_INVALID_ARGUMENT;
     }
-    return decode_root(json, model, model_count, obj, NULL);
+    return nb_decode_root(json, model, model_count, obj, NULL);
 }
 
 int nb_codec_json_encode(const void* obj, const nb_codec_json_model_t* model, size_t model_count,
@@ -1030,12 +1030,12 @@ int nb_codec_json_encode(const void* obj, const nb_codec_json_model_t* model, si
         return NB_CODEC_INVALID_ARGUMENT;
     }
     *json = NULL;
-    status = model_obj_size(model, model_count, &size);
+    status = nb_model_obj_size(model, model_count, &size);
     if (status != NB_CODEC_OK) {
         return status;
     }
     (void)size;
-    status = encode_object(obj, model, model_count, &root);
+    status = nb_encode_object(obj, model, model_count, &root);
     if (status != NB_CODEC_OK) {
         cJSON_Delete(root);
         return status;
@@ -1050,11 +1050,11 @@ int nb_codec_json_encode(const void* obj, const nb_codec_json_model_t* model, si
 }
 
 void nb_codec_json_clear(void* obj, const nb_codec_json_model_t* model, size_t model_count) {
-    clear_object(obj, model, model_count, 0);
+    nb_clear_object(obj, model, model_count, 0);
 }
 
 void nb_codec_json_free(void* obj, const nb_codec_json_model_t* model, size_t model_count) {
-    clear_object(obj, model, model_count, 1);
+    nb_clear_object(obj, model, model_count, 1);
 }
 
 void nb_codec_json_free_string(char* json) {
@@ -1066,5 +1066,5 @@ int nb_codec_json_fill_object(const struct cJSON* node, const nb_codec_json_mode
     if (!node || !obj) {
         return NB_CODEC_INVALID_ARGUMENT;
     }
-    return fill_object(node, obj, model, model_count);
+    return nb_fill_object(node, obj, model, model_count);
 }

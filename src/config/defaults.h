@@ -1,16 +1,16 @@
-#ifndef ZRI_CONFIG_DEFAULTS_H
-#define ZRI_CONFIG_DEFAULTS_H
+#ifndef NB_CONFIG_DEFAULTS_H
+#define NB_CONFIG_DEFAULTS_H
 
 /*
  * 配置默认值 / 范围 / 语义总表（单一真源）。
  *
  * config 解析、校验与 node 装配都引用这里，避免同一默认值散落在多处导致漂移。
- * 表中“0”多数表示“使用默认”，由 node_create 兜底为下表值。
+ * 表中“0”多数表示“使用默认”，由 nb_node_create 兜底为下表值。
  *
  * 项                        默认               范围                 语义
  * ------------------------- ------------------ -------------------- --------------------
  * io_threads                0(=硬件并发)       1..IO_MAX            poller 分片线程数
- * handler_threads           0(关)              0..ZRI_MAX_HANDLER   worker 线程池
+ * handler_threads           0(关)              0..NB_MAX_HANDLER   worker 线程池
  * handler_max_concurrency   0(不限)            0..N                 worker 在途上限
  * max_inflight              65536              0..N                 客户端 pending 上限
  * max_streams               64                 0..MAX_RECV_STREAMS  并发接收流上限
@@ -29,27 +29,26 @@
 
 #include "caps.h" /* MAX_MSG / MAX_RECV_STREAMS / IO_MAX */
 
-#define ZRI_DEFAULT_NODE_NAME "rpc"
-#define ZRI_DEFAULT_BIND_HOST "0.0.0.0"
-#define ZRI_DEFAULT_DISCOVERY_HOST "255.255.255.255"
-#define ZRI_DEFAULT_HELLO_INTERVAL_MS 3000u
-#define ZRI_DEFAULT_NODE_TTL_MS 9000u
-#define ZRI_DEFAULT_METRICS_SAMPLE_EVERY 1u
+#define NB_DEFAULT_NODE_NAME "rpc"
+#define NB_DEFAULT_BIND_HOST "0.0.0.0"
+#define NB_DEFAULT_DISCOVERY_HOST "255.255.255.255"
+#define NB_DEFAULT_HELLO_INTERVAL_MS 3000u
+#define NB_DEFAULT_NODE_TTL_MS 9000u
+#define NB_DEFAULT_METRICS_SAMPLE_EVERY 1u
 
 /* capacity 常量经 defaults 单点引用，node/config 不再各自挑来源。 */
-#define ZRI_DEFAULT_MAX_MSG MAX_MSG
-#define ZRI_DEFAULT_FRAG_BYTES FRAG_DEFAULT
-#define ZRI_DEFAULT_FRAG_MIN FRAG_MIN
-#define ZRI_DEFAULT_FRAG_MAX FRAG_MAX
-#define ZRI_DEFAULT_MAX_INFLIGHT DEFAULT_MAX_INFLIGHT
-#define ZRI_DEFAULT_MAX_STREAMS MAX_RECV_STREAMS
-#define ZRI_DEFAULT_BACKPRESSURE_BYTES BACKPRESSURE_DEFAULT
-#define ZRI_DEFAULT_RTCP_INTERVAL_MS RTCP_INTERVAL_MS
-#define ZRI_DEFAULT_DISCOVERY_PORT DISCOVERY_PORT
-#define ZRI_DEFAULT_TIMEOUT_MS DEFAULT_TIMEOUT_MS
+#define NB_DEFAULT_MAX_MSG MAX_MSG
+#define NB_DEFAULT_FRAG_BYTES FRAG_DEFAULT
+#define NB_DEFAULT_FRAG_MIN FRAG_MIN
+#define NB_DEFAULT_FRAG_MAX FRAG_MAX
+#define NB_DEFAULT_MAX_INFLIGHT DEFAULT_MAX_INFLIGHT
+#define NB_DEFAULT_MAX_STREAMS MAX_RECV_STREAMS
+#define NB_DEFAULT_BACKPRESSURE_BYTES BACKPRESSURE_DEFAULT
+#define NB_DEFAULT_RTCP_INTERVAL_MS RTCP_INTERVAL_MS
+#define NB_DEFAULT_DISCOVERY_PORT NB_DISCOVERY_PORT
 
 /* 校验上界：超过即判非法（对应旧 config.c 的硬编码）。 */
-#define ZRI_MAX_IO_THREADS 1024u
-#define ZRI_MAX_HANDLER_THREADS 1024u
+#define NB_MAX_IO_THREADS 1024u
+#define NB_MAX_HANDLER_THREADS 1024u
 
-#endif /* ZRI_CONFIG_DEFAULTS_H */
+#endif /* NB_CONFIG_DEFAULTS_H */

@@ -1,5 +1,5 @@
-#ifndef CLIENT_H
-#define CLIENT_H
+#ifndef NB_CLIENT_H
+#define NB_CLIENT_H
 
 /*
  * rpc 客户端 API。
@@ -12,4 +12,4 @@
 #include <proxy.h>
 #include <stub.h>
 
-#endif /* CLIENT_H */
+#endif /* NB_CLIENT_H */

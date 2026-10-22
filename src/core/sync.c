@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct zri_sync_ctx {
+typedef struct nb_sync_ctx {
     ntk_sem *sem;
     ntk_mutex *lock;
     int refs; /* 2：等待方 + 回调方，最后一个释放 */
@@ -15,11 +15,11 @@ typedef struct zri_sync_ctx {
     void *data;
     size_t len;
     uint8_t encoding;
-    metadata_t *metadata;
+    nb_metadata_t *metadata;
     char *message;
-} zri_sync_ctx_t;
+} nb_sync_ctx_t;
 
-static void sync_ctx_put(zri_sync_ctx_t *c)
+static void nb_sync_ctx_put(nb_sync_ctx_t *c)
 {
     int last;
     ntk_mutex_lock(c->lock);
@@ -41,22 +41,22 @@ static void sync_ctx_put(zri_sync_ctx_t *c)
     }
 }
 
-static void sync_response_cb(int status, const response_t *resp, void *user)
+static void nb_sync_response_cb(int status, const nb_response_t *resp, void *user)
 {
-    zri_sync_ctx_t *c = (zri_sync_ctx_t *)user;
+    nb_sync_ctx_t *c = (nb_sync_ctx_t *)user;
     ntk_mutex_lock(c->lock);
     if (c->done) {
         ntk_mutex_unlock(c->lock);
-        sync_ctx_put(c);
+        nb_sync_ctx_put(c);
         return;
     }
     c->status = status;
-    if (status == OK && resp) {
+    if (status == NB_OK && resp) {
         int oom = 0;
         c->app_status = resp->status;
         c->encoding = resp->payload.encoding;
         if (resp->metadata && resp->metadata->count > 0) {
-            c->metadata = (metadata_t *)malloc(sizeof(*c->metadata));
+            c->metadata = (nb_metadata_t *)malloc(sizeof(*c->metadata));
             if (c->metadata) {
                 *c->metadata = *resp->metadata;
             } else {
@@ -89,37 +89,37 @@ static void sync_response_cb(int status, const response_t *resp, void *user)
             c->metadata = NULL;
             free(c->message);
             c->message = NULL;
-            c->status = ERR_NOMEM;
+            c->status = NB_ERR_NOMEM;
         }
     }
     c->done = 1;
     ntk_mutex_unlock(c->lock);
     ntk_sem_post(c->sem, 1);
-    sync_ctx_put(c);
+    nb_sync_ctx_put(c);
 }
 
 /* ---- 同步调用 ---- */
 
-int proxy_call_sync_ex(proxy_t *proxy,
+int nb_proxy_call_sync_ex(nb_proxy_t *proxy,
                        const char *service,
                        const char *method,
-                       const payload_t *request,
-                       const metadata_t *metadata,
-                       response_t *response,
+                       const nb_payload_t *request,
+                       const nb_metadata_t *metadata,
+                       nb_response_t *response,
                        uint64_t timeout_ms,
                        uint64_t *out_request_id)
 {
-    zri_sync_ctx_t *c;
+    nb_sync_ctx_t *c;
     uint64_t id = 0;
     int rc;
 
     if (!proxy || !service || !method || !response) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
     memset(response, 0, sizeof(*response));
-    c = (zri_sync_ctx_t *)calloc(1, sizeof(*c));
+    c = (nb_sync_ctx_t *)calloc(1, sizeof(*c));
     if (!c) {
-        return ERR_NOMEM;
+        return NB_ERR_NOMEM;
     }
     c->sem = ntk_sem_create(0);
     c->lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
@@ -131,28 +131,28 @@ int proxy_call_sync_ex(proxy_t *proxy,
             ntk_mutex_destroy(c->lock);
         }
         free(c);
-        return ERR_NOMEM;
+        return NB_ERR_NOMEM;
     }
     c->refs = 2;
 
-    rc = proxy_call_async_ex(
-        proxy, service, method, request, metadata, sync_response_cb, c, timeout_ms, &id);
-    if (rc != OK) {
-        sync_ctx_put(c);
-        sync_ctx_put(c);
+    rc = nb_proxy_call_async_ex(
+        proxy, service, method, request, metadata, nb_sync_response_cb, c, timeout_ms, &id);
+    if (rc != NB_OK) {
+        nb_sync_ctx_put(c);
+        nb_sync_ctx_put(c);
         return rc;
     }
     if (out_request_id) {
         *out_request_id = id;
     }
-    if (ntk_sem_timedwait(c->sem, (unsigned)(timeout_ms ? timeout_ms : DEFAULT_TIMEOUT_MS)) !=
+    if (ntk_sem_timedwait(c->sem, (unsigned)(timeout_ms ? timeout_ms : NB_DEFAULT_TIMEOUT_MS)) !=
         NTK_OK) {
         /* 取消未完成调用；回调（若仍会到达）会释放它的引用。 */
-        (void)proxy_cancel(proxy, id);
-        sync_ctx_put(c);
-        return ERR_TIMEOUT;
+        (void)nb_proxy_cancel(proxy, id);
+        nb_sync_ctx_put(c);
+        return NB_ERR_TIMEOUT;
     }
-    if (c->status == OK) {
+    if (c->status == NB_OK) {
         response->status = c->app_status;
         response->message = c->message;
         response->metadata = c->metadata;
@@ -162,27 +162,27 @@ int proxy_call_sync_ex(proxy_t *proxy,
         c->data = NULL; /* 所有权转移给调用方 */
         c->message = NULL;
         c->metadata = NULL;
-        sync_ctx_put(c);
-        return OK;
+        nb_sync_ctx_put(c);
+        return NB_OK;
     }
     rc = c->status;
-    sync_ctx_put(c);
+    nb_sync_ctx_put(c);
     return rc;
 }
 
-int proxy_call_sync(proxy_t *proxy,
+int nb_proxy_call_sync(nb_proxy_t *proxy,
                     const char *service,
                     const char *method,
-                    const payload_t *request,
-                    response_t *response,
+                    const nb_payload_t *request,
+                    nb_response_t *response,
                     uint64_t timeout_ms,
                     uint64_t *out_request_id)
 {
-    return proxy_call_sync_ex(
+    return nb_proxy_call_sync_ex(
         proxy, service, method, request, NULL, response, timeout_ms, out_request_id);
 }
 
-void response_release(response_t *response)
+void nb_response_release(nb_response_t *response)
 {
     if (!response) {
         return;

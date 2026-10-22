@@ -13,18 +13,18 @@
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
-    zri_envelope_t view;
-    zri_message_t msg;
+    nb_envelope_t view;
+    nb_message_t msg;
     char route[MAX_ROUTE];
 
     if (size == 0) {
         return 0;
     }
     memset(&view, 0, sizeof(view));
-    if (zri_envelope_decode(data, size, &view) != OK) {
+    if (nb_envelope_decode(data, size, &view) != NB_OK) {
         return 0;
     }
     memset(&msg, 0, sizeof(msg));
-    zri_envelope_to_message(&view, route, sizeof(route), &msg);
+    nb_envelope_to_message(&view, route, sizeof(route), &msg);
     return 0;
 }

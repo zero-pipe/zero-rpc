@@ -18,11 +18,11 @@ extern "C" {
  * is encoded as a v2 frame (fixed header + TLV extensions + payload); see
  * frame.h. All integer fields are big-endian.
  */
-#define ENVELOPE_MAGIC0 ZRI_FRAME_MAGIC0
-#define ENVELOPE_MAGIC1 ZRI_FRAME_MAGIC1
-#define ENVELOPE_VERSION ZRI_FRAME_VERSION
-#define ENVELOPE_OFF_CHECKSUM ZRI_FRAME_OFF_CHECKSUM
-#define ENVELOPE_HDR_LEN ZRI_FRAME_HDR_LEN
+#define ENVELOPE_MAGIC0 NB_FRAME_MAGIC0
+#define ENVELOPE_MAGIC1 NB_FRAME_MAGIC1
+#define ENVELOPE_VERSION NB_FRAME_VERSION
+#define ENVELOPE_OFF_CHECKSUM NB_FRAME_OFF_CHECKSUM
+#define ENVELOPE_HDR_LEN NB_FRAME_HDR_LEN
 
 /*
  * 扩展相对固定头之外的附加字节上限：5 个标准 TLV 头（route/metadata/status/
@@ -39,9 +39,9 @@ extern "C" {
 #define KIND_PING 5   /* 控制面心跳；收到后原样回显 */
 
 #define STREAM_FLAG_STREAM 0x80
-#define STREAM_FLAG_FIRST STREAM_FIRST
-#define STREAM_FLAG_LAST STREAM_LAST
-#define STREAM_FLAG_CANCEL STREAM_CANCEL
+#define STREAM_FLAG_FIRST NB_STREAM_FIRST
+#define STREAM_FLAG_LAST NB_STREAM_LAST
+#define STREAM_FLAG_CANCEL NB_STREAM_CANCEL
 
 /*
  * Single envelope descriptor for both encoding and decoding (no separate
@@ -52,7 +52,7 @@ extern "C" {
  * + payload. KIND_CANCEL is encoded as a CONTROL frame; every other kind is a
  * DATA frame. Absent optional extensions decode to zero/NULL.
  */
-typedef struct zri_envelope {
+typedef struct nb_envelope {
     uint8_t kind;
     uint8_t encoding;
     uint8_t stream_flags;
@@ -71,26 +71,26 @@ typedef struct zri_envelope {
     uint16_t status_msg_len;
     const void *payload;
     size_t payload_len;
-} zri_envelope_t;
+} nb_envelope_t;
 
 /* 编码后的总字节数（header + extensions + payload）。 */
-size_t zri_envelope_size(const zri_envelope_t *envelope);
+size_t nb_envelope_size(const nb_envelope_t *envelope);
 /*
  * 只编码 header + extensions（payload_len 仍写入头部），payload 由调用方紧随
  * 其后发送。返回前缀字节数，0 表示失败。
  */
-size_t zri_envelope_encode_prefix(uint8_t *buf, size_t cap, const zri_envelope_t *envelope);
-size_t zri_envelope_encode(uint8_t *buf, size_t cap, const zri_envelope_t *envelope);
-int zri_envelope_decode(const uint8_t *buf, size_t len, zri_envelope_t *view);
+size_t nb_envelope_encode_prefix(uint8_t *buf, size_t cap, const nb_envelope_t *envelope);
+size_t nb_envelope_encode(uint8_t *buf, size_t cap, const nb_envelope_t *envelope);
+int nb_envelope_decode(const uint8_t *buf, size_t len, nb_envelope_t *view);
 
 /*
  * 把解码后的 envelope 转成统一消息上下文。route 会被拷贝到调用方提供的
  * route_buf（保持 NUL 结尾），其余字段直接借用 envelope 所在缓冲。
  */
-void zri_envelope_to_message(const zri_envelope_t *envelope,
+void nb_envelope_to_message(const nb_envelope_t *envelope,
                              char *route_buf,
                              size_t route_cap,
-                             zri_message_t *out);
+                             nb_message_t *out);
 
 #ifdef __cplusplus
 }

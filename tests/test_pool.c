@@ -4,7 +4,7 @@
 
 #include <node.h>
 
-#define RPC_LOG_TAG "test"
+#define NB_LOG_TAG "test"
 #include <log.h>
 
 #include <stdio.h>
@@ -17,14 +17,14 @@ static void *g_remote_obj;
 
 static void pending_probe(void *user)
 {
-    node_t *node = (node_t *)user;
-    zri_pending_t *pending[1024];
+    nb_node_t *node = (nb_node_t *)user;
+    nb_pending_t *pending[1024];
     unsigned i;
 
     memset(pending, 0, sizeof(pending));
     for (i = 0; i < sizeof(pending) / sizeof(pending[0]); i++) {
         pending[i] =
-            zri_pending_add(node, (uint64_t)i + 1, NULL, NULL, 60000, zri_node_poller(node), NULL);
+            nb_pending_add(node, (uint64_t)i + 1, NULL, NULL, 60000, nb_node_poller(node), NULL);
         if (!pending[i]) {
             g_task_ok = 0;
             ntk_sem_post(g_sem, 1);
@@ -32,7 +32,7 @@ static void pending_probe(void *user)
         }
     }
     for (i = 0; i < sizeof(pending) / sizeof(pending[0]); i++) {
-        zri_pending_release(pending[i]);
+        nb_pending_release(pending[i]);
     }
     g_task_ok = 1;
     ntk_sem_post(g_sem, 1);
@@ -41,7 +41,7 @@ static void pending_probe(void *user)
 #define CHECK(cond)                                                     \
     do {                                                                \
         if (!(cond)) {                                                  \
-            rpc_log_error("FAIL %s:%d: %s", __FILE__, __LINE__, #cond); \
+            nb_log_error("FAIL %s:%d: %s", __FILE__, __LINE__, #cond); \
             g_fail = 1;                                                 \
         }                                                               \
     } while (0)
@@ -49,7 +49,7 @@ static void pending_probe(void *user)
 /* 在 poller 线程内验证：当前 poller 正确，且池释放后可复用同一块。 */
 static void pool_probe(void *user)
 {
-    node_t *node = (node_t *)user;
+    nb_node_t *node = (nb_node_t *)user;
     ntk_poller *cur = ntk_poller_current();
     ntk_buf_pool *pool;
     void *a;
@@ -58,7 +58,7 @@ static void pool_probe(void *user)
     size_t cap_b = 0;
 
     g_task_ok = 0;
-    if (cur != zri_node_poller(node)) {
+    if (cur != nb_node_poller(node)) {
         goto done;
     }
     pool = ntk_poller_buf_pool(cur);
@@ -77,23 +77,23 @@ static void pool_probe(void *user)
     }
     ntk_buf_pool_release(pool, b, cap_b);
 
-    /* zri_mem：owner 线程内释放应复用同一块。 */
+    /* nb_mem：owner 线程内释放应复用同一块。 */
     {
-        void *m1 = zri_mem_alloc(64);
+        void *m1 = nb_mem_alloc(64);
         void *m2;
         if (!m1) {
             goto done;
         }
-        zri_mem_free(m1);
-        m2 = zri_mem_alloc(64);
+        nb_mem_free(m1);
+        m2 = nb_mem_alloc(64);
         if (m2 != m1) {
-            zri_mem_free(m2);
+            nb_mem_free(m2);
             goto done;
         }
-        zri_mem_free(m2);
+        nb_mem_free(m2);
     }
     /* 交给主线程跨线程释放：不得崩溃。 */
-    g_remote_obj = zri_mem_alloc(64);
+    g_remote_obj = nb_mem_alloc(64);
     if (!g_remote_obj) {
         goto done;
     }
@@ -104,30 +104,30 @@ done:
 
 int main(void)
 {
-    node_config_t cfg;
-    node_t *node = NULL;
+    nb_node_config_t cfg;
+    nb_node_t *node = NULL;
     unsigned i;
     unsigned n;
 
     memset(&cfg, 0, sizeof(cfg));
     cfg.name = "pooltest";
-    cfg.transport.transport = TRANSPORT_UDP;
+    cfg.transport.transport = NB_TRANSPORT_UDP;
     cfg.transport.bind_host = "127.0.0.1";
-    cfg.mode = MODE_STATIC;
+    cfg.mode = NB_MODE_STATIC;
     cfg.runtime.io_threads = 2;
 
     /* 主线程未绑定 poller。 */
     CHECK(ntk_poller_current() == NULL);
 
-    if (node_create(&cfg, &node) != OK) {
-        rpc_log_error("node create failed");
+    if (nb_node_create(&cfg, &node) != NB_OK) {
+        nb_log_error("node create failed");
         return 1;
     }
 
-    n = ntk_poller_pool_size(zri_node_pool(node));
+    n = ntk_poller_pool_size(nb_node_pool(node));
     CHECK(n >= 1);
     for (i = 0; i < n; i++) {
-        ntk_poller *p = ntk_poller_pool_at(zri_node_pool(node), i);
+        ntk_poller *p = ntk_poller_pool_at(nb_node_pool(node), i);
         CHECK(p != NULL);
         CHECK(ntk_poller_buf_pool(p) != NULL);
     }
@@ -136,10 +136,10 @@ int main(void)
     g_sem = ntk_sem_create(0);
     CHECK(g_sem != NULL);
     if (g_sem) {
-        CHECK(ntk_poller_async(zri_node_poller(node), pool_probe, node, 0) == NTK_OK);
+        CHECK(ntk_poller_async(nb_node_poller(node), pool_probe, node, 0) == NTK_OK);
         CHECK(ntk_sem_timedwait(g_sem, 2000) == NTK_OK);
         CHECK(g_task_ok == 1);
-        CHECK(ntk_poller_async(zri_node_poller(node), pending_probe, node, 0) == NTK_OK);
+        CHECK(ntk_poller_async(nb_node_poller(node), pending_probe, node, 0) == NTK_OK);
         CHECK(ntk_sem_timedwait(g_sem, 2000) == NTK_OK);
         CHECK(g_task_ok == 1);
         ntk_sem_destroy(g_sem);
@@ -148,15 +148,15 @@ int main(void)
 
     /* 跨线程释放（非 owner poller 线程）。 */
     if (g_remote_obj) {
-        zri_mem_free(g_remote_obj);
+        nb_mem_free(g_remote_obj);
         g_remote_obj = NULL;
     }
 
-    node_destroy(node);
+    nb_node_destroy(node);
     if (g_fail) {
-        rpc_log_error("POOL FAIL");
+        nb_log_error("POOL FAIL");
     } else {
-        rpc_log_info("POOL OK");
+        nb_log_info("POOL NB_OK");
     }
     return g_fail ? 1 : 0;
 }

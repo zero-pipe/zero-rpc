@@ -79,11 +79,11 @@ python3 tools/perf/block_matrix.py --build build --duration 5
 python3 tools/perf/block_matrix.py --build build --group executor --group mix
 ```
 
-- `worker`：慢方法注册为 `SERVICE_EXEC_WORKER`，跑在节点 `handler_threads` 线程池；
+- `worker`：慢方法注册为 `NB_SERVICE_EXEC_WORKER`，跑在节点 `handler_threads` 线程池；
   `inline`：同样方法在 poller 内联执行，作为对照；`executor`：慢方法走自定义 executor。
 - 每行输出 fast/block 的 p50/p99、QPS 与失败数。关注 `mix-*` 中 fast 的 p99：
   worker 应接近 `*-r0`（无阻塞）基线，inline 会随阻塞比例明显恶化。
-- `overload-mc*` 验证 `handler_max_concurrency`：超限请求快速返回 `ERR_AGAIN`
+- `overload-mc*` 验证 `handler_max_concurrency`：超限请求快速返回 `NB_ERR_AGAIN`
   （`blk fail` 增加、延迟保持低位），而不是无界排队把 p99 拉高。
 
 **soak（稳定性）**：定速长跑，采样服务端 RSS / fd / 线程数；`rss_growth`

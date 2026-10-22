@@ -7,52 +7,52 @@
  */
 #include <server.h>
 
-#define RPC_LOG_TAG "example"
+#define NB_LOG_TAG "example"
 #include <log.h>
 
 #include <stdlib.h>
 #include <string.h>
 
-static int health_check(const request_t *req, message_view_t *resp, void *user)
+static int health_check(const nb_request_t *req, nb_message_view_t *resp, void *user)
 {
     (void)user;
     /* req->payload 对框架透明：这里原样回显。 */
-    (void)message_view_set_data(resp, req->payload.data, req->payload.len);
+    (void)nb_message_view_set_data(resp, req->payload.data, req->payload.len);
     return 0;
 }
 
 int main(int argc, char **argv)
 {
-    node_config_t cfg;
-    node_t *node = NULL;
-    service_t *svc = NULL;
+    nb_node_config_t cfg;
+    nb_node_t *node = NULL;
+    nb_service_t *svc = NULL;
     uint16_t port = (uint16_t)(argc > 1 ? atoi(argv[1]) : 42410);
     int rc;
 
-    node_config_default(&cfg);
+    nb_node_config_default(&cfg);
     cfg.name = "HealthServer";
-    cfg.transport.transport = TRANSPORT_TCP;
+    cfg.transport.transport = NB_TRANSPORT_TCP;
     cfg.transport.bind_host = "127.0.0.1";
     cfg.transport.data_port = port;
-    cfg.mode = MODE_STATIC;
+    cfg.mode = NB_MODE_STATIC;
     cfg.runtime.io_threads = 1;
 
-    rc = node_create(&cfg, &node);
-    if (rc == OK) {
-        rc = service_create(node, "HealthService", &svc);
+    rc = nb_node_create(&cfg, &node);
+    if (rc == NB_OK) {
+        rc = nb_service_create(node, "HealthService", &svc);
     }
-    if (rc == OK) {
-        rc = service_add_sync_method(svc, "check", health_check, NULL);
+    if (rc == NB_OK) {
+        rc = nb_service_add_sync_method(svc, "check", health_check, NULL);
     }
-    if (rc != OK) {
-        rpc_log_error("server setup failed: %d", rc);
-        node_destroy(node);
+    if (rc != NB_OK) {
+        nb_log_error("server setup failed: %d", rc);
+        nb_node_destroy(node);
         return 1;
     }
 
-    rpc_log_info("service=HealthService method=check endpoint=tcp://127.0.0.1:%u (Ctrl+C to stop)",
+    nb_log_info("service=HealthService method=check endpoint=tcp://127.0.0.1:%u (Ctrl+C to stop)",
                  (unsigned)port);
-    (void)node_spin(node);
-    node_destroy(node);
+    (void)nb_node_spin(node);
+    nb_node_destroy(node);
     return 0;
 }

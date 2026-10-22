@@ -4,7 +4,7 @@
 #include <stddef.h>
 
 /* Poller-local pooled allocation with safe cross-thread fallback release. */
-void *zri_mem_alloc(size_t size);
-void zri_mem_free(void *ptr);
+void *nb_mem_alloc(size_t size);
+void nb_mem_free(void *ptr);
 
 #endif /* MEM_H */

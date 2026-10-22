@@ -10,81 +10,81 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct zri_cancel_task {
-    proxy_t *proxy;
+typedef struct nb_cancel_task {
+    nb_proxy_t *proxy;
     uint64_t id;
-} zri_cancel_task_t;
+} nb_cancel_task_t;
 
-int zri_proxy_resolve(proxy_t *proxy,
+int nb_proxy_resolve(nb_proxy_t *proxy,
                       const char *service,
                       char *ip_out,
                       size_t ip_cap,
                       uint16_t *port_out,
-                      transport_kind_t *transport_out,
+                      nb_transport_kind_t *transport_out,
                       char *scheme_out,
                       size_t scheme_cap,
                       int prefer_stream)
 {
-    stub_target_t target;
+    nb_stub_target_t target;
     if (!proxy) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
     if (proxy->has_endpoint) {
-        zri_copy_str(ip_out, ip_cap, proxy->endpoint_ip, "127.0.0.1");
+        nb_copy_str(ip_out, ip_cap, proxy->endpoint_ip, "127.0.0.1");
         *port_out = proxy->endpoint_port;
         if (transport_out) {
             *transport_out = proxy->endpoint_transport;
         }
         if (scheme_out) {
-            zri_copy_str(scheme_out,
+            nb_copy_str(scheme_out,
                          scheme_cap,
                          proxy->endpoint_scheme[0] ?
                              proxy->endpoint_scheme :
-                             (proxy->endpoint_transport == TRANSPORT_TCP ? "tcp" : "udp"),
+                             (proxy->endpoint_transport == NB_TRANSPORT_TCP ? "tcp" : "udp"),
                          "udp");
         }
-        return OK;
+        return NB_OK;
     }
-    if (zri_node_resolve(proxy->node, service, prefer_stream, &target) != OK) {
-        return ERR_NOTFOUND;
+    if (nb_node_resolve(proxy->node, service, prefer_stream, &target) != NB_OK) {
+        return NB_ERR_NOTFOUND;
     }
-    zri_copy_str(ip_out, ip_cap, target.ip, "0.0.0.0");
+    nb_copy_str(ip_out, ip_cap, target.ip, "0.0.0.0");
     *port_out = target.port;
     if (transport_out) {
         *transport_out = target.transport;
     }
     if (scheme_out) {
-        zri_copy_str(scheme_out, scheme_cap, target.scheme, "udp");
+        nb_copy_str(scheme_out, scheme_cap, target.scheme, "udp");
     }
-    return OK;
+    return NB_OK;
 }
 
 /*
- * proxy 注入到 stub 的发送钩子：复用 zri_proxy_resolve 完成端点覆盖/发现，
+ * proxy 注入到 stub 的发送钩子：复用 nb_proxy_resolve 完成端点覆盖/发现，
  * 再把单条消息交给底层传输。
  */
-static int proxy_stub_send(stub_t *stub,
+static int nb_proxy_stub_send(nb_stub_t *stub,
                            const char *service,
                            const char *method,
-                           const payload_t *payload,
-                           stub_kind_t kind,
+                           const nb_payload_t *payload,
+                           nb_stub_kind_t kind,
                            uint64_t request_id,
                            uint64_t timeout_ms,
                            const void *metadata,
                            uint16_t metadata_len,
-                           stub_target_t *target,
+                           nb_stub_target_t *target,
                            void *user_data)
 {
-    proxy_t *proxy = (proxy_t *)user_data;
-    node_t *node = stub_node(stub);
-    transport_kind_t transport = TRANSPORT_UDP;
+    nb_proxy_t *proxy = (nb_proxy_t *)user_data;
+    nb_node_t *node = nb_stub_node(stub);
+    nb_transport_kind_t transport = NB_TRANSPORT_UDP;
     int prefer_stream;
     if (!proxy || !node) {
-        return ERR_STATE;
+        return NB_ERR_STATE;
     }
     prefer_stream = proxy->prefer_stream_threshold > 0 && payload &&
         payload->len > proxy->prefer_stream_threshold;
-    if (zri_proxy_resolve(proxy,
+    if (nb_proxy_resolve(proxy,
                           service,
                           target->ip,
                           sizeof(target->ip),
@@ -92,60 +92,60 @@ static int proxy_stub_send(stub_t *stub,
                           &transport,
                           target->scheme,
                           sizeof(target->scheme),
-                          prefer_stream) != OK) {
-        return ERR_NOTFOUND;
+                          prefer_stream) != NB_OK) {
+        return NB_ERR_NOTFOUND;
     }
     target->transport = transport;
-    return zri_node_send_call(node,
+    return nb_node_send_call(node,
                               target,
                               service,
                               method,
                               payload,
-                              kind == STUB_EVENT ? KIND_EVENT : KIND_REQUEST,
+                              kind == NB_STUB_EVENT ? KIND_EVENT : KIND_REQUEST,
                               request_id,
                               timeout_ms,
                               metadata,
                               metadata_len);
 }
 
-static void cancel_task_fn(void *user)
+static void nb_cancel_task_fn(void *user)
 {
-    zri_cancel_task_t *t = (zri_cancel_task_t *)user;
-    node_t *node = t->proxy->node;
-    zri_pending_t *p = zri_pending_find(node, t->id);
+    nb_cancel_task_t *t = (nb_cancel_task_t *)user;
+    nb_node_t *node = t->proxy->node;
+    nb_pending_t *p = nb_pending_find(node, t->id);
     if (p) {
         /*
          * 先通知服务端取消（best-effort），再本地回调。服务端据此跳过仍在排队
-         * 的 worker 任务；已运行的 handler 可通过 call_canceled() 自行提前退出。
+         * 的 worker 任务；已运行的 handler 可通过 nb_call_canceled() 自行提前退出。
          */
         if (p->has_req && p->port) {
-            stub_target_t target;
+            nb_stub_target_t target;
             memset(&target, 0, sizeof(target));
-            zri_copy_str(target.ip, sizeof(target.ip), p->ip, "0.0.0.0");
-            zri_copy_str(target.scheme, sizeof(target.scheme), p->scheme, "udp");
+            nb_copy_str(target.ip, sizeof(target.ip), p->ip, "0.0.0.0");
+            nb_copy_str(target.scheme, sizeof(target.scheme), p->scheme, "udp");
             target.port = p->port;
             target.transport = p->transport;
-            (void)zri_node_send_call(
+            (void)nb_node_send_call(
                 node, &target, p->service, p->method, NULL, KIND_CANCEL, p->request_id, 0, NULL, 0);
         }
-        zri_pending_invoke(p, ERR_NOTFOUND, NULL);
+        nb_pending_invoke(p, NB_ERR_NOTFOUND, NULL);
     }
     free(t);
 }
 
 /* ---- 生命周期 ---- */
 
-int proxy_create(node_t *node, const proxy_options_t *options, proxy_t **out)
+int nb_proxy_create(nb_node_t *node, const nb_proxy_options_t *options, nb_proxy_t **out)
 {
-    proxy_t *p;
-    stub_options_t stub_options;
+    nb_proxy_t *p;
+    nb_stub_options_t stub_options;
     if (!node || !out) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
     *out = NULL;
-    p = (proxy_t *)calloc(1, sizeof(*p));
+    p = (nb_proxy_t *)calloc(1, sizeof(*p));
     if (!p) {
-        return ERR_NOMEM;
+        return NB_ERR_NOMEM;
     }
     p->node = node;
     p->payload_encoding = options ? options->payload_encoding : 0;
@@ -153,72 +153,72 @@ int proxy_create(node_t *node, const proxy_options_t *options, proxy_t **out)
     /* proxy 在 stub 之上注入路由：send 钩子使用 proxy 做解析。 */
     memset(&stub_options, 0, sizeof(stub_options));
     stub_options.payload_encoding = p->payload_encoding;
-    stub_options.send = proxy_stub_send;
+    stub_options.send = nb_proxy_stub_send;
     stub_options.user_data = p;
-    if (stub_create(node, &stub_options, &p->stub) != OK) {
+    if (nb_stub_create(node, &stub_options, &p->stub) != NB_OK) {
         free(p);
-        return ERR_NOMEM;
+        return NB_ERR_NOMEM;
     }
     *out = p;
-    return OK;
+    return NB_OK;
 }
 
-void proxy_destroy(proxy_t *proxy)
+void nb_proxy_destroy(nb_proxy_t *proxy)
 {
     if (!proxy) {
         return;
     }
     /* 先取消该 proxy 名下在途调用；回调在 poller 上完成后再释放 proxy/stub。 */
     if (proxy->stub) {
-        (void)zri_stub_cancel_all(proxy->stub, ERR_CLOSED);
+        (void)nb_stub_cancel_all(proxy->stub, NB_ERR_CLOSED);
     }
-    stub_destroy(proxy->stub);
+    nb_stub_destroy(proxy->stub);
     free(proxy);
 }
 
 /* ---- 目标端点 ---- */
 
-int proxy_set_endpoint(proxy_t *proxy, const char *ip, uint16_t port, transport_kind_t transport)
+int nb_proxy_set_endpoint(nb_proxy_t *proxy, const char *ip, uint16_t port, nb_transport_kind_t transport)
 {
     if (!proxy || !ip || !port) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
-    zri_copy_str(proxy->endpoint_ip, sizeof(proxy->endpoint_ip), ip, "127.0.0.1");
+    nb_copy_str(proxy->endpoint_ip, sizeof(proxy->endpoint_ip), ip, "127.0.0.1");
     proxy->endpoint_port = port;
     proxy->endpoint_transport = transport;
-    zri_copy_str(proxy->endpoint_scheme,
+    nb_copy_str(proxy->endpoint_scheme,
                  sizeof(proxy->endpoint_scheme),
-                 transport == TRANSPORT_TCP ? "tcp" : "udp",
+                 transport == NB_TRANSPORT_TCP ? "tcp" : "udp",
                  "udp");
     proxy->has_endpoint = 1;
-    return OK;
+    return NB_OK;
 }
 
-int proxy_set_endpoint_uri(proxy_t *proxy, const char *endpoint)
+int nb_proxy_set_endpoint_uri(nb_proxy_t *proxy, const char *endpoint)
 {
-    endpoint_t parsed;
-    if (!proxy || !endpoint || endpoint_parse(endpoint, &parsed) != OK || parsed.port == 0) {
-        return ERR_INVALID;
+    nb_endpoint_t parsed;
+    if (!proxy || !endpoint || nb_endpoint_parse(endpoint, &parsed) != NB_OK || parsed.port == 0) {
+        return NB_ERR_INVALID;
     }
-    zri_copy_str(proxy->endpoint_ip, sizeof(proxy->endpoint_ip), parsed.host, "127.0.0.1");
-    zri_copy_str(proxy->endpoint_scheme, sizeof(proxy->endpoint_scheme), parsed.scheme, "tcp");
+    nb_copy_str(proxy->endpoint_ip, sizeof(proxy->endpoint_ip), parsed.host, "127.0.0.1");
+    nb_copy_str(proxy->endpoint_scheme, sizeof(proxy->endpoint_scheme), parsed.scheme, "tcp");
     proxy->endpoint_port = parsed.port;
     proxy->endpoint_transport = parsed.transport;
     proxy->has_endpoint = 1;
-    return OK;
+    return NB_OK;
 }
 
 /* ---- Unary 调用 ---- */
 
-typedef struct zri_proxy_cb_ctx {
-    proxy_t *proxy;
+typedef struct nb_proxy_cb_ctx {
+    nb_proxy_t *proxy;
     response_fn cb;
     void *user;
-} zri_proxy_cb_ctx_t;
+} nb_proxy_cb_ctx_t;
 
-static void proxy_response_wrapper(int status, const response_t *resp, void *user)
+static void nb_proxy_response_wrapper(int status, const nb_response_t *resp, void *user)
 {
-    zri_proxy_cb_ctx_t *ctx = (zri_proxy_cb_ctx_t *)user;
+    nb_proxy_cb_ctx_t *ctx = (nb_proxy_cb_ctx_t *)user;
     if (!ctx) {
         return;
     }
@@ -231,10 +231,10 @@ static void proxy_response_wrapper(int status, const response_t *resp, void *use
     free(ctx);
 }
 
-int proxy_set_interceptor(proxy_t *proxy, const proxy_interceptor_t *interceptor)
+int nb_proxy_set_interceptor(nb_proxy_t *proxy, const nb_proxy_interceptor_t *interceptor)
 {
     if (!proxy) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
     if (interceptor) {
         proxy->interceptor = *interceptor;
@@ -243,54 +243,54 @@ int proxy_set_interceptor(proxy_t *proxy, const proxy_interceptor_t *interceptor
         memset(&proxy->interceptor, 0, sizeof(proxy->interceptor));
         proxy->has_interceptor = 0;
     }
-    return OK;
+    return NB_OK;
 }
 
-int proxy_call_async_ex(proxy_t *proxy,
+int nb_proxy_call_async_ex(nb_proxy_t *proxy,
                         const char *service,
                         const char *method,
-                        const payload_t *payload,
-                        const metadata_t *metadata,
+                        const nb_payload_t *payload,
+                        const nb_metadata_t *metadata,
                         response_fn cb,
                         void *user,
                         uint64_t timeout_ms,
                         uint64_t *out_request_id)
 {
-    const metadata_t *use_meta = metadata;
-    metadata_t meta;
-    zri_proxy_cb_ctx_t *ctx = NULL;
+    const nb_metadata_t *use_meta = metadata;
+    nb_metadata_t meta;
+    nb_proxy_cb_ctx_t *ctx = NULL;
     response_fn use_cb = cb;
     void *use_user = user;
     uint64_t timeout = timeout_ms;
     int rc;
 
     if (!proxy || !proxy->node || !proxy->stub || !service || !method || !cb) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
     if (proxy->has_interceptor && proxy->interceptor.before) {
         if (metadata) {
             meta = *metadata;
         } else {
-            metadata_init(&meta);
+            nb_metadata_init(&meta);
         }
         rc = proxy->interceptor.before(proxy->interceptor.ctx, service, method, &meta, &timeout);
-        if (rc != OK) {
+        if (rc != NB_OK) {
             return rc;
         }
         use_meta = meta.count ? &meta : NULL;
     }
     if (proxy->has_interceptor && proxy->interceptor.after) {
-        ctx = (zri_proxy_cb_ctx_t *)calloc(1, sizeof(*ctx));
+        ctx = (nb_proxy_cb_ctx_t *)calloc(1, sizeof(*ctx));
         if (!ctx) {
-            return ERR_NOMEM;
+            return NB_ERR_NOMEM;
         }
         ctx->proxy = proxy;
         ctx->cb = cb;
         ctx->user = user;
-        use_cb = proxy_response_wrapper;
+        use_cb = nb_proxy_response_wrapper;
         use_user = ctx;
     }
-    rc = zri_stub_call_ex(proxy->stub,
+    rc = nb_stub_call_ex(proxy->stub,
                           service,
                           method,
                           payload,
@@ -302,94 +302,94 @@ int proxy_call_async_ex(proxy_t *proxy,
                           timeout,
                           out_request_id,
                           use_meta);
-    if (rc != OK && ctx) {
+    if (rc != NB_OK && ctx) {
         free(ctx);
     }
     return rc;
 }
 
-int proxy_call_async(proxy_t *proxy,
+int nb_proxy_call_async(nb_proxy_t *proxy,
                      const char *service,
                      const char *method,
-                     const payload_t *payload,
+                     const nb_payload_t *payload,
                      response_fn cb,
                      void *user,
                      uint64_t timeout_ms,
                      uint64_t *out_request_id)
 {
-    return proxy_call_async_ex(
+    return nb_proxy_call_async_ex(
         proxy, service, method, payload, NULL, cb, user, timeout_ms, out_request_id);
 }
 
-int proxy_call_event_ex(proxy_t *proxy,
+int nb_proxy_call_event_ex(nb_proxy_t *proxy,
                         const char *service,
                         const char *method,
-                        const payload_t *payload,
-                        const metadata_t *metadata,
+                        const nb_payload_t *payload,
+                        const nb_metadata_t *metadata,
                         uint64_t *out_request_id)
 {
-    const metadata_t *use_meta = metadata;
-    metadata_t meta;
+    const nb_metadata_t *use_meta = metadata;
+    nb_metadata_t meta;
     int rc;
     if (!proxy || !proxy->node || !proxy->stub || !service || !method) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
     if (proxy->has_interceptor && proxy->interceptor.before) {
         uint64_t timeout = 0;
         if (metadata) {
             meta = *metadata;
         } else {
-            metadata_init(&meta);
+            nb_metadata_init(&meta);
         }
         rc = proxy->interceptor.before(proxy->interceptor.ctx, service, method, &meta, &timeout);
-        if (rc != OK) {
+        if (rc != NB_OK) {
             return rc;
         }
         use_meta = meta.count ? &meta : NULL;
     }
-    return stub_call_event_ex(
+    return nb_stub_call_event_ex(
         proxy->stub, service, method, payload, use_meta, out_request_id);
 }
 
-int proxy_call_event(proxy_t *proxy,
+int nb_proxy_call_event(nb_proxy_t *proxy,
                      const char *service,
                      const char *method,
-                     const payload_t *payload,
+                     const nb_payload_t *payload,
                      uint64_t *out_request_id)
 {
-    return proxy_call_event_ex(proxy, service, method, payload, NULL, out_request_id);
+    return nb_proxy_call_event_ex(proxy, service, method, payload, NULL, out_request_id);
 }
 
 /* ---- 调用控制 ---- */
 
-int proxy_cancel(proxy_t *proxy, uint64_t request_id)
+int nb_proxy_cancel(nb_proxy_t *proxy, uint64_t request_id)
 {
-    zri_cancel_task_t *t;
+    nb_cancel_task_t *t;
     if (!proxy || !proxy->node || !request_id) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
-    t = (zri_cancel_task_t *)calloc(1, sizeof(*t));
+    t = (nb_cancel_task_t *)calloc(1, sizeof(*t));
     if (!t) {
-        return ERR_NOMEM;
+        return NB_ERR_NOMEM;
     }
     t->proxy = proxy;
     t->id = request_id;
     {
-        ntk_poller *owner = zri_pending_owner(proxy->node, request_id);
-        if (ntk_poller_async(owner ? owner : proxy->node->poller, cancel_task_fn, t, 1) != NTK_OK) {
+        ntk_poller *owner = nb_pending_owner(proxy->node, request_id);
+        if (ntk_poller_async(owner ? owner : proxy->node->poller, nb_cancel_task_fn, t, 1) != NTK_OK) {
             free(t);
-            return ERR_IO;
+            return NB_ERR_IO;
         }
     }
-    return OK;
+    return NB_OK;
 }
 
 /* ---- 流式调用 ---- */
 
-int proxy_call_stream(proxy_t *proxy,
+int nb_proxy_call_stream(nb_proxy_t *proxy,
                       const char *service,
                       const char *method,
-                      const payload_t *request,
+                      const nb_payload_t *request,
                       response_chunk_fn on_chunk,
                       stream_done_fn on_done,
                       void *user,
@@ -397,9 +397,9 @@ int proxy_call_stream(proxy_t *proxy,
                       uint64_t *out_request_id)
 {
     if (!proxy || !proxy->node || !proxy->stub || !service || !method || !on_chunk || !on_done) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
-    return zri_stub_call_ex(proxy->stub,
+    return nb_stub_call_ex(proxy->stub,
                             service,
                             method,
                             request,
@@ -414,26 +414,26 @@ int proxy_call_stream(proxy_t *proxy,
 }
 
 /* RTO 重传：按保存的请求参数重发（同一 msg_id）。 */
-void zri_pending_retx(node_t *node, zri_pending_t *p)
+void nb_pending_retx(nb_node_t *node, nb_pending_t *p)
 {
-    stub_target_t target;
-    payload_t pl;
+    nb_stub_target_t target;
+    nb_payload_t pl;
     uint64_t now;
     uint64_t remaining;
     if (!node || !p || !p->has_req) {
         return;
     }
     memset(&target, 0, sizeof(target));
-    zri_copy_str(target.ip, sizeof(target.ip), p->ip, "0.0.0.0");
-    zri_copy_str(target.scheme, sizeof(target.scheme), p->scheme, "udp");
+    nb_copy_str(target.ip, sizeof(target.ip), p->ip, "0.0.0.0");
+    nb_copy_str(target.scheme, sizeof(target.scheme), p->scheme, "udp");
     target.port = p->port;
     target.transport = p->transport;
     pl.data = p->data;
     pl.len = p->len;
     pl.encoding = p->encoding;
-    now = zri_now_ms();
+    now = nb_now_ms();
     remaining = p->deadline_ms > now ? p->deadline_ms - now : 1;
-    (void)zri_node_send_call(node,
+    (void)nb_node_send_call(node,
                              &target,
                              p->service,
                              p->method,
@@ -443,5 +443,5 @@ void zri_pending_retx(node_t *node, zri_pending_t *p)
                              remaining,
                              p->metadata,
                              p->metadata_len);
-    ZRI_METRIC_INC(node->metrics.retries);
+    NB_METRIC_INC(node->metrics.retries);
 }

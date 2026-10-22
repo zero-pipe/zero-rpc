@@ -1,5 +1,5 @@
-#ifndef RUNTIME_H
-#define RUNTIME_H
+#ifndef NB_RUNTIME_H
+#define NB_RUNTIME_H
 
 /*
  * rpc 运行时 API。
@@ -12,4 +12,4 @@
 #include <metrics.h>
 #include <node.h>
 
-#endif /* RUNTIME_H */
+#endif /* NB_RUNTIME_H */

@@ -1,5 +1,5 @@
-#ifndef SERVER_H
-#define SERVER_H
+#ifndef NB_SERVER_H
+#define NB_SERVER_H
 
 /*
  * rpc 服务端 API。
@@ -12,4 +12,4 @@
 #include <message_view.h>
 #include <service.h>
 
-#endif /* SERVER_H */
+#endif /* NB_SERVER_H */

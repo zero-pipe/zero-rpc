@@ -12,9 +12,9 @@ extern "C" {
 TEST(Envelope, RoundTripPreservesStreamMetadata) {
     const char route[] = "upload.chunk";
     const char payload[] = "payload";
-    zri_envelope_t input = {};
+    nb_envelope_t input = {};
     uint8_t buffer[256] = {};
-    zri_envelope_t output = {};
+    nb_envelope_t output = {};
 
     input.kind = KIND_REQUEST;
     input.encoding = 7;
@@ -28,9 +28,9 @@ TEST(Envelope, RoundTripPreservesStreamMetadata) {
     input.payload = payload;
     input.payload_len = sizeof(payload) - 1;
 
-    ASSERT_EQ(zri_envelope_encode(buffer, sizeof(buffer), &input),
-              zri_envelope_size(&input));
-    ASSERT_EQ(zri_envelope_decode(buffer, zri_envelope_size(&input), &output), OK);
+    ASSERT_EQ(nb_envelope_encode(buffer, sizeof(buffer), &input),
+              nb_envelope_size(&input));
+    ASSERT_EQ(nb_envelope_decode(buffer, nb_envelope_size(&input), &output), NB_OK);
     EXPECT_EQ(output.stream_flags, input.stream_flags);
     EXPECT_EQ(output.status, input.status);
     EXPECT_EQ(output.stream_id, input.stream_id);
@@ -41,35 +41,35 @@ TEST(Envelope, RoundTripPreservesStreamMetadata) {
 }
 
 TEST(ReliableWindow, ReportsMissingSequence) {
-    zri_rx_window_t window;
+    nb_rx_window_t window;
     uint16_t missing[8] = {};
-    zri_rx_window_reset(&window);
-    ASSERT_EQ(zri_rx_window_accept(&window, 100), 1);
-    ASSERT_EQ(zri_rx_window_accept(&window, 102), 1);
-    ASSERT_EQ(zri_rx_window_missing(&window, missing, 8), 1u);
+    nb_rx_window_reset(&window);
+    ASSERT_EQ(nb_rx_window_accept(&window, 100), 1);
+    ASSERT_EQ(nb_rx_window_accept(&window, 102), 1);
+    ASSERT_EQ(nb_rx_window_missing(&window, missing, 8), 1u);
     EXPECT_EQ(missing[0], 101);
 }
 
 TEST(Reassembly, RejectsOutOfBoundsFragment) {
-    zri_reasm_t reasm;
-    zri_reasm_init(&reasm);
-    zri_reasm_slot_t *slot = zri_reasm_acquire(&reasm, 1, 8, 2, 0);
+    nb_reasm_t reasm;
+    nb_reasm_init(&reasm);
+    nb_reasm_slot_t *slot = nb_reasm_acquire(&reasm, 1, 8, 2, 0);
     ASSERT_NE(slot, nullptr);
-    EXPECT_EQ(zri_reasm_put(slot, 0, 7, reinterpret_cast<const uint8_t *>("xx"), 2), 0);
-    zri_reasm_reset(&reasm);
+    EXPECT_EQ(nb_reasm_put(slot, 0, 7, reinterpret_cast<const uint8_t *>("xx"), 2), 0);
+    nb_reasm_reset(&reasm);
 }
 
 TEST(TxRing, EvictsBySequenceModuloRing) {
-    zri_tx_ring_t ring = {};
-    ASSERT_EQ(zri_tx_ring_ensure(&ring, 32), 1);
-    uint8_t *slot = zri_tx_ring_slot(&ring, 3);
+    nb_tx_ring_t ring = {};
+    ASSERT_EQ(nb_tx_ring_ensure(&ring, 32), 1);
+    uint8_t *slot = nb_tx_ring_slot(&ring, 3);
     ASSERT_NE(slot, nullptr);
     memcpy(slot, "abc", 3);
-    zri_tx_ring_commit(&ring, 3, 3);
+    nb_tx_ring_commit(&ring, 3, 3);
     uint32_t len = 0;
-    ASSERT_NE(zri_tx_ring_get(&ring, 3, &len), nullptr);
+    ASSERT_NE(nb_tx_ring_get(&ring, 3, &len), nullptr);
     EXPECT_EQ(len, 3u);
-    zri_tx_ring_commit(&ring, static_cast<uint16_t>(3 + RTX_RING), 3);
-    EXPECT_EQ(zri_tx_ring_get(&ring, 3, &len), nullptr);
-    zri_tx_ring_cleanup(&ring);
+    nb_tx_ring_commit(&ring, static_cast<uint16_t>(3 + RTX_RING), 3);
+    EXPECT_EQ(nb_tx_ring_get(&ring, 3, &len), nullptr);
+    nb_tx_ring_cleanup(&ring);
 }

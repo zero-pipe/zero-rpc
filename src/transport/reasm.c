@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-void zri_reasm_init(zri_reasm_t *reasm)
+void nb_reasm_init(nb_reasm_t *reasm)
 {
     if (reasm) {
         for (size_t i = 0; i < MAX_REASM; i++) {
@@ -17,14 +17,14 @@ void zri_reasm_init(zri_reasm_t *reasm)
     }
 }
 
-void zri_reasm_set_budget(zri_reasm_t *reasm, uint32_t budget_bytes)
+void nb_reasm_set_budget(nb_reasm_t *reasm, uint32_t budget_bytes)
 {
     if (reasm) {
         reasm->budget_bytes = budget_bytes;
     }
 }
 
-void zri_reasm_release(zri_reasm_t *reasm, zri_reasm_slot_t *slot)
+void nb_reasm_release(nb_reasm_t *reasm, nb_reasm_slot_t *slot)
 {
     if (!slot) {
         return;
@@ -37,28 +37,28 @@ void zri_reasm_release(zri_reasm_t *reasm, zri_reasm_slot_t *slot)
         }
     }
     if (slot->buf) {
-        zri_mem_free(slot->buf);
+        nb_mem_free(slot->buf);
         slot->buf = NULL;
     }
     if (slot->bits) {
-        zri_mem_free(slot->bits);
+        nb_mem_free(slot->bits);
         slot->bits = NULL;
     }
     slot->used = 0;
 }
 
-void zri_reasm_reset(zri_reasm_t *reasm)
+void nb_reasm_reset(nb_reasm_t *reasm)
 {
     if (!reasm) {
         return;
     }
     for (size_t i = 0; i < MAX_REASM; i++) {
-        zri_reasm_release(reasm, &reasm->slots[i]);
+        nb_reasm_release(reasm, &reasm->slots[i]);
     }
     reasm->used_bytes = 0;
 }
 
-zri_reasm_slot_t *zri_reasm_find(zri_reasm_t *reasm, uint32_t msg_id)
+nb_reasm_slot_t *nb_reasm_find(nb_reasm_t *reasm, uint32_t msg_id)
 {
     if (!reasm) {
         return NULL;
@@ -71,10 +71,10 @@ zri_reasm_slot_t *zri_reasm_find(zri_reasm_t *reasm, uint32_t msg_id)
     return NULL;
 }
 
-zri_reasm_slot_t *zri_reasm_acquire(
-    zri_reasm_t *reasm, uint32_t msg_id, uint32_t total_len, uint32_t frag_count, uint64_t now_ms)
+nb_reasm_slot_t *nb_reasm_acquire(
+    nb_reasm_t *reasm, uint32_t msg_id, uint32_t total_len, uint32_t frag_count, uint64_t now_ms)
 {
-    zri_reasm_slot_t *slot = NULL;
+    nb_reasm_slot_t *slot = NULL;
     if (!reasm || frag_count == 0 || (total_len > 0 && frag_count == 0)) {
         return NULL;
     }
@@ -99,19 +99,19 @@ zri_reasm_slot_t *zri_reasm_acquire(
     slot->got = 0;
     slot->created_ms = now_ms;
     slot->base_seq_set = 0;
-    slot->buf = total_len ? (uint8_t *)zri_mem_alloc(total_len) : NULL;
+    slot->buf = total_len ? (uint8_t *)nb_mem_alloc(total_len) : NULL;
     /* bitset 走控制对象池，避免每条消息一次 calloc/free。 */
-    slot->bits = (uint8_t *)zri_mem_alloc((frag_count + 7) / 8);
+    slot->bits = (uint8_t *)nb_mem_alloc((frag_count + 7) / 8);
     if (slot->bits) {
         memset(slot->bits, 0, (frag_count + 7) / 8);
     }
     if ((total_len && !slot->buf) || !slot->bits) {
         if (slot->buf) {
-            zri_mem_free(slot->buf);
+            nb_mem_free(slot->buf);
             slot->buf = NULL;
         }
         if (slot->bits) {
-            zri_mem_free(slot->bits);
+            nb_mem_free(slot->bits);
             slot->bits = NULL;
         }
         slot->used = 0;
@@ -121,8 +121,8 @@ zri_reasm_slot_t *zri_reasm_acquire(
     return slot;
 }
 
-int zri_reasm_put(
-    zri_reasm_slot_t *slot, uint32_t frag_index, uint32_t offset, const uint8_t *data, uint32_t len)
+int nb_reasm_put(
+    nb_reasm_slot_t *slot, uint32_t frag_index, uint32_t offset, const uint8_t *data, uint32_t len)
 {
     if (!slot || !slot->bits || frag_index >= slot->frag_count || offset > slot->total_len ||
         len > slot->total_len - offset || (len > 0 && !data)) {
@@ -139,14 +139,14 @@ int zri_reasm_put(
     return 1;
 }
 
-size_t zri_reasm_missing(const zri_reasm_t *reasm, uint16_t *out, size_t cap)
+size_t nb_reasm_missing(const nb_reasm_t *reasm, uint16_t *out, size_t cap)
 {
     size_t count = 0;
     if (!reasm || !out || cap == 0) {
         return 0;
     }
     for (size_t i = 0; i < MAX_REASM && count < cap; i++) {
-        const zri_reasm_slot_t *slot = &reasm->slots[i];
+        const nb_reasm_slot_t *slot = &reasm->slots[i];
         if (!slot->used || !slot->base_seq_set) {
             continue;
         }
@@ -159,22 +159,22 @@ size_t zri_reasm_missing(const zri_reasm_t *reasm, uint16_t *out, size_t cap)
     return count;
 }
 
-void zri_reasm_expire(zri_reasm_t *reasm,
+void nb_reasm_expire(nb_reasm_t *reasm,
                       uint64_t now_ms,
                       uint64_t timeout_ms,
-                      void (*on_lost)(const zri_reasm_slot_t *slot, void *user),
+                      void (*on_lost)(const nb_reasm_slot_t *slot, void *user),
                       void *user)
 {
     if (!reasm) {
         return;
     }
     for (size_t i = 0; i < MAX_REASM; i++) {
-        zri_reasm_slot_t *slot = &reasm->slots[i];
+        nb_reasm_slot_t *slot = &reasm->slots[i];
         if (slot->used && now_ms - slot->created_ms > timeout_ms) {
             if (on_lost) {
                 on_lost(slot, user);
             }
-            zri_reasm_release(reasm, slot);
+            nb_reasm_release(reasm, slot);
         }
     }
 }

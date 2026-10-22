@@ -1,12 +1,12 @@
 /*
  * 可观测性热路径基准：对比 metrics/log 开关前后的单次开销。
  *
- * 关闭 metrics 时 ZRI_METRIC_* 只剩一次全局标志判断；关闭 log 时
- * rpc_log_* 宏短路、不做任何格式化。用于量化“关掉采集后热路径零成本”。
+ * 关闭 metrics 时 NB_METRIC_* 只剩一次全局标志判断；关闭 log 时
+ * nb_log_* 宏短路、不做任何格式化。用于量化“关掉采集后热路径零成本”。
  *
  * 用法：bench_observability [iterations]
  */
-#include "atomic.h" /* 内部头：ZRI_METRIC_* 与运行期开关 */
+#include "atomic.h" /* 内部头：NB_METRIC_* 与运行期开关 */
 
 #include <config.h>
 #include <log.h>
@@ -28,10 +28,10 @@ static double bench_metric_inc(int enabled, unsigned iters, uint64_t *sink)
     double t0;
     double t1;
 
-    g_zri_metrics_enabled = enabled;
+    nb_metrics_enabled = enabled;
     t0 = now_ns();
     for (i = 0; i < iters; i++) {
-        ZRI_METRIC_INC(v);
+        NB_METRIC_INC(v);
     }
     t1 = now_ns();
     *sink = v;
@@ -45,10 +45,10 @@ static double bench_metric_add(int enabled, unsigned iters, uint64_t *sink)
     double t0;
     double t1;
 
-    g_zri_metrics_enabled = enabled;
+    nb_metrics_enabled = enabled;
     t0 = now_ns();
     for (i = 0; i < iters; i++) {
-        ZRI_METRIC_ADD(v, 7u);
+        NB_METRIC_ADD(v, 7u);
     }
     t1 = now_ns();
     *sink = v;
@@ -62,10 +62,10 @@ static double bench_log_guard(int enabled, unsigned iters, uint64_t *sink)
     double t0;
     double t1;
 
-    rpc_log_configure(enabled, NODE_LOG_INFO);
+    nb_log_configure(enabled, NB_NODE_LOG_INFO);
     t0 = now_ns();
     for (i = 0; i < iters; i++) {
-        acc += (uint64_t)rpc_log_enabled();
+        acc += (uint64_t)nb_log_enabled();
     }
     t1 = now_ns();
     *sink = acc;
@@ -78,10 +78,10 @@ static double bench_log_disabled_macro(unsigned iters)
     double t0;
     double t1;
 
-    rpc_log_configure(0, NODE_LOG_INFO);
+    nb_log_configure(0, NB_NODE_LOG_INFO);
     t0 = now_ns();
     for (i = 0; i < iters; i++) {
-        rpc_log_debug("bench"); /* 关闭时短路，不格式化、不输出 */
+        nb_log_debug("bench"); /* 关闭时短路，不格式化、不输出 */
     }
     t1 = now_ns();
     return (t1 - t0) / (double)iters;
@@ -109,8 +109,8 @@ int main(int argc, char **argv)
     guard_on = bench_log_guard(1, iters, &sink);
     guard_off = bench_log_guard(0, iters, &sink);
     log_off = bench_log_disabled_macro(iters);
-    rpc_log_configure(1, NODE_LOG_INFO);
-    g_zri_metrics_enabled = 1;
+    nb_log_configure(1, NB_NODE_LOG_INFO);
+    nb_metrics_enabled = 1;
 
     printf("iterations=%u\n", iters);
     printf("%-16s %12s %12s %8s\n", "path", "on(ns/op)", "off(ns/op)", "on/off");

@@ -1,8 +1,8 @@
 /*
  * 服务端回复：把 status + payload 编码进响应帧并发出。
  *
- * 从 service.c 拆出，只负责“如何回复”，入口是 reply / reply_bytes /
- * reply_stream 与错误状态回包 zri_service_send_status。
+ * 从 service.c 拆出，只负责“如何回复”，入口是 nb_reply / nb_reply_bytes /
+ * nb_reply_stream 与错误状态回包 nb_service_send_status。
  */
 #include "service_internal.h"
 #include "node_internal.h"
@@ -18,50 +18,50 @@
 
 /*
  * 由请求上下文派生响应上下文：保留路由/回程 token，切换 kind 与 payload。
- * 这样 reply 路径与普通发送共用同一个 zri_message_t 抽象。
+ * 这样 nb_reply 路径与普通发送共用同一个 nb_message_t 抽象。
  */
-static int send_reply(zri_transport_t *transport,
-                      const zri_message_t *request,
+static int nb_send_reply(nb_transport_t *transport,
+                      const nb_message_t *request,
                       int status,
                       const void *metadata,
                       uint16_t metadata_len,
                       const char *message,
                       uint16_t message_len,
-                      const payload_t *payload,
-                      const stream_meta_t *stream,
+                      const nb_payload_t *payload,
+                      const nb_stream_meta_t *stream,
                       uint8_t flags)
 {
-    zri_message_t reply;
+    nb_message_t nb_reply;
     if (!transport || !request) {
-        return ERR_STATE;
+        return NB_ERR_STATE;
     }
-    /* 传输层状态消息缓冲固定为 STATUS_MSG_MAX，这里统一截断避免越界。 */
-    if (message_len > STATUS_MSG_MAX) {
-        message_len = STATUS_MSG_MAX;
+    /* 传输层状态消息缓冲固定为 NB_STATUS_MSG_MAX，这里统一截断避免越界。 */
+    if (message_len > NB_STATUS_MSG_MAX) {
+        message_len = NB_STATUS_MSG_MAX;
     }
-    reply = *request;
-    reply.kind = KIND_RESPONSE;
-    reply.flags = flags;
-    reply.status = status;
-    reply.route = NULL;
-    reply.metadata = metadata;
-    reply.metadata_len = metadata_len;
-    reply.status_msg = message;
-    reply.status_msg_len = message_len;
-    reply.payload = payload ? *payload : (payload_t){ 0 };
+    nb_reply = *request;
+    nb_reply.kind = KIND_RESPONSE;
+    nb_reply.flags = flags;
+    nb_reply.status = status;
+    nb_reply.route = NULL;
+    nb_reply.metadata = metadata;
+    nb_reply.metadata_len = metadata_len;
+    nb_reply.status_msg = message;
+    nb_reply.status_msg_len = message_len;
+    nb_reply.payload = payload ? *payload : (nb_payload_t){ 0 };
     if (stream) {
-        reply.stream = *stream;
-        reply.has_stream = 1;
+        nb_reply.stream = *stream;
+        nb_reply.has_stream = 1;
     }
     {
-        int rc = zri_transport_reply(transport, &reply);
+        int rc = nb_transport_reply(transport, &nb_reply);
         /*
          * 记录 UDP unary 的最终响应，供重复请求（重传）重放；框架状态包、
          * 流式分块、EVENT 不参与去重。
          */
-        if (rc == OK && flags == 0 && !stream && request->kind == KIND_REQUEST &&
-            request->request_id != 0 && transport->kind == TRANSPORT_UDP && transport->node) {
-            zri_dedup_complete(&transport->node->dedup,
+        if (rc == NB_OK && flags == 0 && !stream && request->kind == KIND_REQUEST &&
+            request->request_id != 0 && transport->kind == NB_TRANSPORT_UDP && transport->node) {
+            nb_dedup_complete(&transport->node->dedup,
                                transport,
                                request,
                                status,
@@ -75,8 +75,8 @@ static int send_reply(zri_transport_t *transport,
     }
 }
 
-/* 从 call_t 还原请求上下文（异步 reply 时请求视图已失效，只保留寻址信息）。 */
-static void call_request_context(const call_t *call, zri_message_t *out)
+/* 从 nb_call_t 还原请求上下文（异步 nb_reply 时请求视图已失效，只保留寻址信息）。 */
+static void nb_call_request_context(const nb_call_t *call, nb_message_t *out)
 {
     memset(out, 0, sizeof(*out));
     out->request_id = call->msg_id;
@@ -86,32 +86,32 @@ static void call_request_context(const call_t *call, zri_message_t *out)
 }
 
 /*
- * call 可能来自 poller 的 zri_mem 池，也可能来自 worker 复用池；统一交给
- * zri_worker_call_free 按来源回收，避免对池对象误用 zri_mem_free。
+ * call 可能来自 poller 的 nb_mem 池，也可能来自 worker 复用池；统一交给
+ * nb_worker_call_free 按来源回收，避免对池对象误用 nb_mem_free。
  */
-static void call_release(call_t *call)
+static void nb_call_release(nb_call_t *call)
 {
     if (call) {
-        zri_worker_call_free(call->node, call);
+        nb_worker_call_free(call->node, call);
     }
 }
 
 /*
- * 跨线程回复任务。handler 在 worker 线程执行时，reply() 不能直接碰传输
+ * 跨线程回复任务。handler 在 worker 线程执行时，nb_reply() 不能直接碰传输
  * （UDP/TCP 的 session/link 都是 per-poller 无锁状态），必须把发送回投到
  * 请求到达的 poller。任务自带寻址上下文，不依赖 call 的生命周期。
  */
-typedef struct zri_reply_task {
-    node_t *node;
-    zri_transport_t *transport;
-    zri_peer_token_t token;
-    char peer_ip[ENDPOINT_MAX];
+typedef struct nb_reply_task {
+    nb_node_t *node;
+    nb_transport_t *transport;
+    nb_peer_token_t token;
+    char peer_ip[NB_ENDPOINT_MAX];
     uint16_t peer_port;
     uint32_t msg_id;
     int status;
-    uint8_t metadata[METADATA_WIRE_MAX];
+    uint8_t metadata[NB_METADATA_WIRE_MAX];
     uint16_t metadata_len;
-    char message[STATUS_MSG_MAX];
+    char message[NB_STATUS_MSG_MAX];
     uint16_t message_len;
     uint8_t *data;
     uint8_t inline_data[128]; /* 小响应免一次 malloc */
@@ -121,9 +121,9 @@ typedef struct zri_reply_task {
     unsigned stream_flags;
     uint32_t stream_id;
     uint64_t stream_offset;
-} zri_reply_task_t;
+} nb_reply_task_t;
 
-static void reply_task_destroy(zri_reply_task_t *t)
+static void nb_reply_task_destroy(nb_reply_task_t *t)
 {
     if (!t) {
         return;
@@ -132,19 +132,19 @@ static void reply_task_destroy(zri_reply_task_t *t)
         free(t->data);
     }
     if (t->node && t->node->reply_task_pool.lock) {
-        zri_obj_pool_free(&t->node->reply_task_pool, t);
+        nb_obj_pool_free(&t->node->reply_task_pool, t);
     } else {
         free(t);
     }
 }
 
-static void reply_task_fn(void *user)
+static void nb_reply_task_fn(void *user)
 {
-    zri_reply_task_t *t = (zri_reply_task_t *)user;
-    zri_message_t request;
-    payload_t payload;
-    stream_meta_t stream;
-    const stream_meta_t *stream_ptr = NULL;
+    nb_reply_task_t *t = (nb_reply_task_t *)user;
+    nb_message_t request;
+    nb_payload_t payload;
+    nb_stream_meta_t stream;
+    const nb_stream_meta_t *stream_ptr = NULL;
 
     memset(&request, 0, sizeof(request));
     request.request_id = t->msg_id;
@@ -168,7 +168,7 @@ static void reply_task_fn(void *user)
         stream.offset = t->stream_offset;
         stream_ptr = &stream;
     }
-    (void)send_reply(t->transport,
+    (void)nb_send_reply(t->transport,
                      &request,
                      t->status,
                      t->metadata_len ? t->metadata : NULL,
@@ -178,53 +178,53 @@ static void reply_task_fn(void *user)
                      &payload,
                      stream_ptr,
                      0);
-    reply_task_destroy(t);
+    nb_reply_task_destroy(t);
 }
 
 /*
  * 把回复拷成任务回投 call->poller。release_call 非 0 时，任务接管 call
- * （unary 回复 / STREAM_LAST）；分块响应的中间 chunk 保留 call。
+ * （unary 回复 / NB_STREAM_LAST）；分块响应的中间 chunk 保留 call。
  */
-static int reply_marshal(call_t *call,
+static int nb_reply_marshal(nb_call_t *call,
                          int status,
-                         const payload_t *payload,
-                         const stream_meta_t *stream,
+                         const nb_payload_t *payload,
+                         const nb_stream_meta_t *stream,
                          int release_call,
-                         const metadata_t *metadata,
+                         const nb_metadata_t *metadata,
                          const char *message)
 {
-    zri_reply_task_t *t;
+    nb_reply_task_t *t;
     int free_call = release_call && !call->stream_owned;
 
     if (!call->poller) {
         if (free_call) {
-            call_release(call);
+            nb_call_release(call);
         }
-        return ERR_STATE;
+        return NB_ERR_STATE;
     }
     t = call->node && call->node->reply_task_pool.lock ?
-        (zri_reply_task_t *)zri_obj_pool_alloc(&call->node->reply_task_pool, sizeof(*t)) :
-        (zri_reply_task_t *)calloc(1, sizeof(*t));
+        (nb_reply_task_t *)nb_obj_pool_alloc(&call->node->reply_task_pool, sizeof(*t)) :
+        (nb_reply_task_t *)calloc(1, sizeof(*t));
     if (!t) {
         if (free_call) {
-            call_release(call);
+            nb_call_release(call);
         }
-        return ERR_NOMEM;
+        return NB_ERR_NOMEM;
     }
     memset(t, 0, sizeof(*t));
     t->node = call->node;
     t->transport = call->transport;
     t->token = call->token;
-    zri_copy_str(t->peer_ip, sizeof(t->peer_ip), call->peer_ip, "0.0.0.0");
+    nb_copy_str(t->peer_ip, sizeof(t->peer_ip), call->peer_ip, "0.0.0.0");
     t->peer_port = call->peer_port;
     t->msg_id = call->msg_id;
     t->status = status;
     if (metadata && metadata->count > 0) {
         size_t meta_len = 0;
-        if (metadata_encode(metadata, t->metadata, sizeof(t->metadata), &meta_len) == OK) {
+        if (nb_metadata_encode(metadata, t->metadata, sizeof(t->metadata), &meta_len) == NB_OK) {
             t->metadata_len = (uint16_t)meta_len;
         } else {
-            rpc_log_warn("reply metadata dropped (encode failed): id=%u",
+            nb_log_warn("nb_reply metadata dropped (encode failed): id=%u",
                          (unsigned)t->msg_id);
         }
     }
@@ -241,11 +241,11 @@ static int reply_marshal(call_t *call,
         t->data = payload->len <= sizeof(t->inline_data) ? t->inline_data :
                                                            (uint8_t *)malloc(payload->len);
         if (!t->data) {
-            reply_task_destroy(t);
+            nb_reply_task_destroy(t);
             if (free_call) {
-                call_release(call);
+                nb_call_release(call);
             }
-            return ERR_NOMEM;
+            return NB_ERR_NOMEM;
         }
         memcpy(t->data, payload->data, payload->len);
         t->len = payload->len;
@@ -257,40 +257,40 @@ static int reply_marshal(call_t *call,
         t->stream_id = stream->stream_id;
         t->stream_offset = stream->offset;
     }
-    if (ntk_poller_async(call->poller, reply_task_fn, t, 1) != NTK_OK) {
-        reply_task_destroy(t);
+    if (ntk_poller_async(call->poller, nb_reply_task_fn, t, 1) != NTK_OK) {
+        nb_reply_task_destroy(t);
         if (free_call) {
-            call_release(call);
+            nb_call_release(call);
         }
-        return ERR_IO;
+        return NB_ERR_IO;
     }
     if (free_call) {
-        call_release(call);
+        nb_call_release(call);
     }
-    return OK;
+    return NB_OK;
 }
 
-void zri_service_send_status(zri_transport_t *transport, const zri_message_t *request, int status)
+void nb_service_send_status(nb_transport_t *transport, const nb_message_t *request, int status)
 {
-    payload_t empty;
+    nb_payload_t empty;
     if (!request || request->kind == KIND_EVENT) {
         return;
     }
     memset(&empty, 0, sizeof(empty));
-    (void)send_reply(
-        transport, request, status, NULL, 0, NULL, 0, &empty, NULL, MSG_FLAG_FRAMEWORK_STATUS);
+    (void)nb_send_reply(
+        transport, request, status, NULL, 0, NULL, 0, &empty, NULL, NB_MSG_FLAG_FRAMEWORK_STATUS);
 }
 
 /* ---- 回复 ---- */
 
-void reply_ex(call_t *call,
+void nb_reply_ex(nb_call_t *call,
               int status,
               const char *message,
-              const payload_t *payload,
-              const metadata_t *metadata)
+              const nb_payload_t *payload,
+              const nb_metadata_t *metadata)
 {
-    zri_message_t request;
-    uint8_t meta_buf[METADATA_WIRE_MAX];
+    nb_message_t request;
+    uint8_t meta_buf[NB_METADATA_WIRE_MAX];
     size_t meta_len = 0;
     if (!call || call->replied) {
         return;
@@ -300,22 +300,22 @@ void reply_ex(call_t *call,
         return;
     }
     if (!call->node || !call->transport) {
-        call_release(call);
+        nb_call_release(call);
         return;
     }
     if (metadata && metadata->count > 0) {
-        if (metadata_encode(metadata, meta_buf, sizeof(meta_buf), &meta_len) != OK) {
-            rpc_log_warn("reply metadata dropped (encode failed): id=%u",
+        if (nb_metadata_encode(metadata, meta_buf, sizeof(meta_buf), &meta_len) != NB_OK) {
+            nb_log_warn("nb_reply metadata dropped (encode failed): id=%u",
                          (unsigned)call->msg_id);
             meta_len = 0;
         }
     }
     if (call->poller && !ntk_poller_is_current_thread(call->poller)) {
-        (void)reply_marshal(call, status, payload, NULL, 1, metadata, message);
+        (void)nb_reply_marshal(call, status, payload, NULL, 1, metadata, message);
         return;
     }
-    call_request_context(call, &request);
-    (void)send_reply(call->transport,
+    nb_call_request_context(call, &request);
+    (void)nb_send_reply(call->transport,
                      &request,
                      status,
                      meta_len ? meta_buf : NULL,
@@ -326,34 +326,34 @@ void reply_ex(call_t *call,
                      NULL,
                      0);
     if (!call->stream_owned) {
-        call_release(call);
+        nb_call_release(call);
     }
 }
 
-void reply(call_t *call, int status, const payload_t *payload)
+void nb_reply(nb_call_t *call, int status, const nb_payload_t *payload)
 {
-    reply_ex(call, status, NULL, payload, NULL);
+    nb_reply_ex(call, status, NULL, payload, NULL);
 }
 
-void reply_bytes(call_t *call, int status, const void *data, size_t len)
+void nb_reply_bytes(nb_call_t *call, int status, const void *data, size_t len)
 {
-    payload_t pl;
+    nb_payload_t pl;
     pl.data = data;
     pl.len = len;
     pl.encoding = 0;
-    reply(call, status, &pl);
+    nb_reply(call, status, &pl);
 }
 
-int reply_stream(call_t *call, int status, const chunk_t *chunk)
+int nb_reply_stream(nb_call_t *call, int status, const nb_chunk_t *chunk)
 {
-    zri_message_t request;
-    payload_t payload;
-    stream_meta_t stream;
-    uint8_t meta_buf[METADATA_WIRE_MAX];
+    nb_message_t request;
+    nb_payload_t payload;
+    nb_stream_meta_t stream;
+    uint8_t meta_buf[NB_METADATA_WIRE_MAX];
     size_t meta_len = 0;
     int rc;
     if (!call || !call->node || !call->transport || (chunk && chunk->len > 0 && !chunk->data)) {
-        return ERR_INVALID;
+        return NB_ERR_INVALID;
     }
     memset(&payload, 0, sizeof(payload));
     if (chunk) {
@@ -362,17 +362,17 @@ int reply_stream(call_t *call, int status, const chunk_t *chunk)
         payload.encoding = chunk->encoding;
     }
     memset(&stream, 0, sizeof(stream));
-    stream.flags = chunk ? chunk->flags : STREAM_LAST;
+    stream.flags = chunk ? chunk->flags : NB_STREAM_LAST;
     stream.stream_id = call->msg_id;
     stream.offset = chunk ? chunk->offset : 0;
     stream.total_size = 0;
 
     if (call->poller && !ntk_poller_is_current_thread(call->poller)) {
-        int last = chunk && (chunk->flags & STREAM_LAST);
+        int last = chunk && (chunk->flags & NB_STREAM_LAST);
         if (last) {
             call->replied = 1;
         }
-        return reply_marshal(call,
+        return nb_reply_marshal(call,
                              status,
                              &payload,
                              &stream,
@@ -382,14 +382,14 @@ int reply_stream(call_t *call, int status, const chunk_t *chunk)
     }
 
     if (chunk && chunk->metadata && chunk->metadata->count > 0) {
-        if (metadata_encode(chunk->metadata, meta_buf, sizeof(meta_buf), &meta_len) != OK) {
-            rpc_log_warn("stream chunk metadata dropped (encode failed): id=%u",
+        if (nb_metadata_encode(chunk->metadata, meta_buf, sizeof(meta_buf), &meta_len) != NB_OK) {
+            nb_log_warn("stream chunk metadata dropped (encode failed): id=%u",
                          (unsigned)call->msg_id);
             meta_len = 0;
         }
     }
-    call_request_context(call, &request);
-    rc = send_reply(call->transport,
+    nb_call_request_context(call, &request);
+    rc = nb_send_reply(call->transport,
                     &request,
                     status,
                     meta_len ? meta_buf : NULL,
@@ -399,10 +399,10 @@ int reply_stream(call_t *call, int status, const chunk_t *chunk)
                     &payload,
                     &stream,
                     0);
-    if (chunk && (chunk->flags & STREAM_LAST)) {
+    if (chunk && (chunk->flags & NB_STREAM_LAST)) {
         call->replied = 1;
         if (!call->stream_owned) {
-            call_release(call);
+            nb_call_release(call);
         }
     }
     return rc;

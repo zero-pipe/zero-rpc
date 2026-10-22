@@ -6,17 +6,17 @@
 
 #include <string.h>
 
-volatile int g_zri_metrics_enabled = 1;
-volatile int g_zri_latency_enabled = 1;
-volatile uint32_t g_zri_metrics_sample_every = 1;
+volatile int nb_metrics_enabled = 1;
+volatile int nb_latency_enabled = 1;
+volatile uint32_t nb_metrics_sample_every = 1;
 
 /* 延迟直方图分桶单一真源，node.c / dispatch.c 共用。 */
-const uint32_t zri_latency_bounds[LATENCY_HIST_BUCKETS - 1] = {
+const uint32_t nb_latency_bounds[NB_LATENCY_HIST_BUCKETS - 1] = {
     1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000
 };
 
 #define METRIC(field, type, unit, name) \
-    { name, type, unit, offsetof(metrics_t, field) }
+    { name, type, unit, offsetof(nb_metrics_t, field) }
 
 /* 名称/类型/单位登记（Prometheus 风格命名）。 */
 const nb_metric_desc_t nb_metric_table[] = {
@@ -77,7 +77,7 @@ const nb_metric_desc_t *nb_metric_find(const char *name)
 size_t nb_metric_latency_bounds(const uint32_t **bounds)
 {
     if (bounds) {
-        *bounds = zri_latency_bounds;
+        *bounds = nb_latency_bounds;
     }
-    return LATENCY_HIST_BUCKETS - 1;
+    return NB_LATENCY_HIST_BUCKETS - 1;
 }

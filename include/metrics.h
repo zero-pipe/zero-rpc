@@ -1,5 +1,5 @@
-#ifndef METRICS_H
-#define METRICS_H
+#ifndef NB_METRICS_H
+#define NB_METRICS_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -9,13 +9,13 @@ extern "C" {
 #endif
 
 /* 端到端延迟直方图桶数：<=1,2,5,10,25,50,100,250,500,1000,2500,5000,10000ms，最后一桶为 >10000ms。 */
-#define LATENCY_HIST_BUCKETS 14
+#define NB_LATENCY_HIST_BUCKETS 14
 
-/* 直方图上界（毫秒），共 LATENCY_HIST_BUCKETS-1 个；最后一桶表示 >=10000ms。 */
-extern const uint32_t zri_latency_bounds[LATENCY_HIST_BUCKETS - 1];
+/* 直方图上界（毫秒），共 NB_LATENCY_HIST_BUCKETS-1 个；最后一桶表示 >=10000ms。 */
+extern const uint32_t nb_latency_bounds[NB_LATENCY_HIST_BUCKETS - 1];
 
 /* ---- 节点累计指标 ---- */
-typedef struct metrics {
+typedef struct nb_metrics {
     uint64_t requests_sent;
     uint64_t responses_received;
     uint64_t requests_failed;
@@ -48,22 +48,22 @@ typedef struct metrics {
     uint64_t inflight_handlers;   /* 当前未完成 worker/executor 任务数 */
     uint64_t latency_count;       /* 已完成的端到端采样数 */
     uint64_t latency_sum_ms;      /* 延迟总和，用于计算均值 */
-    uint64_t latency_hist[LATENCY_HIST_BUCKETS];
+    uint64_t latency_hist[NB_LATENCY_HIST_BUCKETS];
     uint64_t latency_p50_ms;      /* 由直方图估算的分位值 */
     uint64_t latency_p90_ms;
     uint64_t latency_p99_ms;
     uint64_t rate_limited;    /* 被 per-peer 入站限速丢弃/回退的请求数 */
     uint64_t streams_rejected; /* 因并发流上限被拒绝的新流数 */
-} metrics_t;
+} nb_metrics_t;
 
 /* ---- 对端链路质量 ---- */
 /*
- * 传输无关的对端链路统计，见 node_peer_stats()。
+ * 传输无关的对端链路统计，见 nb_node_peer_stats()。
  *
- * UDP 由 RTCP SR/RR 填充；TCP 等无链路反馈的传输查询返回 ERR_NOTFOUND。
+ * UDP 由 RTCP SR/RR 填充；TCP 等无链路反馈的传输查询返回 NB_ERR_NOTFOUND。
  * 这里只暴露“链路质量”语义，RTP/RTCP 的具体报文类型不进入公共抽象。
  */
-typedef struct peer_stats {
+typedef struct nb_peer_stats {
     uint32_t local_id;          /* 本端链路标识（UDP: SSRC） */
     uint32_t remote_id;         /* 对端链路标识（UDP: SSRC） */
     uint32_t rtt_ms;            /* 往返时延估计 */
@@ -71,12 +71,12 @@ typedef struct peer_stats {
     int32_t lost;               /* 对端报告的累计丢包 */
     uint64_t feedback_sent;     /* 本端发出的链路反馈包数（UDP: SR+RR） */
     uint64_t feedback_received; /* 本端收到的链路反馈包数（UDP: SR+RR） */
-} peer_stats_t;
+} nb_peer_stats_t;
 
 /* ---- 指标登记表 ----
  *
  * 名称/类型/单位集中登记，导出层（Prometheus 等）只需遍历这张表，不再从
- * 散落的 ZRI_METRIC_INC 调用点猜测语义。offset 为 metrics_t 内字段偏移。
+ * 散落的 NB_METRIC_INC 调用点猜测语义。offset 为 nb_metrics_t 内字段偏移。
  */
 typedef enum nb_metric_type {
     NB_METRIC_COUNTER = 0,
@@ -103,4 +103,4 @@ size_t nb_metric_latency_bounds(const uint32_t **bounds);
 }
 #endif
 
-#endif /* METRICS_H */
+#endif /* NB_METRICS_H */
