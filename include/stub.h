@@ -68,17 +68,17 @@ node_t *stub_node(const stub_t *stub);
 
 /* ---- 调用 ---- */
 /* 单向发送（EVENT）。不等待响应；发送在节点 poller 线程上完成。 */
-int stub_call(stub_t *stub,
-              const char *service,
-              const char *method,
-              const payload_t *payload,
-              uint64_t *out_request_id);
-int stub_call_ex(stub_t *stub,
-                 const char *service,
-                 const char *method,
-                 const payload_t *payload,
-                 const metadata_t *metadata,
-                 uint64_t *out_request_id);
+int stub_call_event(stub_t *stub,
+                    const char *service,
+                    const char *method,
+                    const payload_t *payload,
+                    uint64_t *out_request_id);
+int stub_call_event_ex(stub_t *stub,
+                       const char *service,
+                       const char *method,
+                       const payload_t *payload,
+                       const metadata_t *metadata,
+                       uint64_t *out_request_id);
 
 /*
  * 异步请求。发现并发送后立即返回；响应或超时通过 cb 回调（在 poller 线程）。

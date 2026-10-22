@@ -347,7 +347,7 @@ int proxy_call_event_ex(proxy_t *proxy,
         }
         use_meta = meta.count ? &meta : NULL;
     }
-    return stub_call_ex(
+    return stub_call_event_ex(
         proxy->stub, service, method, payload, use_meta, out_request_id);
 }
 

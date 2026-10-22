@@ -427,12 +427,12 @@ node_t *stub_node(const stub_t *stub)
 
 /* ---- 调用 ---- */
 
-int stub_call_ex(stub_t *stub,
-                 const char *service,
-                 const char *method,
-                 const payload_t *payload,
-                 const metadata_t *metadata,
-                 uint64_t *out_request_id)
+int stub_call_event_ex(stub_t *stub,
+                       const char *service,
+                       const char *method,
+                       const payload_t *payload,
+                       const metadata_t *metadata,
+                       uint64_t *out_request_id)
 {
     zri_stub_task_t *t;
     uint64_t id;
@@ -478,13 +478,13 @@ int stub_call_ex(stub_t *stub,
     return OK;
 }
 
-int stub_call(stub_t *stub,
-              const char *service,
-              const char *method,
-              const payload_t *payload,
-              uint64_t *out_request_id)
+int stub_call_event(stub_t *stub,
+                    const char *service,
+                    const char *method,
+                    const payload_t *payload,
+                    uint64_t *out_request_id)
 {
-    return stub_call_ex(stub, service, method, payload, NULL, out_request_id);
+    return stub_call_event_ex(stub, service, method, payload, NULL, out_request_id);
 }
 
 int zri_stub_call_ex(stub_t *stub,
