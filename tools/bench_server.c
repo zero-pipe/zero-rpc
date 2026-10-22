@@ -123,24 +123,24 @@ int main(int argc, char **argv)
     block_options.echo_request = 1;
     memset(&node_cfg, 0, sizeof(node_cfg));
     node_cfg.name = "bench_server";
-    node_cfg.bind_host = "127.0.0.1";
-    node_cfg.discovery_host = "127.0.0.1";
-    node_cfg.discovery_port = DISCOVERY_PORT;
-    node_cfg.io_threads = 0; /* 0 = auto (hardware_concurrency); O1: was 2 */
+    node_cfg.transport.bind_host = "127.0.0.1";
+    node_cfg.discovery.host = "127.0.0.1";
+    node_cfg.discovery.port = DISCOVERY_PORT;
+    node_cfg.runtime.io_threads = 0; /* 0 = auto (hardware_concurrency); O1: was 2 */
 
     for (index = 1; index < argc; ++index) {
         if (strcmp(argv[index], "--transport") == 0 && index + 1 < argc) {
             const char *t = argv[++index];
-            node_cfg.transport =
+            node_cfg.transport.transport =
                 (strcmp(t, "tcp") == 0 || strcmp(t, "TCP") == 0) ? TRANSPORT_TCP : TRANSPORT_UDP;
         } else if (strcmp(argv[index], "--io-threads") == 0 && index + 1 < argc) {
-            node_cfg.io_threads = (unsigned)atoi(argv[++index]);
+            node_cfg.runtime.io_threads = (unsigned)atoi(argv[++index]);
         } else if (strcmp(argv[index], "--mode") == 0 && index + 1 < argc) {
             mode = (strcmp(argv[++index], "static") == 0) ? MODE_STATIC : MODE_MESH;
         } else if (strcmp(argv[index], "--handler-threads") == 0 && index + 1 < argc) {
-            node_cfg.handler_threads = (unsigned)atoi(argv[++index]);
+            node_cfg.runtime.handler_threads = (unsigned)atoi(argv[++index]);
         } else if (strcmp(argv[index], "--handler-max-concurrency") == 0 && index + 1 < argc) {
-            node_cfg.handler_max_concurrency = (unsigned)strtoul(argv[++index], NULL, 10);
+            node_cfg.runtime.handler_max_concurrency = (unsigned)strtoul(argv[++index], NULL, 10);
         } else if (strcmp(argv[index], "--worker") == 0) {
             use_worker = 1;
         } else if (strcmp(argv[index], "--executor") == 0 && index + 1 < argc) {
@@ -167,17 +167,17 @@ int main(int argc, char **argv)
         } else if (strcmp(argv[index], "--method") == 0 && index + 1 < argc) {
             method_name = argv[++index];
         } else if (strcmp(argv[index], "--bind") == 0 && index + 1 < argc) {
-            node_cfg.bind_host = argv[++index];
+            node_cfg.transport.bind_host = argv[++index];
         } else if (strcmp(argv[index], "--discovery-port") == 0 && index + 1 < argc) {
-            node_cfg.discovery_port = (uint16_t)atoi(argv[++index]);
+            node_cfg.discovery.port = (uint16_t)atoi(argv[++index]);
         } else if (strcmp(argv[index], "--data-port") == 0 && index + 1 < argc) {
-            node_cfg.data_port = (uint16_t)atoi(argv[++index]);
+            node_cfg.transport.data_port = (uint16_t)atoi(argv[++index]);
         } else if (strcmp(argv[index], "--max-msg-bytes") == 0 && index + 1 < argc) {
-            node_cfg.max_msg_bytes = (uint32_t)strtoul(argv[++index], NULL, 10);
+            node_cfg.transport.max_msg_bytes = (uint32_t)strtoul(argv[++index], NULL, 10);
         } else if (strcmp(argv[index], "--backpressure-bytes") == 0 && index + 1 < argc) {
-            node_cfg.backpressure_bytes = (uint32_t)strtoul(argv[++index], NULL, 10);
+            node_cfg.transport.backpressure_bytes = (uint32_t)strtoul(argv[++index], NULL, 10);
         } else if (strcmp(argv[index], "--frag-bytes") == 0 && index + 1 < argc) {
-            node_cfg.frag_bytes = (uint16_t)atoi(argv[++index]);
+            node_cfg.transport.frag_bytes = (uint16_t)atoi(argv[++index]);
         } else if (strcmp(argv[index], "--peer") == 0 && index + 1 < argc) {
             if (peer_count < 16) {
                 snprintf(peer_hosts[peer_count], sizeof(peer_hosts[0]), "%s", argv[++index]);
@@ -283,8 +283,8 @@ int main(int argc, char **argv)
                  node_transport(node) == TRANSPORT_TCP ? "tcp" : "udp",
                  (unsigned)node_data_port(node),
                  (unsigned)node_discovery_port(node),
-                 node_cfg.handler_threads,
-                 node_cfg.handler_max_concurrency,
+                 node_cfg.runtime.handler_threads,
+                 node_cfg.runtime.handler_max_concurrency,
                  use_worker,
                  main_executor_threads,
                  block_worker,

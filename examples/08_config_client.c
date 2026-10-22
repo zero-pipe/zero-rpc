@@ -1,5 +1,5 @@
 /*
- * 08 Config：客户端。同一套扁平配置，通过 routes 静态指向服务端并同步调用。
+ * 08 Config：客户端。同一套嵌套配置，通过 routes 静态指向服务端并同步调用。
  *
  * 用法：example_08_config_client [config.json]
  */

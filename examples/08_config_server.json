@@ -1,8 +1,12 @@
 {
   "name": "echo-server",
   "mode": "static",
-  "io_threads": 2,
-  "bindings": [
-    "tcp://127.0.0.1:42440"
-  ]
+  "runtime": {
+    "io_threads": 2
+  },
+  "transport": {
+    "bindings": [
+      "tcp://127.0.0.1:42440"
+    ]
+  }
 }

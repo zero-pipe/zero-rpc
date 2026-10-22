@@ -111,10 +111,10 @@ int main(void)
 
     memset(&cfg, 0, sizeof(cfg));
     cfg.name = "pooltest";
-    cfg.transport = TRANSPORT_UDP;
-    cfg.bind_host = "127.0.0.1";
+    cfg.transport.transport = TRANSPORT_UDP;
+    cfg.transport.bind_host = "127.0.0.1";
     cfg.mode = MODE_STATIC;
-    cfg.io_threads = 2;
+    cfg.runtime.io_threads = 2;
 
     /* 主线程未绑定 poller。 */
     CHECK(ntk_poller_current() == NULL);

@@ -159,23 +159,23 @@ static int test_rpc_semantics(void)
 
     memset(&scfg, 0, sizeof(scfg));
     scfg.name = "sem-srv";
-    scfg.transport = TRANSPORT_TCP;
-    scfg.bind_host = "127.0.0.1";
-    scfg.discovery_host = "127.0.0.1";
-    scfg.discovery_port = sport;
-    scfg.io_threads = 1;
-    scfg.hello_interval_ms = 200;
-    scfg.node_ttl_ms = 3000;
+    scfg.transport.transport = TRANSPORT_TCP;
+    scfg.transport.bind_host = "127.0.0.1";
+    scfg.discovery.host = "127.0.0.1";
+    scfg.discovery.port = sport;
+    scfg.runtime.io_threads = 1;
+    scfg.discovery.hello_interval_ms = 200;
+    scfg.discovery.node_ttl_ms = 3000;
 
     memset(&ccfg, 0, sizeof(ccfg));
     ccfg.name = "sem-cli";
-    ccfg.transport = TRANSPORT_TCP;
-    ccfg.bind_host = "127.0.0.1";
-    ccfg.discovery_host = "127.0.0.1";
-    ccfg.discovery_port = cport;
-    ccfg.io_threads = 1;
-    ccfg.hello_interval_ms = 200;
-    ccfg.node_ttl_ms = 3000;
+    ccfg.transport.transport = TRANSPORT_TCP;
+    ccfg.transport.bind_host = "127.0.0.1";
+    ccfg.discovery.host = "127.0.0.1";
+    ccfg.discovery.port = cport;
+    ccfg.runtime.io_threads = 1;
+    ccfg.discovery.hello_interval_ms = 200;
+    ccfg.discovery.node_ttl_ms = 3000;
 
     ok.sem = ntk_sem_create(0);
     denied.sem = ntk_sem_create(0);

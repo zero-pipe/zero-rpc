@@ -1,6 +1,7 @@
 #include "codec_json.h"
 
 #include "cJSON.h"
+#include "codec_json_internal.h"
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -1058,4 +1059,12 @@ void nb_codec_json_free(void* obj, const nb_codec_json_model_t* model, size_t mo
 
 void nb_codec_json_free_string(char* json) {
     cJSON_free(json);
+}
+
+int nb_codec_json_fill_object(const struct cJSON* node, const nb_codec_json_model_t* model,
+                              size_t model_count, void* obj) {
+    if (!node || !obj) {
+        return NB_CODEC_INVALID_ARGUMENT;
+    }
+    return fill_object(node, obj, model, model_count);
 }

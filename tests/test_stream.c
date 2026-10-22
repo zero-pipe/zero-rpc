@@ -148,23 +148,23 @@ static int run_case(transport_kind_t transport, const char *label, uint16_t sdis
 
     memset(&scfg, 0, sizeof(scfg));
     scfg.name = "stream-srv";
-    scfg.transport = transport;
-    scfg.bind_host = "127.0.0.1";
-    scfg.discovery_host = "127.0.0.1";
-    scfg.discovery_port = sdisc;
-    scfg.io_threads = 1;
-    scfg.hello_interval_ms = 200;
-    scfg.node_ttl_ms = 3000;
+    scfg.transport.transport = transport;
+    scfg.transport.bind_host = "127.0.0.1";
+    scfg.discovery.host = "127.0.0.1";
+    scfg.discovery.port = sdisc;
+    scfg.runtime.io_threads = 1;
+    scfg.discovery.hello_interval_ms = 200;
+    scfg.discovery.node_ttl_ms = 3000;
 
     memset(&ccfg, 0, sizeof(ccfg));
     ccfg.name = "stream-cli";
-    ccfg.transport = transport;
-    ccfg.bind_host = "127.0.0.1";
-    ccfg.discovery_host = "127.0.0.1";
-    ccfg.discovery_port = cdisc;
-    ccfg.io_threads = 1;
-    ccfg.hello_interval_ms = 200;
-    ccfg.node_ttl_ms = 3000;
+    ccfg.transport.transport = transport;
+    ccfg.transport.bind_host = "127.0.0.1";
+    ccfg.discovery.host = "127.0.0.1";
+    ccfg.discovery.port = cdisc;
+    ccfg.runtime.io_threads = 1;
+    ccfg.discovery.hello_interval_ms = 200;
+    ccfg.discovery.node_ttl_ms = 3000;
 
     if (node_create(&scfg, &server) != OK || node_create(&ccfg, &client) != OK) {
         rpc_log_error("[%s] node create failed", label);

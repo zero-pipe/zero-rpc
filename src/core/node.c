@@ -182,44 +182,44 @@ int node_create(const node_config_t *cfg, node_t **out)
         return ERR_INVALID;
     }
     zri_copy_str(node->name, sizeof(node->name), cfg->name, "rpc");
-    zri_copy_str(node->bind_host, sizeof(node->bind_host), cfg->bind_host, "0.0.0.0");
+    zri_copy_str(node->bind_host, sizeof(node->bind_host), cfg->transport.bind_host, "0.0.0.0");
     zri_copy_str(
-        node->discovery_host, sizeof(node->discovery_host), cfg->discovery_host, "255.255.255.255");
-    node->discovery_port = cfg->discovery_port ? cfg->discovery_port : DISCOVERY_PORT;
-    node->io_threads = cfg->io_threads ? cfg->io_threads : ntk_thread_hardware_concurrency();
+        node->discovery_host, sizeof(node->discovery_host), cfg->discovery.host, "255.255.255.255");
+    node->discovery_port = cfg->discovery.port ? cfg->discovery.port : DISCOVERY_PORT;
+    node->io_threads = cfg->runtime.io_threads ? cfg->runtime.io_threads : ntk_thread_hardware_concurrency();
     if (node->io_threads > IO_MAX) {
         node->io_threads = IO_MAX;
     }
     if (node->io_threads < 1) {
         node->io_threads = 1;
     }
-    node->hello_interval_ms = cfg->hello_interval_ms ? cfg->hello_interval_ms : 3000;
-    node->node_ttl_ms = cfg->node_ttl_ms ? cfg->node_ttl_ms : 9000;
+    node->hello_interval_ms = cfg->discovery.hello_interval_ms ? cfg->discovery.hello_interval_ms : 3000;
+    node->node_ttl_ms = cfg->discovery.node_ttl_ms ? cfg->discovery.node_ttl_ms : 9000;
     node->mode = cfg->mode;
-    node->frag_bytes = cfg->frag_bytes;
+    node->frag_bytes = cfg->transport.frag_bytes;
     if (node->frag_bytes < FRAG_MIN) {
         node->frag_bytes = FRAG_DEFAULT;
     }
     if (node->frag_bytes > FRAG_MAX) {
         node->frag_bytes = FRAG_MAX;
     }
-    node->max_msg_bytes = cfg->max_msg_bytes ? cfg->max_msg_bytes : MAX_MSG;
+    node->max_msg_bytes = cfg->transport.max_msg_bytes ? cfg->transport.max_msg_bytes : MAX_MSG;
     if (node->max_msg_bytes > MAX_MSG_LIMIT) {
         node->max_msg_bytes = MAX_MSG_LIMIT;
     }
     if (node->max_msg_bytes < node->frag_bytes) {
         node->max_msg_bytes = node->frag_bytes;
     }
-    node->bp_high_water = cfg->backpressure_bytes ? cfg->backpressure_bytes : BACKPRESSURE_DEFAULT;
-    node->rtcp_interval_ms = cfg->rtcp_interval_ms ? cfg->rtcp_interval_ms : RTCP_INTERVAL_MS;
-    node->rtcp_disabled = cfg->rtcp_disabled;
-    node->max_recv_streams = cfg->max_streams ? cfg->max_streams : MAX_RECV_STREAMS;
+    node->bp_high_water = cfg->transport.backpressure_bytes ? cfg->transport.backpressure_bytes : BACKPRESSURE_DEFAULT;
+    node->rtcp_interval_ms = cfg->transport.rtcp_interval_ms ? cfg->transport.rtcp_interval_ms : RTCP_INTERVAL_MS;
+    node->rtcp_disabled = cfg->transport.rtcp_disabled;
+    node->max_recv_streams = cfg->runtime.max_streams ? cfg->runtime.max_streams : MAX_RECV_STREAMS;
     if (node->max_recv_streams > MAX_RECV_STREAMS) {
         node->max_recv_streams = MAX_RECV_STREAMS;
     }
-    node->rate_limit_pps = cfg->peer_rate_limit_pps;
-    node->handler_max_concurrency = cfg->handler_max_concurrency;
-    node->max_inflight = cfg->max_inflight ? cfg->max_inflight : DEFAULT_MAX_INFLIGHT;
+    node->rate_limit_pps = cfg->runtime.peer_rate_limit_pps;
+    node->handler_max_concurrency = cfg->runtime.handler_max_concurrency;
+    node->max_inflight = cfg->runtime.max_inflight ? cfg->runtime.max_inflight : DEFAULT_MAX_INFLIGHT;
     {
         const char *dp = getenv("DROP_PERCENT");
         int v = dp ? atoi(dp) : 0;
@@ -313,10 +313,10 @@ int node_create(const node_config_t *cfg, node_t **out)
      * 可选 handler 线程池：把注册为 *_worker 的业务 handler 移出 poller，
      * 避免单个阻塞 handler 卡死整条 poller。回复经 ntk_poller_async 回投。
      */
-    if (cfg->handler_threads > 0) {
+    if (cfg->runtime.handler_threads > 0) {
         ntk_thread_pool_opts_t hopts;
         memset(&hopts, 0, sizeof(hopts));
-        hopts.thread_count = cfg->handler_threads;
+        hopts.thread_count = cfg->runtime.handler_threads;
         hopts.priority = NTK_THREAD_PRIO_NORMAL;
         hopts.auto_start = 1;
         node->handler_pool = ntk_thread_pool_create(&hopts);
@@ -326,11 +326,11 @@ int node_create(const node_config_t *cfg, node_t **out)
         }
     }
 
-    if (cfg->bindings && cfg->binding_count > 0) {
+    if (cfg->transport.bindings && cfg->transport.binding_count > 0) {
         size_t i;
-        for (i = 0; i < cfg->binding_count; i++) {
+        for (i = 0; i < cfg->transport.binding_count; i++) {
             endpoint_t endpoint;
-            const binding_config_t *binding = &cfg->bindings[i];
+            const binding_config_t *binding = &cfg->transport.bindings[i];
             if (!binding->endpoint || endpoint_parse(binding->endpoint, &endpoint) != OK) {
                 node_destroy(node);
                 return ERR_INVALID;
@@ -341,8 +341,8 @@ int node_create(const node_config_t *cfg, node_t **out)
             }
         }
     } else {
-        const char *scheme = cfg->transport == TRANSPORT_TCP ? "tcp" : "udp";
-        if (zri_node_transport_add(node, scheme, node->bind_host, cfg->data_port) != OK) {
+        const char *scheme = cfg->transport.transport == TRANSPORT_TCP ? "tcp" : "udp";
+        if (zri_node_transport_add(node, scheme, node->bind_host, cfg->transport.data_port) != OK) {
             node_destroy(node);
             return ERR_IO;
         }

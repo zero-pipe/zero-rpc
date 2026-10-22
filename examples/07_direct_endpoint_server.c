@@ -25,11 +25,11 @@ int main(void)
 
     memset(&cfg, 0, sizeof(cfg));
     cfg.name = "DirectServer";
-    cfg.transport = TRANSPORT_TCP;
-    cfg.bind_host = "127.0.0.1";
-    cfg.data_port = 42430;
+    cfg.transport.transport = TRANSPORT_TCP;
+    cfg.transport.bind_host = "127.0.0.1";
+    cfg.transport.data_port = 42430;
     cfg.mode = MODE_STATIC;
-    cfg.io_threads = 1;
+    cfg.runtime.io_threads = 1;
 
     rc = node_create(&cfg, &node);
     if (rc == OK) {

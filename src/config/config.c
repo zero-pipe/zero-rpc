@@ -1,44 +1,301 @@
-/* 简单 JSON 配置解析（内置 cJSON）。 */
+/*
+ * 配置加载：模型驱动的 JSON 解析 + 旧的扁平 JSON 兼容层。
+ *
+ * 新格式按模块拆成子对象（runtime / transport / discovery / metrics / log），
+ * 由 codec_json 的 model 描述字段布局后统一填充；旧格式把同样的字段平铺在
+ * 顶层（transport 为字符串、bindings 为 URI 数组），这里在解析时映射进对应
+ * 子结构。两种格式共用同一套校验与默认值。
+ */
 #include <config.h>
+#include <node.h>
 
 #include "cJSON.h"
+#include "codec_json_internal.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-/* 读取可选字符串；字段存在但类型错误或超出容量时返回 ERR_INVALID。 */
-static int cfg_str(char *dst, size_t cap, const cJSON *obj, const char *key, const char *def)
+/* ---- 默认值 ---- */
+
+void node_runtime_config_default(node_runtime_config_t *cfg)
 {
-    const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
+    if (!cfg) {
+        return;
+    }
+    memset(cfg, 0, sizeof(*cfg));
+}
+
+void node_transport_config_default(node_transport_config_t *cfg)
+{
+    if (!cfg) {
+        return;
+    }
+    memset(cfg, 0, sizeof(*cfg));
+    cfg->transport = TRANSPORT_UDP;
+    cfg->bind_host = "0.0.0.0";
+}
+
+void node_discovery_config_default(node_discovery_config_t *cfg)
+{
+    if (!cfg) {
+        return;
+    }
+    memset(cfg, 0, sizeof(*cfg));
+    cfg->host = "255.255.255.255";
+}
+
+void node_metrics_config_default(node_metrics_config_t *cfg)
+{
+    if (!cfg) {
+        return;
+    }
+    memset(cfg, 0, sizeof(*cfg));
+    cfg->sample_every = 1;
+}
+
+void node_log_config_default(node_log_config_t *cfg)
+{
+    if (!cfg) {
+        return;
+    }
+    memset(cfg, 0, sizeof(*cfg));
+    cfg->level = NODE_LOG_INFO;
+}
+
+void node_config_default(node_config_t *cfg)
+{
+    if (!cfg) {
+        return;
+    }
+    memset(cfg, 0, sizeof(*cfg));
+    cfg->name = "rpc";
+    cfg->mode = MODE_MESH;
+    node_runtime_config_default(&cfg->runtime);
+    node_transport_config_default(&cfg->transport);
+    node_discovery_config_default(&cfg->discovery);
+    node_metrics_config_default(&cfg->metrics);
+    node_log_config_default(&cfg->log);
+}
+
+/* ---- 模型驱动的解析中间结构 ---- */
+
+typedef struct cfg_runtime_in {
+    uint32_t io_threads;
+    uint32_t handler_threads;
+    uint32_t handler_max_concurrency;
+    uint32_t max_inflight;
+    uint32_t max_streams;
+    uint32_t peer_rate_limit_pps;
+} cfg_runtime_in_t;
+
+typedef struct cfg_transport_in {
+    char *kind;
+    char *bind_host;
+    uint32_t data_port;
+    uint32_t frag_bytes;
+    uint32_t max_msg_bytes;
+    uint32_t backpressure_bytes;
+    uint32_t rtcp_interval_ms;
+    uint8_t rtcp;
+    uint8_t rtcp_present;
+} cfg_transport_in_t;
+
+typedef struct cfg_discovery_in {
+    char *mode;
+    char *broadcast;
+    uint32_t hello_interval_ms;
+    uint32_t node_ttl_ms;
+} cfg_discovery_in_t;
+
+typedef struct cfg_metrics_in {
+    uint8_t disabled;
+    uint8_t latency_disabled;
+    uint32_t sample_every;
+    uint8_t per_peer_disabled;
+} cfg_metrics_in_t;
+
+typedef struct cfg_log_in {
+    uint8_t disabled;
+    char *level;
+    char *sink;
+    char *file;
+} cfg_log_in_t;
+
+typedef struct cfg_route_in {
+    char *service;
+    char *endpoint;
+} cfg_route_in_t;
+
+typedef struct cfg_binding_in {
+    char *name;
+    char *endpoint;
+} cfg_binding_in_t;
+
+/* 用显式结构体字段偏移描述每个子对象，交给 codec_json 填充。 */
+static const nb_codec_json_model_t g_runtime_model[] = {
+    { NB_CODEC_JSON_OBJ, NULL, 0, 0, { .obj_size = sizeof(cfg_runtime_in_t) } },
+    { NB_CODEC_JSON_U32, "io_threads", offsetof(cfg_runtime_in_t, io_threads), 0, { 0 } },
+    { NB_CODEC_JSON_U32, "handler_threads", offsetof(cfg_runtime_in_t, handler_threads), 0, { 0 } },
+    { NB_CODEC_JSON_U32,
+      "handler_max_concurrency",
+      offsetof(cfg_runtime_in_t, handler_max_concurrency),
+      0,
+      { 0 } },
+    { NB_CODEC_JSON_U32, "max_inflight", offsetof(cfg_runtime_in_t, max_inflight), 0, { 0 } },
+    { NB_CODEC_JSON_U32, "max_streams", offsetof(cfg_runtime_in_t, max_streams), 0, { 0 } },
+    { NB_CODEC_JSON_U32,
+      "peer_rate_limit_pps",
+      offsetof(cfg_runtime_in_t, peer_rate_limit_pps),
+      0,
+      { 0 } },
+};
+
+static const nb_codec_json_model_t g_transport_model[] = {
+    { NB_CODEC_JSON_OBJ, NULL, 0, 0, { .obj_size = sizeof(cfg_transport_in_t) } },
+    { NB_CODEC_JSON_STRING, "kind", offsetof(cfg_transport_in_t, kind), 0, { 0 } },
+    { NB_CODEC_JSON_STRING, "bind_host", offsetof(cfg_transport_in_t, bind_host), 0, { 0 } },
+    { NB_CODEC_JSON_U32, "data_port", offsetof(cfg_transport_in_t, data_port), 0, { 0 } },
+    { NB_CODEC_JSON_U32, "frag_bytes", offsetof(cfg_transport_in_t, frag_bytes), 0, { 0 } },
+    { NB_CODEC_JSON_U32, "max_msg_bytes", offsetof(cfg_transport_in_t, max_msg_bytes), 0, { 0 } },
+    { NB_CODEC_JSON_U32,
+      "backpressure_bytes",
+      offsetof(cfg_transport_in_t, backpressure_bytes),
+      0,
+      { 0 } },
+    { NB_CODEC_JSON_U32,
+      "rtcp_interval_ms",
+      offsetof(cfg_transport_in_t, rtcp_interval_ms),
+      0,
+      { 0 } },
+    { NB_CODEC_JSON_BOOL,
+      "rtcp",
+      offsetof(cfg_transport_in_t, rtcp),
+      offsetof(cfg_transport_in_t, rtcp_present),
+      { 0 } },
+};
+
+static const nb_codec_json_model_t g_discovery_model[] = {
+    { NB_CODEC_JSON_OBJ, NULL, 0, 0, { .obj_size = sizeof(cfg_discovery_in_t) } },
+    { NB_CODEC_JSON_STRING, "mode", offsetof(cfg_discovery_in_t, mode), 0, { 0 } },
+    { NB_CODEC_JSON_STRING, "broadcast", offsetof(cfg_discovery_in_t, broadcast), 0, { 0 } },
+    { NB_CODEC_JSON_U32,
+      "hello_interval_ms",
+      offsetof(cfg_discovery_in_t, hello_interval_ms),
+      0,
+      { 0 } },
+    { NB_CODEC_JSON_U32, "node_ttl_ms", offsetof(cfg_discovery_in_t, node_ttl_ms), 0, { 0 } },
+};
+
+static const nb_codec_json_model_t g_metrics_model[] = {
+    { NB_CODEC_JSON_OBJ, NULL, 0, 0, { .obj_size = sizeof(cfg_metrics_in_t) } },
+    { NB_CODEC_JSON_BOOL, "disabled", offsetof(cfg_metrics_in_t, disabled), 0, { 0 } },
+    { NB_CODEC_JSON_BOOL,
+      "latency_disabled",
+      offsetof(cfg_metrics_in_t, latency_disabled),
+      0,
+      { 0 } },
+    { NB_CODEC_JSON_U32, "sample_every", offsetof(cfg_metrics_in_t, sample_every), 0, { 0 } },
+    { NB_CODEC_JSON_BOOL,
+      "per_peer_disabled",
+      offsetof(cfg_metrics_in_t, per_peer_disabled),
+      0,
+      { 0 } },
+};
+
+static const nb_codec_json_model_t g_log_model[] = {
+    { NB_CODEC_JSON_OBJ, NULL, 0, 0, { .obj_size = sizeof(cfg_log_in_t) } },
+    { NB_CODEC_JSON_BOOL, "disabled", offsetof(cfg_log_in_t, disabled), 0, { 0 } },
+    { NB_CODEC_JSON_STRING, "level", offsetof(cfg_log_in_t, level), 0, { 0 } },
+    { NB_CODEC_JSON_STRING, "sink", offsetof(cfg_log_in_t, sink), 0, { 0 } },
+    { NB_CODEC_JSON_STRING, "file", offsetof(cfg_log_in_t, file), 0, { 0 } },
+};
+
+static const nb_codec_json_model_t g_route_model[] = {
+    { NB_CODEC_JSON_OBJ, NULL, 0, 0, { .obj_size = sizeof(cfg_route_in_t) } },
+    { NB_CODEC_JSON_STRING, "service", offsetof(cfg_route_in_t, service), 0, { 0 } },
+    { NB_CODEC_JSON_STRING, "endpoint", offsetof(cfg_route_in_t, endpoint), 0, { 0 } },
+};
+
+static const nb_codec_json_model_t g_binding_model[] = {
+    { NB_CODEC_JSON_OBJ, NULL, 0, 0, { .obj_size = sizeof(cfg_binding_in_t) } },
+    { NB_CODEC_JSON_STRING, "name", offsetof(cfg_binding_in_t, name), 0, { 0 } },
+    { NB_CODEC_JSON_STRING, "endpoint", offsetof(cfg_binding_in_t, endpoint), 0, { 0 } },
+};
+
+#define CFG_MODEL_N(model_) (sizeof(model_) / sizeof((model_)[0]))
+
+/* ---- 小工具 ---- */
+
+/* 复制字符串到定长缓冲；src 为空时使用 def；超容量返回 ERR_INVALID。 */
+static int cfg_copy(char *dst, size_t cap, const char *src, const char *def)
+{
     int n;
-    if (!item) {
-        snprintf(dst, cap, "%s", def ? def : "");
+    if (!src) {
+        src = def;
+    }
+    if (!src) {
+        if (cap) {
+            dst[0] = '\0';
+        }
         return OK;
     }
-    if (!cJSON_IsString(item) || !item->valuestring) {
-        return ERR_INVALID;
-    }
-    n = snprintf(dst, cap, "%s", item->valuestring);
+    n = snprintf(dst, cap, "%s", src);
     if (n < 0 || (size_t)n >= cap) {
         return ERR_INVALID;
     }
     return OK;
 }
 
-/* 读取可选 u32，并校验整数与范围；缺省返回 def。 */
-static int cfg_u32(const cJSON *obj,
-                   const char *key,
-                   uint32_t def,
-                   uint32_t min,
-                   uint32_t max,
-                   uint32_t *out)
+/* 堆复制字符串；失败返回 NULL。 */
+static char *cfg_dup(const char *src)
 {
-    const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
+    size_t n;
+    char *copy;
+    if (!src) {
+        return NULL;
+    }
+    n = strlen(src);
+    copy = (char *)malloc(n + 1u);
+    if (copy) {
+        memcpy(copy, src, n + 1u);
+    }
+    return copy;
+}
+
+/* 把子对象填充进已清零的中间结构；obj 为 NULL 时保持默认。 */
+static int cfg_fill(const cJSON *obj, const nb_codec_json_model_t *model, size_t n, void *out)
+{
+    if (!obj) {
+        return OK;
+    }
+    return nb_codec_json_fill_object(obj, model, n, out) == NB_CODEC_OK ? OK : ERR_INVALID;
+}
+
+/* 取可选子对象：不存在返回 OK+NULL；存在但类型不对返回 ERR_INVALID。 */
+static int cfg_child(const cJSON *root, const char *key, const cJSON **out)
+{
+    const cJSON *item = cJSON_GetObjectItemCaseSensitive(root, key);
+    *out = NULL;
+    if (!item) {
+        return OK;
+    }
+    if (!cJSON_IsObject(item)) {
+        return ERR_INVALID;
+    }
+    *out = item;
+    return OK;
+}
+
+/* 读取顶层可选 u32（旧扁平格式），校验整数与范围。 */
+static int cfg_legacy_u32(
+    const cJSON *root, const char *key, uint32_t min, uint32_t max, uint32_t *out)
+{
+    const cJSON *item = cJSON_GetObjectItemCaseSensitive(root, key);
     double d;
     uint32_t v;
     if (!item) {
-        *out = def;
         return OK;
     }
     if (!cJSON_IsNumber(item)) {
@@ -56,47 +313,118 @@ static int cfg_u32(const cJSON *obj,
     return OK;
 }
 
-static int cfg_transport(const cJSON *obj,
-                         const char *key,
-                         transport_kind_t def,
-                         transport_kind_t *out)
+/* 复制顶层可选字符串（旧扁平格式）为堆字符串。 */
+static int cfg_legacy_str(const cJSON *root, const char *key, char **out)
 {
-    const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
+    const cJSON *item = cJSON_GetObjectItemCaseSensitive(root, key);
+    size_t n;
+    char *copy;
     if (!item) {
-        *out = def;
         return OK;
     }
     if (!cJSON_IsString(item) || !item->valuestring) {
         return ERR_INVALID;
     }
-    if (strcmp(item->valuestring, "tcp") == 0 || strcmp(item->valuestring, "TCP") == 0) {
+    n = strlen(item->valuestring);
+    copy = (char *)malloc(n + 1u);
+    if (!copy) {
+        return ERR_NOMEM;
+    }
+    memcpy(copy, item->valuestring, n + 1u);
+    free(*out);
+    *out = copy;
+    return OK;
+}
+
+/* 复制顶层可选 bool（旧扁平格式）到 present/flag。 */
+static int cfg_legacy_bool(const cJSON *root, const char *key, uint8_t *flag, uint8_t *present)
+{
+    const cJSON *item = cJSON_GetObjectItemCaseSensitive(root, key);
+    if (!item) {
+        return OK;
+    }
+    if (!cJSON_IsBool(item)) {
+        return ERR_INVALID;
+    }
+    *flag = cJSON_IsTrue(item) ? 1u : 0u;
+    if (present) {
+        *present = 1u;
+    }
+    return OK;
+}
+
+static int cfg_transport_kind(const char *text, transport_kind_t *out)
+{
+    if (!text) {
+        return ERR_INVALID;
+    }
+    if (strcmp(text, "tcp") == 0 || strcmp(text, "TCP") == 0) {
         *out = TRANSPORT_TCP;
         return OK;
     }
-    if (strcmp(item->valuestring, "udp") == 0 || strcmp(item->valuestring, "UDP") == 0) {
+    if (strcmp(text, "udp") == 0 || strcmp(text, "UDP") == 0) {
         *out = TRANSPORT_UDP;
         return OK;
     }
     return ERR_INVALID;
 }
 
-static int cfg_mode(const cJSON *obj, const char *key, node_mode_t def, node_mode_t *out)
+static int cfg_mode(const char *text, node_mode_t *out)
 {
-    const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
-    if (!item) {
-        *out = def;
-        return OK;
-    }
-    if (!cJSON_IsString(item) || !item->valuestring) {
+    if (!text) {
         return ERR_INVALID;
     }
-    if (strcmp(item->valuestring, "static") == 0 || strcmp(item->valuestring, "STATIC") == 0) {
+    if (strcmp(text, "static") == 0 || strcmp(text, "STATIC") == 0) {
         *out = MODE_STATIC;
         return OK;
     }
-    if (strcmp(item->valuestring, "mesh") == 0 || strcmp(item->valuestring, "MESH") == 0) {
+    if (strcmp(text, "mesh") == 0 || strcmp(text, "MESH") == 0) {
         *out = MODE_MESH;
         return OK;
+    }
+    return ERR_INVALID;
+}
+
+/* discovery.mode：mesh=开启发现，static/off/none=关闭。 */
+static int cfg_discovery_mode(const char *text, int *disabled)
+{
+    if (!text) {
+        return ERR_INVALID;
+    }
+    if (strcmp(text, "mesh") == 0 || strcmp(text, "MESH") == 0 || strcmp(text, "on") == 0) {
+        *disabled = 0;
+        return OK;
+    }
+    if (strcmp(text, "static") == 0 || strcmp(text, "off") == 0 || strcmp(text, "none") == 0 ||
+        strcmp(text, "disabled") == 0) {
+        *disabled = 1;
+        return OK;
+    }
+    return ERR_INVALID;
+}
+
+static int cfg_log_level(const char *text, uint8_t *out)
+{
+    static const struct {
+        const char *name;
+        uint8_t level;
+    } levels[] = {
+        { "assert", NODE_LOG_ASSERT },
+        { "error", NODE_LOG_ERROR },
+        { "warn", NODE_LOG_WARN },
+        { "info", NODE_LOG_INFO },
+        { "debug", NODE_LOG_DEBUG },
+        { "verbose", NODE_LOG_VERBOSE },
+    };
+    size_t i;
+    if (!text) {
+        return ERR_INVALID;
+    }
+    for (i = 0; i < sizeof(levels) / sizeof(levels[0]); i++) {
+        if (strcmp(text, levels[i].name) == 0) {
+            *out = levels[i].level;
+            return OK;
+        }
     }
     return ERR_INVALID;
 }
@@ -114,52 +442,385 @@ static int cfg_host_port(const char *text, char *host, size_t host_cap, uint16_t
     if (n < 0 || (size_t)n >= sizeof(uri) || endpoint_parse(uri, &endpoint) != OK) {
         return ERR_INVALID;
     }
-    snprintf(host, host_cap, "%s", endpoint.host);
+    if (cfg_copy(host, host_cap, endpoint.host, NULL) != OK) {
+        return ERR_INVALID;
+    }
     *port = endpoint.port;
     return OK;
 }
 
-/* 配置一个 binding：接受 "scheme://host:port" 字符串或 {name,endpoint} 对象。 */
-static int cfg_binding(config_t *out, const cJSON *item)
+/* ---- 子结构装载 ---- */
+
+static int load_runtime(const cJSON *root, cfg_runtime_in_t *in)
 {
-    binding_endpoint_t *binding;
-    endpoint_t endpoint;
-    int n;
-    if (!out || !item || out->binding_count >= CONFIG_MAX_BINDINGS) {
+    const cJSON *obj = NULL;
+    if (cfg_child(root, "runtime", &obj) != OK) {
         return ERR_INVALID;
     }
-    binding = &out->bindings[out->binding_count];
-    if (cJSON_IsString(item) && item->valuestring) {
-        n = snprintf(binding->endpoint, sizeof(binding->endpoint), "%s", item->valuestring);
-        if (n < 0 || (size_t)n >= sizeof(binding->endpoint)) {
+    if (obj) {
+        return cfg_fill(obj, g_runtime_model, CFG_MODEL_N(g_runtime_model), in);
+    }
+    /* 旧扁平格式：字段在顶层。 */
+    if (cfg_legacy_u32(root, "io_threads", 0, 1024, &in->io_threads) != OK ||
+        cfg_legacy_u32(root, "handler_threads", 0, 1024, &in->handler_threads) != OK ||
+        cfg_legacy_u32(root,
+                       "handler_max_concurrency",
+                       0,
+                       UINT32_MAX,
+                       &in->handler_max_concurrency) != OK ||
+        cfg_legacy_u32(root, "max_inflight", 0, UINT32_MAX, &in->max_inflight) != OK ||
+        cfg_legacy_u32(root, "max_streams", 0, UINT32_MAX, &in->max_streams) != OK ||
+        cfg_legacy_u32(root, "peer_rate_limit_pps", 0, UINT32_MAX, &in->peer_rate_limit_pps) !=
+            OK) {
+        return ERR_INVALID;
+    }
+    return OK;
+}
+
+static int load_transport(const cJSON *root, cfg_transport_in_t *in, const cJSON **bindings)
+{
+    const cJSON *item = cJSON_GetObjectItemCaseSensitive(root, "transport");
+    *bindings = NULL;
+    if (item && cJSON_IsObject(item)) {
+        if (cfg_fill(item, g_transport_model, CFG_MODEL_N(g_transport_model), in) != OK) {
             return ERR_INVALID;
         }
-    } else if (cJSON_IsObject(item)) {
-        if (cfg_str(binding->name, sizeof(binding->name), item, "name", NULL) != OK) {
+        *bindings = cJSON_GetObjectItemCaseSensitive(item, "bindings");
+    } else {
+        if (item) {
+            if (!cJSON_IsString(item) || !item->valuestring) {
+                return ERR_INVALID;
+            }
+            if (cfg_legacy_str(root, "transport", &in->kind) != OK) {
+                return ERR_INVALID;
+            }
+        }
+        if (cfg_legacy_str(root, "bind_host", &in->bind_host) != OK ||
+            cfg_legacy_u32(root, "data_port", 0, UINT16_MAX, &in->data_port) != OK ||
+            cfg_legacy_u32(root, "frag_bytes", 0, UINT16_MAX, &in->frag_bytes) != OK ||
+            cfg_legacy_u32(root, "max_msg_bytes", 0, UINT32_MAX, &in->max_msg_bytes) != OK ||
+            cfg_legacy_u32(root,
+                           "backpressure_bytes",
+                           0,
+                           UINT32_MAX,
+                           &in->backpressure_bytes) != OK ||
+            cfg_legacy_u32(root, "rtcp_interval_ms", 0, UINT32_MAX, &in->rtcp_interval_ms) != OK ||
+            cfg_legacy_bool(root, "rtcp", &in->rtcp, &in->rtcp_present) != OK) {
             return ERR_INVALID;
         }
-        if (cfg_str(binding->endpoint, sizeof(binding->endpoint), item, "endpoint", NULL) != OK) {
+        *bindings = cJSON_GetObjectItemCaseSensitive(root, "bindings");
+    }
+    if (*bindings && !cJSON_IsArray(*bindings)) {
+        return ERR_INVALID;
+    }
+    return OK;
+}
+
+static int load_discovery(const cJSON *root, cfg_discovery_in_t *in, const cJSON **peers)
+{
+    const cJSON *obj = NULL;
+    *peers = NULL;
+    if (cfg_child(root, "discovery", &obj) != OK) {
+        return ERR_INVALID;
+    }
+    if (obj) {
+        if (cfg_fill(obj, g_discovery_model, CFG_MODEL_N(g_discovery_model), in) != OK) {
             return ERR_INVALID;
         }
-        if (!binding->endpoint[0] &&
-            cfg_str(binding->endpoint, sizeof(binding->endpoint), item, "uri", NULL) != OK) {
+        *peers = cJSON_GetObjectItemCaseSensitive(obj, "peers");
+    }
+    if (*peers && !cJSON_IsArray(*peers)) {
+        return ERR_INVALID;
+    }
+    return OK;
+}
+
+static int load_metrics(const cJSON *root, cfg_metrics_in_t *in)
+{
+    const cJSON *obj = NULL;
+    if (cfg_child(root, "metrics", &obj) != OK) {
+        return ERR_INVALID;
+    }
+    return cfg_fill(obj, g_metrics_model, CFG_MODEL_N(g_metrics_model), in);
+}
+
+static int load_log(const cJSON *root, cfg_log_in_t *in)
+{
+    const cJSON *obj = NULL;
+    if (cfg_child(root, "log", &obj) != OK) {
+        return ERR_INVALID;
+    }
+    return cfg_fill(obj, g_log_model, CFG_MODEL_N(g_log_model), in);
+}
+
+/* ---- 转换到 config_t ---- */
+
+static int fill_bindings(config_t *out, const cJSON *bindings)
+{
+    const cJSON *item;
+    if (!bindings) {
+        return OK;
+    }
+    cJSON_ArrayForEach(item, bindings)
+    {
+        binding_endpoint_t *binding;
+        binding_config_t *view;
+        cfg_binding_in_t parsed;
+        const char *endpoint;
+        const char *name = NULL;
+        endpoint_t endpoint_parsed;
+
+        if (out->binding_count >= CONFIG_MAX_BINDINGS) {
+            return ERR_INVALID;
+        }
+        memset(&parsed, 0, sizeof(parsed));
+        if (cJSON_IsString(item) && item->valuestring) {
+            parsed.endpoint = cfg_dup(item->valuestring);
+            if (!parsed.endpoint) {
+                return ERR_INVALID;
+            }
+        } else if (cJSON_IsObject(item)) {
+            if (cfg_fill(item, g_binding_model, CFG_MODEL_N(g_binding_model), &parsed) != OK) {
+                return ERR_INVALID;
+            }
+            if (!parsed.endpoint) {
+                const cJSON *uri = cJSON_GetObjectItemCaseSensitive(item, "uri");
+                if (uri && cJSON_IsString(uri) && uri->valuestring) {
+                    parsed.endpoint = cfg_dup(uri->valuestring);
+                    if (!parsed.endpoint) {
+                        return ERR_INVALID;
+                    }
+                }
+            }
+        } else {
+            return ERR_INVALID;
+        }
+        endpoint = parsed.endpoint;
+        name = parsed.name;
+        if (!endpoint || endpoint_parse(endpoint, &endpoint_parsed) != OK) {
+            nb_codec_json_clear(&parsed, g_binding_model, CFG_MODEL_N(g_binding_model));
+            return ERR_INVALID;
+        }
+        binding = &out->bindings[out->binding_count];
+        view = &out->binding_configs[out->binding_count];
+        if (cfg_copy(binding->endpoint, sizeof(binding->endpoint), endpoint, NULL) != OK) {
+            nb_codec_json_clear(&parsed, g_binding_model, CFG_MODEL_N(g_binding_model));
+            return ERR_INVALID;
+        }
+        if (name && name[0]) {
+            if (cfg_copy(binding->name, sizeof(binding->name), name, NULL) != OK) {
+                nb_codec_json_clear(&parsed, g_binding_model, CFG_MODEL_N(g_binding_model));
+                return ERR_INVALID;
+            }
+        } else {
+            if (cfg_copy(binding->name, sizeof(binding->name), endpoint_parsed.scheme, NULL) !=
+                OK) {
+                nb_codec_json_clear(&parsed, g_binding_model, CFG_MODEL_N(g_binding_model));
+                return ERR_INVALID;
+            }
+        }
+        if (!binding->name[0]) {
+            nb_codec_json_clear(&parsed, g_binding_model, CFG_MODEL_N(g_binding_model));
+            return ERR_INVALID;
+        }
+        view->name = binding->name;
+        view->endpoint = binding->endpoint;
+        out->binding_count++;
+        nb_codec_json_clear(&parsed, g_binding_model, CFG_MODEL_N(g_binding_model));
+    }
+    return OK;
+}
+
+static int fill_peers(config_t *out, const cJSON *peers)
+{
+    const cJSON *item;
+    if (!peers) {
+        return OK;
+    }
+    cJSON_ArrayForEach(item, peers)
+    {
+        peer_endpoint_t *peer;
+        if (out->peer_count >= CONFIG_MAX_PEERS) {
+            return ERR_INVALID;
+        }
+        if (!cJSON_IsString(item) || !item->valuestring) {
+            return ERR_INVALID;
+        }
+        peer = &out->peers[out->peer_count];
+        if (cfg_host_port(item->valuestring, peer->ip, sizeof(peer->ip), &peer->port) != OK) {
+            return ERR_INVALID;
+        }
+        if (!peer->ip[0] || !peer->port) {
+            return ERR_INVALID;
+        }
+        out->peer_count++;
+    }
+    return OK;
+}
+
+static int fill_routes(config_t *out, const cJSON *routes)
+{
+    const cJSON *item;
+    if (!routes) {
+        return OK;
+    }
+    if (!cJSON_IsArray(routes)) {
+        return ERR_INVALID;
+    }
+    cJSON_ArrayForEach(item, routes)
+    {
+        static_route_t *route;
+        cfg_route_in_t parsed;
+        endpoint_t endpoint;
+        if (out->route_count >= CONFIG_MAX_ROUTES) {
+            return ERR_INVALID;
+        }
+        if (!cJSON_IsObject(item)) {
+            return ERR_INVALID;
+        }
+        memset(&parsed, 0, sizeof(parsed));
+        if (cfg_fill(item, g_route_model, CFG_MODEL_N(g_route_model), &parsed) != OK) {
+            return ERR_INVALID;
+        }
+        route = &out->routes[out->route_count];
+        if (cfg_copy(route->service, sizeof(route->service), parsed.service, NULL) != OK ||
+            cfg_copy(route->endpoint, sizeof(route->endpoint), parsed.endpoint, NULL) != OK ||
+            !route->service[0] || !route->endpoint[0] ||
+            endpoint_parse(route->endpoint, &endpoint) != OK) {
+            nb_codec_json_clear(&parsed, g_route_model, CFG_MODEL_N(g_route_model));
+            return ERR_INVALID;
+        }
+        out->route_count++;
+        nb_codec_json_clear(&parsed, g_route_model, CFG_MODEL_N(g_route_model));
+    }
+    return OK;
+}
+
+/* 把中间结构合入 config_t.node，应用默认值并校验范围。 */
+static int apply_config(config_t *out,
+                        const cfg_runtime_in_t *rt,
+                        const cfg_transport_in_t *tp,
+                        const cfg_discovery_in_t *disc,
+                        const cfg_metrics_in_t *mt,
+                        const cfg_log_in_t *lg,
+                        const cJSON *root,
+                        const cJSON *bindings,
+                        const cJSON *peers,
+                        const cJSON *routes)
+{
+    node_config_t *node = &out->node;
+    node_mode_t mode = MODE_MESH;
+    transport_kind_t kind = TRANSPORT_UDP;
+    const char *name = NULL;
+    const cJSON *item;
+
+    node_config_default(node);
+
+    /* name / mode（顶层，两种格式一致） */
+    item = cJSON_GetObjectItemCaseSensitive(root, "name");
+    if (item) {
+        if (!cJSON_IsString(item) || !item->valuestring) {
+            return ERR_INVALID;
+        }
+        name = item->valuestring;
+    }
+    if (cfg_copy(out->name, sizeof(out->name), name, "rpc") != OK) {
+        return ERR_INVALID;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "mode");
+    if (item) {
+        if (!cJSON_IsString(item) || cfg_mode(item->valuestring, &mode) != OK) {
+            return ERR_INVALID;
+        }
+    }
+    node->mode = mode;
+    node->name = out->name;
+
+    /* runtime */
+    if (rt->io_threads > 1024 || rt->handler_threads > 1024) {
+        return ERR_INVALID;
+    }
+    node->runtime.io_threads = (unsigned)rt->io_threads;
+    node->runtime.handler_threads = (unsigned)rt->handler_threads;
+    node->runtime.handler_max_concurrency = (unsigned)rt->handler_max_concurrency;
+    node->runtime.max_inflight = rt->max_inflight;
+    node->runtime.max_streams = rt->max_streams;
+    node->runtime.peer_rate_limit_pps = rt->peer_rate_limit_pps;
+
+    /* transport */
+    if (tp->kind && cfg_transport_kind(tp->kind, &kind) != OK) {
+        return ERR_INVALID;
+    }
+    if (tp->data_port > UINT16_MAX || tp->frag_bytes > UINT16_MAX) {
+        return ERR_INVALID;
+    }
+    node->transport.transport = kind;
+    if (cfg_copy(out->bind_host, sizeof(out->bind_host), tp->bind_host, "0.0.0.0") != OK) {
+        return ERR_INVALID;
+    }
+    node->transport.bind_host = out->bind_host;
+    node->transport.data_port = (uint16_t)tp->data_port;
+    node->transport.frag_bytes = (uint16_t)tp->frag_bytes;
+    node->transport.max_msg_bytes = tp->max_msg_bytes;
+    node->transport.backpressure_bytes = tp->backpressure_bytes;
+    node->transport.rtcp_interval_ms = tp->rtcp_interval_ms;
+    node->transport.rtcp_disabled = tp->rtcp_present ? (tp->rtcp ? 0 : 1) : 0;
+
+    /* discovery：broadcast（新）或 discovery_host/port（旧）二选一 */
+    if (disc->mode && cfg_discovery_mode(disc->mode, &node->discovery.disabled) != OK) {
+        return ERR_INVALID;
+    }
+    if (disc->broadcast) {
+        if (cfg_host_port(
+                disc->broadcast, out->discovery_host, sizeof(out->discovery_host), &node->discovery.port) !=
+            OK) {
             return ERR_INVALID;
         }
     } else {
+        const cJSON *host = cJSON_GetObjectItemCaseSensitive(root, "discovery_host");
+        uint32_t port = 0;
+        if (host && (!cJSON_IsString(host) || !host->valuestring)) {
+            return ERR_INVALID;
+        }
+        if (cfg_legacy_u32(root, "discovery_port", 0, UINT16_MAX, &port) != OK) {
+            return ERR_INVALID;
+        }
+        if (cfg_copy(out->discovery_host,
+                     sizeof(out->discovery_host),
+                     host ? host->valuestring : NULL,
+                     "255.255.255.255") != OK) {
+            return ERR_INVALID;
+        }
+        node->discovery.port = (uint16_t)port;
+    }
+    node->discovery.host = out->discovery_host;
+    node->discovery.hello_interval_ms = disc->hello_interval_ms;
+    node->discovery.node_ttl_ms = disc->node_ttl_ms;
+
+    /* metrics */
+    node->metrics.disabled = mt->disabled;
+    node->metrics.latency_disabled = mt->latency_disabled;
+    node->metrics.sample_every = mt->sample_every ? mt->sample_every : 1;
+    node->metrics.per_peer_disabled = mt->per_peer_disabled;
+
+    /* log */
+    node->log.disabled = lg->disabled;
+    if (lg->level && cfg_log_level(lg->level, &node->log.level) != OK) {
         return ERR_INVALID;
     }
-    if (!binding->endpoint[0] || endpoint_parse(binding->endpoint, &endpoint) != OK) {
+    if (cfg_copy(out->log_file, sizeof(out->log_file), lg->file, NULL) != OK) {
         return ERR_INVALID;
     }
-    if (!binding->name[0]) {
-        snprintf(binding->name, sizeof(binding->name), "%s", endpoint.scheme);
-    }
-    if (!binding->name[0]) {
+    node->log.file = lg->file ? out->log_file : NULL;
+
+    if (fill_bindings(out, bindings) != OK || fill_peers(out, peers) != OK ||
+        fill_routes(out, routes) != OK) {
         return ERR_INVALID;
     }
-    out->binding_configs[out->binding_count].name = binding->name;
-    out->binding_configs[out->binding_count].endpoint = binding->endpoint;
-    out->binding_count++;
+    if (out->binding_count > 0) {
+        node->transport.bindings = out->binding_configs;
+        node->transport.binding_count = out->binding_count;
+    }
     return OK;
 }
 
@@ -167,189 +828,56 @@ static int cfg_binding(config_t *out, const cJSON *item)
 
 int config_load(const char *json, config_t *out)
 {
-    cJSON *root;
-    const cJSON *bindings;
-    const cJSON *disc;
-    const cJSON *routes;
-    const cJSON *peers;
-    const cJSON *item;
-    uint32_t v;
+    cJSON *root = NULL;
+    cfg_runtime_in_t rt;
+    cfg_transport_in_t tp;
+    cfg_discovery_in_t disc;
+    cfg_metrics_in_t mt;
+    cfg_log_in_t lg;
+    const cJSON *bindings = NULL;
+    const cJSON *peers = NULL;
+    const cJSON *routes = NULL;
+    int rc = ERR_INVALID;
 
     if (!json || !out) {
         return ERR_INVALID;
     }
     memset(out, 0, sizeof(*out));
+    memset(&rt, 0, sizeof(rt));
+    memset(&tp, 0, sizeof(tp));
+    memset(&disc, 0, sizeof(disc));
+    memset(&mt, 0, sizeof(mt));
+    memset(&lg, 0, sizeof(lg));
+
     root = cJSON_Parse(json);
-    if (!root) {
-        return ERR_INVALID;
+    if (!root || !cJSON_IsObject(root)) {
+        goto done;
     }
-
-    if (cfg_str(out->name, sizeof(out->name), root, "name", "rpc") != OK ||
-        cfg_str(out->bind_host, sizeof(out->bind_host), root, "bind_host", "0.0.0.0") != OK ||
-        cfg_transport(root, "transport", TRANSPORT_UDP, &out->node.transport) != OK ||
-        cfg_mode(root, "mode", MODE_MESH, &out->node.mode) != OK) {
-        goto invalid;
-    }
-    if (cfg_u32(root, "data_port", 0, 0, UINT16_MAX, &v) != OK) {
-        goto invalid;
-    }
-    out->node.data_port = (uint16_t)v;
-    if (cfg_u32(root, "io_threads", 0, 0, 1024, &out->node.io_threads) != OK ||
-        cfg_u32(root, "handler_threads", 0, 0, 1024, &out->node.handler_threads) != OK ||
-        cfg_u32(root,
-                "handler_max_concurrency",
-                0,
-                0,
-                UINT32_MAX,
-                &out->node.handler_max_concurrency) != OK ||
-        cfg_u32(root, "max_inflight", 0, 0, UINT32_MAX, &out->node.max_inflight) != OK) {
-        goto invalid;
-    }
-    if (cfg_u32(root, "frag_bytes", 0, 0, UINT16_MAX, &v) != OK) {
-        goto invalid;
-    }
-    out->node.frag_bytes = (uint16_t)v;
-    if (cfg_u32(root, "max_msg_bytes", 0, 0, UINT32_MAX, &out->node.max_msg_bytes) != OK ||
-        cfg_u32(root,
-                "backpressure_bytes",
-                0,
-                0,
-                UINT32_MAX,
-                &out->node.backpressure_bytes) != OK ||
-        cfg_u32(root, "rtcp_interval_ms", 0, 0, UINT32_MAX, &out->node.rtcp_interval_ms) != OK ||
-        cfg_u32(root, "max_streams", 0, 0, UINT32_MAX, &out->node.max_streams) != OK ||
-        cfg_u32(root,
-                "peer_rate_limit_pps",
-                0,
-                0,
-                UINT32_MAX,
-                &out->node.peer_rate_limit_pps) != OK) {
-        goto invalid;
-    }
-    {
-        const cJSON *rtcp = cJSON_GetObjectItemCaseSensitive(root, "rtcp");
-        if (rtcp && !cJSON_IsBool(rtcp)) {
-            goto invalid;
-        }
-        if (rtcp) {
-            out->node.rtcp_disabled = cJSON_IsTrue(rtcp) ? 0 : 1;
-        }
-    }
-    out->node.name = out->name;
-    out->node.bind_host = out->bind_host;
-
-    /* bindings 使用顶层数组，元素为 URI 字符串或 {name, endpoint} 对象。 */
-    bindings = cJSON_GetObjectItemCaseSensitive(root, "bindings");
-    if (bindings && !cJSON_IsArray(bindings)) {
-        goto invalid;
-    }
-    if (bindings) {
-        cJSON_ArrayForEach(item, bindings)
-        {
-            if (cfg_binding(out, item) != OK) {
-                goto invalid;
-            }
-        }
-    }
-
-    /* discovery.broadcast 使用 "host:port"。 */
-    disc = cJSON_GetObjectItemCaseSensitive(root, "discovery");
-    if (disc && !cJSON_IsObject(disc)) {
-        goto invalid;
-    }
-    {
-        const cJSON *broadcast = cJSON_GetObjectItemCaseSensitive(disc, "broadcast");
-        uint16_t broadcast_port = 0;
-        char broadcast_host[ENDPOINT_MAX];
-        if (broadcast &&
-            (!cJSON_IsString(broadcast) || !broadcast->valuestring ||
-             cfg_host_port(
-                 broadcast->valuestring, broadcast_host, sizeof(broadcast_host), &broadcast_port) !=
-                 OK)) {
-            goto invalid;
-        }
-        if (broadcast) {
-            snprintf(out->discovery_host, sizeof(out->discovery_host), "%s", broadcast_host);
-            out->node.discovery_port = broadcast_port;
-        } else {
-            snprintf(out->discovery_host, sizeof(out->discovery_host), "%s", "255.255.255.255");
-            out->node.discovery_port = 0;
-        }
-    }
-    out->node.discovery_host = out->discovery_host;
-    if (cfg_u32(disc, "hello_interval_ms", 0, 0, UINT32_MAX, &out->node.hello_interval_ms) != OK ||
-        cfg_u32(disc, "node_ttl_ms", 0, 0, UINT32_MAX, &out->node.node_ttl_ms) != OK) {
-        goto invalid;
-    }
-    if (out->binding_count > 0) {
-        out->node.bindings = out->binding_configs;
-        out->node.binding_count = out->binding_count;
-    }
-
-    /* discovery.peers：支持 "ip:port" 字符串和 {ip,port} 对象。 */
-    peers = cJSON_GetObjectItemCaseSensitive(disc, "peers");
-    if (peers && !cJSON_IsArray(peers)) {
-        goto invalid;
-    }
-    if (peers) {
-        cJSON_ArrayForEach(item, peers)
-        {
-            peer_endpoint_t *peer;
-            if (out->peer_count >= CONFIG_MAX_PEERS) {
-                goto invalid;
-            }
-            peer = &out->peers[out->peer_count];
-            if (!cJSON_IsString(item) || !item->valuestring ||
-                cfg_host_port(item->valuestring, peer->ip, sizeof(peer->ip), &peer->port) != OK) {
-                goto invalid;
-            }
-            if (peer->ip[0] && peer->port) {
-                out->peer_count++;
-            } else {
-                goto invalid;
-            }
-        }
-    }
-
-    /* routes */
     routes = cJSON_GetObjectItemCaseSensitive(root, "routes");
     if (routes && !cJSON_IsArray(routes)) {
-        goto invalid;
+        goto done;
     }
-    if (routes) {
-        cJSON_ArrayForEach(item, routes)
-        {
-            static_route_t *r;
-            if (out->route_count >= CONFIG_MAX_ROUTES) {
-                goto invalid;
-            }
-            if (!cJSON_IsObject(item)) {
-                goto invalid;
-            }
-            r = &out->routes[out->route_count];
-            if (cfg_str(r->service, sizeof(r->service), item, "service", NULL) != OK ||
-                cfg_str(r->endpoint, sizeof(r->endpoint), item, "endpoint", NULL) != OK) {
-                goto invalid;
-            }
-            if (!r->service[0] || !r->endpoint[0]) {
-                goto invalid;
-            }
-            {
-                endpoint_t endpoint;
-                if (endpoint_parse(r->endpoint, &endpoint) != OK) {
-                    goto invalid;
-                }
-            }
-            out->route_count++;
-        }
+    if (load_runtime(root, &rt) != OK || load_transport(root, &tp, &bindings) != OK ||
+        load_discovery(root, &disc, &peers) != OK || load_metrics(root, &mt) != OK ||
+        load_log(root, &lg) != OK) {
+        goto done;
     }
-    cJSON_Delete(root);
-    return OK;
+    if (apply_config(out, &rt, &tp, &disc, &mt, &lg, root, bindings, peers, routes) != OK) {
+        memset(out, 0, sizeof(*out));
+        goto done;
+    }
+    rc = OK;
 
-invalid:
-    cJSON_Delete(root);
-    memset(out, 0, sizeof(*out));
-    return ERR_INVALID;
+done:
+    nb_codec_json_clear(&rt, g_runtime_model, CFG_MODEL_N(g_runtime_model));
+    nb_codec_json_clear(&tp, g_transport_model, CFG_MODEL_N(g_transport_model));
+    nb_codec_json_clear(&disc, g_discovery_model, CFG_MODEL_N(g_discovery_model));
+    nb_codec_json_clear(&mt, g_metrics_model, CFG_MODEL_N(g_metrics_model));
+    nb_codec_json_clear(&lg, g_log_model, CFG_MODEL_N(g_log_model));
+    if (root) {
+        cJSON_Delete(root);
+    }
+    return rc;
 }
 
 int config_load_file(const char *path, config_t *out)

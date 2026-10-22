@@ -243,24 +243,24 @@ static int run_case(transport_kind_t kind, const char *label)
 
     memset(&scfg, 0, sizeof(scfg));
     scfg.name = "worker-srv";
-    scfg.transport = kind;
-    scfg.bind_host = "127.0.0.1";
-    scfg.discovery_host = "127.0.0.1";
-    scfg.discovery_port = sport;
-    scfg.io_threads = 1;
-    scfg.handler_threads = 2;
-    scfg.hello_interval_ms = 200;
-    scfg.node_ttl_ms = 3000;
+    scfg.transport.transport = kind;
+    scfg.transport.bind_host = "127.0.0.1";
+    scfg.discovery.host = "127.0.0.1";
+    scfg.discovery.port = sport;
+    scfg.runtime.io_threads = 1;
+    scfg.runtime.handler_threads = 2;
+    scfg.discovery.hello_interval_ms = 200;
+    scfg.discovery.node_ttl_ms = 3000;
 
     memset(&ccfg, 0, sizeof(ccfg));
     ccfg.name = "worker-cli";
-    ccfg.transport = kind;
-    ccfg.bind_host = "127.0.0.1";
-    ccfg.discovery_host = "127.0.0.1";
-    ccfg.discovery_port = cport;
-    ccfg.io_threads = 1;
-    ccfg.hello_interval_ms = 200;
-    ccfg.node_ttl_ms = 3000;
+    ccfg.transport.transport = kind;
+    ccfg.transport.bind_host = "127.0.0.1";
+    ccfg.discovery.host = "127.0.0.1";
+    ccfg.discovery.port = cport;
+    ccfg.runtime.io_threads = 1;
+    ccfg.discovery.hello_interval_ms = 200;
+    ccfg.discovery.node_ttl_ms = 3000;
 
     if (node_create(&scfg, &server) != OK || node_create(&ccfg, &client) != OK) {
         rpc_log_error("[%s] node create failed", label);
@@ -392,24 +392,24 @@ static int run_fallback_case(transport_kind_t kind, const char *label)
 
     memset(&scfg, 0, sizeof(scfg));
     scfg.name = "fallback-srv";
-    scfg.transport = kind;
-    scfg.bind_host = "127.0.0.1";
-    scfg.discovery_host = "127.0.0.1";
-    scfg.discovery_port = sport;
-    scfg.io_threads = 1;
-    scfg.handler_threads = 0;
-    scfg.hello_interval_ms = 200;
-    scfg.node_ttl_ms = 3000;
+    scfg.transport.transport = kind;
+    scfg.transport.bind_host = "127.0.0.1";
+    scfg.discovery.host = "127.0.0.1";
+    scfg.discovery.port = sport;
+    scfg.runtime.io_threads = 1;
+    scfg.runtime.handler_threads = 0;
+    scfg.discovery.hello_interval_ms = 200;
+    scfg.discovery.node_ttl_ms = 3000;
 
     memset(&ccfg, 0, sizeof(ccfg));
     ccfg.name = "fallback-cli";
-    ccfg.transport = kind;
-    ccfg.bind_host = "127.0.0.1";
-    ccfg.discovery_host = "127.0.0.1";
-    ccfg.discovery_port = cport;
-    ccfg.io_threads = 1;
-    ccfg.hello_interval_ms = 200;
-    ccfg.node_ttl_ms = 3000;
+    ccfg.transport.transport = kind;
+    ccfg.transport.bind_host = "127.0.0.1";
+    ccfg.discovery.host = "127.0.0.1";
+    ccfg.discovery.port = cport;
+    ccfg.runtime.io_threads = 1;
+    ccfg.discovery.hello_interval_ms = 200;
+    ccfg.discovery.node_ttl_ms = 3000;
 
     if (node_create(&scfg, &server) != OK || node_create(&ccfg, &client) != OK) {
         rpc_log_error("[%s] node create failed", label);
@@ -485,11 +485,11 @@ static int run_api_checks(void)
 
     memset(&cfg, 0, sizeof(cfg));
     cfg.name = "worker-api";
-    cfg.transport = TRANSPORT_UDP;
-    cfg.bind_host = "127.0.0.1";
-    cfg.data_port = 0;
-    cfg.io_threads = 1;
-    cfg.handler_threads = 1;
+    cfg.transport.transport = TRANSPORT_UDP;
+    cfg.transport.bind_host = "127.0.0.1";
+    cfg.transport.data_port = 0;
+    cfg.runtime.io_threads = 1;
+    cfg.runtime.handler_threads = 1;
     cfg.mode = MODE_STATIC;
 
     memset(&direct, 0, sizeof(direct));
@@ -603,25 +603,25 @@ static int run_overload_case(transport_kind_t kind, const char *label)
 
     memset(&scfg, 0, sizeof(scfg));
     scfg.name = "overload-srv";
-    scfg.transport = kind;
-    scfg.bind_host = "127.0.0.1";
-    scfg.discovery_host = "127.0.0.1";
-    scfg.discovery_port = sport;
-    scfg.io_threads = 1;
-    scfg.handler_threads = 1;
-    scfg.handler_max_concurrency = 1;
-    scfg.hello_interval_ms = 200;
-    scfg.node_ttl_ms = 3000;
+    scfg.transport.transport = kind;
+    scfg.transport.bind_host = "127.0.0.1";
+    scfg.discovery.host = "127.0.0.1";
+    scfg.discovery.port = sport;
+    scfg.runtime.io_threads = 1;
+    scfg.runtime.handler_threads = 1;
+    scfg.runtime.handler_max_concurrency = 1;
+    scfg.discovery.hello_interval_ms = 200;
+    scfg.discovery.node_ttl_ms = 3000;
 
     memset(&ccfg, 0, sizeof(ccfg));
     ccfg.name = "overload-cli";
-    ccfg.transport = kind;
-    ccfg.bind_host = "127.0.0.1";
-    ccfg.discovery_host = "127.0.0.1";
-    ccfg.discovery_port = cport;
-    ccfg.io_threads = 1;
-    ccfg.hello_interval_ms = 200;
-    ccfg.node_ttl_ms = 3000;
+    ccfg.transport.transport = kind;
+    ccfg.transport.bind_host = "127.0.0.1";
+    ccfg.discovery.host = "127.0.0.1";
+    ccfg.discovery.port = cport;
+    ccfg.runtime.io_threads = 1;
+    ccfg.discovery.hello_interval_ms = 200;
+    ccfg.discovery.node_ttl_ms = 3000;
 
     if (node_create(&scfg, &server) != OK || node_create(&ccfg, &client) != OK) {
         rpc_log_error("[%s] node create failed", label);
@@ -764,24 +764,24 @@ static int run_executor_case(transport_kind_t kind, const char *label)
 
     memset(&scfg, 0, sizeof(scfg));
     scfg.name = "exec-srv";
-    scfg.transport = kind;
-    scfg.bind_host = "127.0.0.1";
-    scfg.discovery_host = "127.0.0.1";
-    scfg.discovery_port = sport;
-    scfg.io_threads = 1;
-    scfg.handler_threads = 0; /* 证明自定义 executor 不依赖内置池 */
-    scfg.hello_interval_ms = 200;
-    scfg.node_ttl_ms = 3000;
+    scfg.transport.transport = kind;
+    scfg.transport.bind_host = "127.0.0.1";
+    scfg.discovery.host = "127.0.0.1";
+    scfg.discovery.port = sport;
+    scfg.runtime.io_threads = 1;
+    scfg.runtime.handler_threads = 0; /* 证明自定义 executor 不依赖内置池 */
+    scfg.discovery.hello_interval_ms = 200;
+    scfg.discovery.node_ttl_ms = 3000;
 
     memset(&ccfg, 0, sizeof(ccfg));
     ccfg.name = "exec-cli";
-    ccfg.transport = kind;
-    ccfg.bind_host = "127.0.0.1";
-    ccfg.discovery_host = "127.0.0.1";
-    ccfg.discovery_port = cport;
-    ccfg.io_threads = 1;
-    ccfg.hello_interval_ms = 200;
-    ccfg.node_ttl_ms = 3000;
+    ccfg.transport.transport = kind;
+    ccfg.transport.bind_host = "127.0.0.1";
+    ccfg.discovery.host = "127.0.0.1";
+    ccfg.discovery.port = cport;
+    ccfg.runtime.io_threads = 1;
+    ccfg.discovery.hello_interval_ms = 200;
+    ccfg.discovery.node_ttl_ms = 3000;
 
     if (node_create(&scfg, &server) != OK || node_create(&ccfg, &client) != OK) {
         rpc_log_error("[%s] node create failed", label);
@@ -944,24 +944,24 @@ static int run_deadline_case(const char *label)
 
     memset(&scfg, 0, sizeof(scfg));
     scfg.name = "deadline-srv";
-    scfg.transport = TRANSPORT_TCP;
-    scfg.bind_host = "127.0.0.1";
-    scfg.discovery_host = "127.0.0.1";
-    scfg.discovery_port = sport;
-    scfg.io_threads = 1;
-    scfg.handler_threads = 1; /* 单 worker：第二个请求必然排队 */
-    scfg.hello_interval_ms = 200;
-    scfg.node_ttl_ms = 3000;
+    scfg.transport.transport = TRANSPORT_TCP;
+    scfg.transport.bind_host = "127.0.0.1";
+    scfg.discovery.host = "127.0.0.1";
+    scfg.discovery.port = sport;
+    scfg.runtime.io_threads = 1;
+    scfg.runtime.handler_threads = 1; /* 单 worker：第二个请求必然排队 */
+    scfg.discovery.hello_interval_ms = 200;
+    scfg.discovery.node_ttl_ms = 3000;
 
     memset(&ccfg, 0, sizeof(ccfg));
     ccfg.name = "deadline-cli";
-    ccfg.transport = TRANSPORT_TCP;
-    ccfg.bind_host = "127.0.0.1";
-    ccfg.discovery_host = "127.0.0.1";
-    ccfg.discovery_port = cport;
-    ccfg.io_threads = 1;
-    ccfg.hello_interval_ms = 200;
-    ccfg.node_ttl_ms = 3000;
+    ccfg.transport.transport = TRANSPORT_TCP;
+    ccfg.transport.bind_host = "127.0.0.1";
+    ccfg.discovery.host = "127.0.0.1";
+    ccfg.discovery.port = cport;
+    ccfg.runtime.io_threads = 1;
+    ccfg.discovery.hello_interval_ms = 200;
+    ccfg.discovery.node_ttl_ms = 3000;
 
     block.started = ntk_sem_create(0);
     block.release = ntk_sem_create(0);
@@ -1124,24 +1124,24 @@ static int run_cancel_case(const char *label)
 
     memset(&scfg, 0, sizeof(scfg));
     scfg.name = "cancel-srv";
-    scfg.transport = TRANSPORT_TCP;
-    scfg.bind_host = "127.0.0.1";
-    scfg.discovery_host = "127.0.0.1";
-    scfg.discovery_port = sport;
-    scfg.io_threads = 1;
-    scfg.handler_threads = 1;
-    scfg.hello_interval_ms = 200;
-    scfg.node_ttl_ms = 3000;
+    scfg.transport.transport = TRANSPORT_TCP;
+    scfg.transport.bind_host = "127.0.0.1";
+    scfg.discovery.host = "127.0.0.1";
+    scfg.discovery.port = sport;
+    scfg.runtime.io_threads = 1;
+    scfg.runtime.handler_threads = 1;
+    scfg.discovery.hello_interval_ms = 200;
+    scfg.discovery.node_ttl_ms = 3000;
 
     memset(&ccfg, 0, sizeof(ccfg));
     ccfg.name = "cancel-cli";
-    ccfg.transport = TRANSPORT_TCP;
-    ccfg.bind_host = "127.0.0.1";
-    ccfg.discovery_host = "127.0.0.1";
-    ccfg.discovery_port = cport;
-    ccfg.io_threads = 1;
-    ccfg.hello_interval_ms = 200;
-    ccfg.node_ttl_ms = 3000;
+    ccfg.transport.transport = TRANSPORT_TCP;
+    ccfg.transport.bind_host = "127.0.0.1";
+    ccfg.discovery.host = "127.0.0.1";
+    ccfg.discovery.port = cport;
+    ccfg.runtime.io_threads = 1;
+    ccfg.discovery.hello_interval_ms = 200;
+    ccfg.discovery.node_ttl_ms = 3000;
 
     block.started = ntk_sem_create(0);
     block.release = ntk_sem_create(0);

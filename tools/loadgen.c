@@ -472,18 +472,18 @@ int main(int argc, char **argv)
 
     memset(&cfg, 0, sizeof(cfg));
     cfg.name = opt.worker_id ? opt.worker_id : "loadgen";
-    cfg.transport = opt.transport;
-    cfg.bind_host = opt.bind;
-    cfg.data_port = opt.data_port;
-    cfg.discovery_host = "255.255.255.255";
-    cfg.discovery_port = opt.discovery_port;
+    cfg.transport.transport = opt.transport;
+    cfg.transport.bind_host = opt.bind;
+    cfg.transport.data_port = opt.data_port;
+    cfg.discovery.host = "255.255.255.255";
+    cfg.discovery.port = opt.discovery_port;
     cfg.mode = mode;
-    cfg.io_threads = 1;
-    cfg.hello_interval_ms = 100;
-    cfg.node_ttl_ms = 3000;
-    cfg.frag_bytes = opt.frag_bytes;
-    cfg.max_msg_bytes = opt.max_msg_bytes;
-    cfg.backpressure_bytes = opt.backpressure_bytes;
+    cfg.runtime.io_threads = 1;
+    cfg.discovery.hello_interval_ms = 100;
+    cfg.discovery.node_ttl_ms = 3000;
+    cfg.transport.frag_bytes = opt.frag_bytes;
+    cfg.transport.max_msg_bytes = opt.max_msg_bytes;
+    cfg.transport.backpressure_bytes = opt.backpressure_bytes;
 
     sem = ntk_sem_create(0);
     if (!sem) {

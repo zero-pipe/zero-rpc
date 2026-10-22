@@ -33,15 +33,15 @@ int main(int argc, char **argv)
 
     memset(&cfg, 0, sizeof(cfg));
     cfg.name = "DiscoveryServer";
-    cfg.transport = TRANSPORT_TCP;
-    cfg.bind_host = "0.0.0.0";
-    cfg.data_port = data_port;
-    cfg.discovery_host = "255.255.255.255";
-    cfg.discovery_port = discovery_port;
-    cfg.hello_interval_ms = 500;
-    cfg.node_ttl_ms = 3000;
+    cfg.transport.transport = TRANSPORT_TCP;
+    cfg.transport.bind_host = "0.0.0.0";
+    cfg.transport.data_port = data_port;
+    cfg.discovery.host = "255.255.255.255";
+    cfg.discovery.port = discovery_port;
+    cfg.discovery.hello_interval_ms = 500;
+    cfg.discovery.node_ttl_ms = 3000;
     cfg.mode = MODE_MESH;
-    cfg.io_threads = 1;
+    cfg.runtime.io_threads = 1;
 
     rc = node_create(&cfg, &node);
     if (rc == OK) {

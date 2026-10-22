@@ -1,5 +1,5 @@
 /*
- * 08 Config：从 JSON 配置创建节点。展示扁平配置格式（bindings / routes 用 URI）。
+ * 08 Config：从 JSON 配置创建节点。展示按模块拆分的嵌套配置格式。
  * 服务端：读取 08_config_server.json，注册 EchoService.echo（异步回显）。
  *
  * 用法：example_08_config_server [config.json]

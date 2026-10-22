@@ -223,10 +223,10 @@ int main(int argc, char **argv)
 
     memset(&cfg, 0, sizeof(cfg));
     cfg.name = opt.worker_id ? opt.worker_id : "sync_loadgen";
-    cfg.transport = opt.transport;
-    cfg.bind_host = "0.0.0.0";
+    cfg.transport.transport = opt.transport;
+    cfg.transport.bind_host = "0.0.0.0";
     cfg.mode = MODE_STATIC;
-    cfg.io_threads = 1;
+    cfg.runtime.io_threads = 1;
     rc = node_create(&cfg, &node);
     if (rc == OK) {
         rc = proxy_create(node, NULL, &proxy);

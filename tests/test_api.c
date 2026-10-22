@@ -118,24 +118,24 @@ static int test_stub_and_sync(void)
 
     memset(&scfg, 0, sizeof(scfg));
     scfg.name = "api_srv";
-    scfg.transport = TRANSPORT_UDP;
-    scfg.bind_host = "127.0.0.1";
-    scfg.discovery_host = "127.0.0.1";
-    scfg.discovery_port = sport;
-    scfg.io_threads = 1;
-    scfg.hello_interval_ms = 200;
-    scfg.node_ttl_ms = 3000;
+    scfg.transport.transport = TRANSPORT_UDP;
+    scfg.transport.bind_host = "127.0.0.1";
+    scfg.discovery.host = "127.0.0.1";
+    scfg.discovery.port = sport;
+    scfg.runtime.io_threads = 1;
+    scfg.discovery.hello_interval_ms = 200;
+    scfg.discovery.node_ttl_ms = 3000;
     scfg.service_table = &g_order_table;
 
     memset(&ccfg, 0, sizeof(ccfg));
     ccfg.name = "api_cli";
-    ccfg.transport = TRANSPORT_UDP;
-    ccfg.bind_host = "127.0.0.1";
-    ccfg.discovery_host = "127.0.0.1";
-    ccfg.discovery_port = cport;
-    ccfg.io_threads = 1;
-    ccfg.hello_interval_ms = 200;
-    ccfg.node_ttl_ms = 3000;
+    ccfg.transport.transport = TRANSPORT_UDP;
+    ccfg.transport.bind_host = "127.0.0.1";
+    ccfg.discovery.host = "127.0.0.1";
+    ccfg.discovery.port = cport;
+    ccfg.runtime.io_threads = 1;
+    ccfg.discovery.hello_interval_ms = 200;
+    ccfg.discovery.node_ttl_ms = 3000;
 
     rc = node_create(&scfg, &server);
     if (rc != OK) {
