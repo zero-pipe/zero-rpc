@@ -376,6 +376,24 @@ static int stub_payload_prepare(const stub_t *stub,
     return OK;
 }
 
+/* 把 metadata 编码进调用方的 inline 线格式缓冲；无 metadata 时 out_len = 0。 */
+static int stub_metadata_encode(const metadata_t *metadata,
+                                uint8_t *buf,
+                                size_t cap,
+                                uint16_t *out_len)
+{
+    size_t len = 0;
+    *out_len = 0;
+    if (!metadata) {
+        return OK;
+    }
+    if (metadata_encode(metadata, buf, cap, &len) != OK) {
+        return ERR_TOOBIG;
+    }
+    *out_len = (uint16_t)len;
+    return OK;
+}
+
 /* ---- 生命周期 ---- */
 
 int stub_create(node_t *node, const stub_options_t *options, stub_t **out)
@@ -422,7 +440,7 @@ int stub_call_ex(stub_t *stub,
     size_t len;
     uint8_t encoding;
     uint8_t metadata_buf[METADATA_WIRE_MAX];
-    size_t metadata_len = 0;
+    uint16_t metadata_len = 0;
     int rc;
 
     if (!stub || !stub->node || !service || !method) {
@@ -432,22 +450,20 @@ int stub_call_ex(stub_t *stub,
     if (rc != OK) {
         return rc;
     }
-    if (metadata &&
-        metadata_encode(metadata, metadata_buf, sizeof(metadata_buf), &metadata_len) != OK) {
+    if (stub_metadata_encode(metadata, metadata_buf, sizeof(metadata_buf), &metadata_len) != OK) {
         rpc_log_error("metadata encode failed (too large?): service=%s method=%s", service, method);
         return ERR_TOOBIG;
     }
     id = stub_next_id(stub->node);
     if (ntk_poller_is_current_thread(zri_node_pick_poller(stub->node, id))) {
-        stub_event_now(
-            stub, id, service, method, data, len, encoding, metadata_buf, (uint16_t)metadata_len);
+        stub_event_now(stub, id, service, method, data, len, encoding, metadata_buf, metadata_len);
         if (out_request_id) {
             *out_request_id = id;
         }
         return OK;
     }
     t = stub_task_create(
-        stub, id, service, method, data, len, encoding, metadata_buf, (uint16_t)metadata_len);
+        stub, id, service, method, data, len, encoding, metadata_buf, metadata_len);
     if (!t) {
         return ERR_NOMEM;
     }
@@ -490,7 +506,7 @@ int zri_stub_call_ex(stub_t *stub,
     size_t len;
     uint8_t encoding;
     uint8_t metadata_buf[METADATA_WIRE_MAX];
-    size_t metadata_len = 0;
+    uint16_t metadata_len = 0;
     int rc;
 
     if (!stub || !stub->node || !service || !method) {
@@ -506,8 +522,7 @@ int zri_stub_call_ex(stub_t *stub,
     if (rc != OK) {
         return rc;
     }
-    if (metadata &&
-        metadata_encode(metadata, metadata_buf, sizeof(metadata_buf), &metadata_len) != OK) {
+    if (stub_metadata_encode(metadata, metadata_buf, sizeof(metadata_buf), &metadata_len) != OK) {
         rpc_log_error("metadata encode failed (too large?): service=%s method=%s", service, method);
         return ERR_TOOBIG;
     }
@@ -529,7 +544,7 @@ int zri_stub_call_ex(stub_t *stub,
                       user,
                       timeout_ms,
                       metadata_buf,
-                      (uint16_t)metadata_len);
+                      metadata_len);
         if (out_request_id) {
             *out_request_id = id;
         }
@@ -537,7 +552,7 @@ int zri_stub_call_ex(stub_t *stub,
     }
 
     t = stub_task_create(
-        stub, id, service, method, data, len, encoding, metadata_buf, (uint16_t)metadata_len);
+        stub, id, service, method, data, len, encoding, metadata_buf, metadata_len);
     if (!t) {
         return ERR_NOMEM;
     }
