@@ -14,11 +14,22 @@ typedef struct transport_provider transport_provider_t;
 typedef struct transport_instance transport_instance_t;
 
 /* ---- 消息与回调 ---- */
+/*
+ * Provider 消息视图与框架内部 zri_message_t 的语义保持一致（寻址/回程 token
+ * 由 send/reply/receive 的独立参数承载）。新增字段必须同步在
+ * transport_factory.c 的双向适配中透传，避免自定义传输丢语义。
+ */
 typedef struct transport_message {
     uint8_t kind;
     uint8_t flags; /* MSG_FLAG_*；随包透传 */
     int status; /* RESPONSE：应用状态码；带 MSG_FLAG_FRAMEWORK_STATUS 时为框架错误码 */
     uint32_t request_id;
+    uint32_t timeout_ms; /* 请求剩余超时毫秒；0 = 无 deadline */
+    const void *metadata; /* metadata TLV 字节；可为 NULL */
+    uint16_t metadata_len;
+    const char *status_msg; /* 状态消息；可为 NULL */
+    uint16_t status_msg_len;
+    int has_stream; /* 非 0 时 stream 有效 */
     stream_meta_t stream;
     const char *route;
     payload_t payload;

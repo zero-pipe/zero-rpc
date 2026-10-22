@@ -55,6 +55,43 @@ static void test_envelope_roundtrip(void)
     CHECK(memcmp(view.payload, payload, sizeof(payload)) == 0);
 }
 
+static void test_envelope_rejects_bad_header(void)
+{
+    uint8_t buf[128];
+    uint8_t bad[128];
+    const char *route = "echo.ping";
+    const uint8_t payload[4] = { 1, 2, 3, 4 };
+    zri_envelope_t envelope;
+    zri_envelope_t view;
+    size_t n;
+
+    memset(&envelope, 0, sizeof(envelope));
+    envelope.kind = KIND_REQUEST;
+    envelope.route = route;
+    envelope.payload = payload;
+    envelope.payload_len = sizeof(payload);
+    n = zri_envelope_encode(buf, sizeof(buf), &envelope);
+    CHECK(n > 0);
+    CHECK(zri_envelope_decode(buf, n, &view) == OK);
+
+    memcpy(bad, buf, n);
+    bad[0] ^= 0xff;
+    CHECK(zri_envelope_decode(bad, n, &view) == ERR_INVALID);
+
+    memcpy(bad, buf, n);
+    bad[2] = (uint8_t)(ENVELOPE_VERSION + 1u);
+    CHECK(zri_envelope_decode(bad, n, &view) == ERR_INVALID);
+
+    /* 控制段（route 首字节）被篡改必须被 CRC 检出。 */
+    memcpy(bad, buf, n);
+    bad[ENVELOPE_HDR_LEN] ^= 0x01;
+    CHECK(zri_envelope_decode(bad, n, &view) == ERR_INVALID);
+
+    memcpy(bad, buf, n);
+    bad[ENVELOPE_OFF_CHECKSUM] ^= 0x01;
+    CHECK(zri_envelope_decode(bad, n, &view) == ERR_INVALID);
+}
+
 static void test_udp_fragment_roundtrip(void)
 {
     uint8_t buf[256];
@@ -217,6 +254,7 @@ static void test_rtcp_bye_roundtrip(void)
 int main(void)
 {
     test_envelope_roundtrip();
+    test_envelope_rejects_bad_header();
     test_udp_fragment_roundtrip();
     test_tcp_opaque_frame();
     test_nack_roundtrip();

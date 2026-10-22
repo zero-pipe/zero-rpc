@@ -12,6 +12,24 @@ size_t zri_envelope_size(size_t route_len,
     return (size_t)ENVELOPE_HDR_LEN + route_len + metadata_len + status_msg_len + payload_len;
 }
 
+/*
+ * CRC32 覆盖控制段（header + route + metadata + status_msg），不含 payload。
+ * UDP/TCP 发送时只编码前缀、payload 零拷贝直发，因此校验必须在二者拼接前
+ * 就能确定；payload 完整性由传输层（UDP 校验和 / TCP）负责。
+ */
+static uint32_t envelope_checksum(const uint8_t *buf, size_t len)
+{
+    static const uint8_t zero[4] = { 0, 0, 0, 0 };
+    uint32_t crc = zri_crc32(buf, ENVELOPE_OFF_CHECKSUM, 0);
+    crc = zri_crc32(zero, sizeof(zero), crc);
+    if (len > (size_t)ENVELOPE_OFF_CHECKSUM + 4u) {
+        crc = zri_crc32(buf + ENVELOPE_OFF_CHECKSUM + 4u,
+                        len - ENVELOPE_OFF_CHECKSUM - 4u,
+                        crc);
+    }
+    return crc;
+}
+
 size_t zri_envelope_encode(uint8_t *buf, size_t cap, const zri_envelope_t *envelope)
 {
     size_t route_len;
@@ -34,20 +52,24 @@ size_t zri_envelope_encode(uint8_t *buf, size_t cap, const zri_envelope_t *envel
         return 0;
     }
     p = buf;
-    p[0] = envelope->kind;
-    p[1] = envelope->encoding;
-    p[2] = envelope->stream_flags;
-    p[3] = envelope->flags;
-    zri_put_u32(p + 4, (uint32_t)envelope->status);
-    zri_put_u32(p + 8, envelope->request_id);
-    zri_put_u32(p + 12, envelope->stream_id);
-    zri_put_u64(p + 16, envelope->stream_offset);
-    zri_put_u64(p + 24, envelope->stream_total_size);
-    zri_put_u16(p + 32, (uint16_t)route_len);
-    zri_put_u16(p + 34, envelope->metadata_len);
-    zri_put_u32(p + 36, envelope->timeout_ms);
-    zri_put_u16(p + 40, envelope->status_msg_len);
-    zri_put_u16(p + 42, 0);
+    p[0] = (uint8_t)ENVELOPE_MAGIC0;
+    p[1] = (uint8_t)ENVELOPE_MAGIC1;
+    p[2] = (uint8_t)ENVELOPE_VERSION;
+    p[3] = envelope->kind;
+    p[4] = envelope->encoding;
+    p[5] = envelope->stream_flags;
+    p[6] = envelope->flags;
+    p[7] = 0;
+    zri_put_u32(p + 8, (uint32_t)envelope->status);
+    zri_put_u32(p + 12, envelope->request_id);
+    zri_put_u32(p + 16, envelope->stream_id);
+    zri_put_u64(p + 20, envelope->stream_offset);
+    zri_put_u64(p + 28, envelope->stream_total_size);
+    zri_put_u16(p + 36, (uint16_t)route_len);
+    zri_put_u16(p + 38, envelope->metadata_len);
+    zri_put_u32(p + 40, envelope->timeout_ms);
+    zri_put_u16(p + 44, envelope->status_msg_len);
+    zri_put_u32(p + ENVELOPE_OFF_CHECKSUM, 0);
     p += ENVELOPE_HDR_LEN;
     if (route_len > 0) {
         memcpy(p, envelope->route, route_len);
@@ -64,6 +86,10 @@ size_t zri_envelope_encode(uint8_t *buf, size_t cap, const zri_envelope_t *envel
     if (envelope->payload_len > 0) {
         memcpy(p, envelope->payload, envelope->payload_len);
     }
+    zri_put_u32(buf + ENVELOPE_OFF_CHECKSUM,
+                envelope_checksum(
+                    buf, (size_t)ENVELOPE_HDR_LEN + route_len + envelope->metadata_len +
+                             envelope->status_msg_len));
     return need;
 }
 
@@ -75,22 +101,33 @@ int zri_envelope_decode(const uint8_t *buf, size_t len, zri_envelope_t *view)
     if (!buf || !view || len < ENVELOPE_HDR_LEN) {
         return ERR_INVALID;
     }
-    route_len = zri_get_u16(buf + 32);
-    metadata_len = zri_get_u16(buf + 34);
-    status_msg_len = zri_get_u16(buf + 40);
+    if (buf[0] != (uint8_t)ENVELOPE_MAGIC0 || buf[1] != (uint8_t)ENVELOPE_MAGIC1) {
+        return ERR_INVALID;
+    }
+    if (buf[2] != (uint8_t)ENVELOPE_VERSION) {
+        return ERR_INVALID;
+    }
+    route_len = zri_get_u16(buf + 36);
+    metadata_len = zri_get_u16(buf + 38);
+    status_msg_len = zri_get_u16(buf + 44);
     if ((size_t)ENVELOPE_HDR_LEN + route_len + metadata_len + status_msg_len > len) {
         return ERR_INVALID;
     }
-    view->kind = buf[0];
-    view->encoding = buf[1];
-    view->stream_flags = buf[2];
-    view->flags = buf[3];
-    view->status = (int)zri_get_u32(buf + 4);
-    view->request_id = zri_get_u32(buf + 8);
-    view->stream_id = zri_get_u32(buf + 12);
-    view->stream_offset = zri_get_u64(buf + 16);
-    view->stream_total_size = zri_get_u64(buf + 24);
-    view->timeout_ms = zri_get_u32(buf + 36);
+    if (zri_get_u32(buf + ENVELOPE_OFF_CHECKSUM) !=
+        envelope_checksum(
+            buf, (size_t)ENVELOPE_HDR_LEN + route_len + metadata_len + status_msg_len)) {
+        return ERR_INVALID;
+    }
+    view->kind = buf[3];
+    view->encoding = buf[4];
+    view->stream_flags = buf[5];
+    view->flags = buf[6];
+    view->status = (int)zri_get_u32(buf + 8);
+    view->request_id = zri_get_u32(buf + 12);
+    view->stream_id = zri_get_u32(buf + 16);
+    view->stream_offset = zri_get_u64(buf + 20);
+    view->stream_total_size = zri_get_u64(buf + 28);
+    view->timeout_ms = zri_get_u32(buf + 40);
     view->route = (const char *)(buf + ENVELOPE_HDR_LEN);
     view->route_len = route_len;
     view->metadata = buf + ENVELOPE_HDR_LEN + route_len;

@@ -27,13 +27,19 @@ static void provider_on_receive(void *receiver,
     if (!transport || !transport->node || !message) {
         return;
     }
-    has_stream = (message->stream.flags & (STREAM_FIRST | STREAM_LAST | STREAM_CANCEL)) != 0 ||
+    has_stream = message->has_stream ||
+        (message->stream.flags & (STREAM_FIRST | STREAM_LAST | STREAM_CANCEL)) != 0 ||
         message->stream.stream_id != 0;
     memset(&msg, 0, sizeof(msg));
     msg.kind = message->kind;
     msg.flags = message->flags;
     msg.status = message->status;
     msg.request_id = message->request_id;
+    msg.timeout_ms = message->timeout_ms;
+    msg.metadata = message->metadata;
+    msg.metadata_len = message->metadata_len;
+    msg.status_msg = message->status_msg;
+    msg.status_msg_len = message->status_msg_len;
     msg.route = message->route;
     msg.payload = message->payload;
     if (has_stream) {
@@ -68,9 +74,13 @@ static void provider_message_from(const zri_message_t *src, transport_message_t 
     dst->flags = src->flags;
     dst->status = src->status;
     dst->request_id = src->request_id;
-    if (src->has_stream) {
-        dst->stream = src->stream;
-    }
+    dst->timeout_ms = src->timeout_ms;
+    dst->metadata = src->metadata;
+    dst->metadata_len = src->metadata_len;
+    dst->status_msg = src->status_msg;
+    dst->status_msg_len = src->status_msg_len;
+    dst->has_stream = src->has_stream;
+    dst->stream = src->stream;
     dst->route = src->route;
     dst->payload = src->payload;
 }

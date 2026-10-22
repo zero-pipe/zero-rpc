@@ -63,4 +63,10 @@ static inline void zri_copy_str(char *dst, size_t cap, const char *src, const ch
 /* 格式化 "service.method"；超长/参数非法返回 ERR_INVALID。 */
 int zri_route_format(char *out, size_t cap, const char *service, const char *method);
 
+/*
+ * 增量 CRC32（IEEE 802.3，反射多项式 0xEDB88320）。首段 seed 传 0，后续段传上
+ * 一次返回值即可拼接校验；用于 envelope 的完整性校验。
+ */
+uint32_t zri_crc32(const void *data, size_t len, uint32_t seed);
+
 #endif /* UTIL_H */
