@@ -15,11 +15,13 @@ add_library(rpc STATIC
     core/pending.c
     core/dedup.c
     core/codec.c
-    core/log.c
-    core/mem.c
-    core/util.c
-    core/iobuf.c
-    core/endpoint.c
+    util/log.c
+    util/crc32.c
+    util/mem.c
+    util/util.c
+    util/iobuf.c
+    util/endpoint.c
+    util/json/codec_json.c
     message/envelope.c
     router/router.c
     registry/registry.c
@@ -42,6 +44,8 @@ target_include_directories(rpc
         $<INSTALL_INTERFACE:include>
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/core
+        ${CMAKE_CURRENT_SOURCE_DIR}/util
+        ${CMAKE_CURRENT_SOURCE_DIR}/util/json
         ${CMAKE_CURRENT_SOURCE_DIR}/message
         ${CMAKE_CURRENT_SOURCE_DIR}/transport
         ${CMAKE_CURRENT_SOURCE_DIR}/router

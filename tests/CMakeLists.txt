@@ -30,6 +30,7 @@ add_test(NAME stream COMMAND test_stream)
 add_executable(test_pool test_pool.c)
 target_include_directories(test_pool PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/core
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/util
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/discovery
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/message
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/registry
@@ -41,7 +42,8 @@ add_test(NAME pool COMMAND test_pool)
 
 add_executable(test_iobuf test_iobuf.c)
 target_include_directories(test_iobuf PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/util)
 target_link_libraries(test_iobuf PRIVATE rpc)
 add_test(NAME iobuf COMMAND test_iobuf)
 

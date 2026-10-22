@@ -1,6 +1,4 @@
-#include "util.h"
-
-#include <stdio.h>
+#include "crc32.h"
 
 /* CRC32 查表（IEEE 802.3），运行时按需构建一次；只读表，构建用原子一次性置位。 */
 static uint32_t g_crc_table[256];
@@ -31,18 +29,4 @@ uint32_t zri_crc32(const void *data, size_t len, uint32_t seed)
         crc = g_crc_table[(crc ^ *p++) & 0xffu] ^ (crc >> 8);
     }
     return ~crc;
-}
-
-int zri_route_format(char *out, size_t cap, const char *service, const char *method)
-{
-    int n;
-
-    if (!out || cap == 0 || !service || !method) {
-        return ERR_INVALID;
-    }
-    n = snprintf(out, cap, "%s.%s", service, method);
-    if (n < 0 || (size_t)n >= cap) {
-        return ERR_INVALID;
-    }
-    return OK;
 }
