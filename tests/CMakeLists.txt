@@ -13,6 +13,11 @@ add_executable(test_config test_config.c)
 target_link_libraries(test_config PRIVATE rpc)
 add_test(NAME config COMMAND test_config)
 
+add_executable(test_metrics test_metrics.c)
+target_include_directories(test_metrics PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src/util)
+target_link_libraries(test_metrics PRIVATE rpc)
+add_test(NAME metrics COMMAND test_metrics)
+
 add_executable(test_registry test_registry.c)
 target_include_directories(test_registry PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src/registry)
 target_link_libraries(test_registry PRIVATE rpc)
@@ -66,7 +71,7 @@ add_test(NAME headers COMMAND test_headers)
 # CTest labels drive gating: `ctest -L unit`, `ctest -L integration`.
 # unit        = pure module / codec / config logic
 # integration = end-to-end loopback / streaming with real threads + sockets
-set_tests_properties(framing config registry reliable pool iobuf
+set_tests_properties(framing config metrics registry reliable pool iobuf
     PROPERTIES LABELS "unit" TIMEOUT 120)
 set_tests_properties(loopback stream
     PROPERTIES LABELS "integration" TIMEOUT 300)

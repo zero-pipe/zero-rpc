@@ -11,6 +11,7 @@
 
 #include "cJSON.h"
 #include "codec_json_internal.h"
+#include "defaults.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -34,7 +35,7 @@ void node_transport_config_default(node_transport_config_t *cfg)
     }
     memset(cfg, 0, sizeof(*cfg));
     cfg->transport = TRANSPORT_UDP;
-    cfg->bind_host = "0.0.0.0";
+    cfg->bind_host = ZRI_DEFAULT_BIND_HOST;
 }
 
 void node_discovery_config_default(node_discovery_config_t *cfg)
@@ -43,7 +44,7 @@ void node_discovery_config_default(node_discovery_config_t *cfg)
         return;
     }
     memset(cfg, 0, sizeof(*cfg));
-    cfg->host = "255.255.255.255";
+    cfg->host = ZRI_DEFAULT_DISCOVERY_HOST;
 }
 
 void node_metrics_config_default(node_metrics_config_t *cfg)
@@ -52,7 +53,7 @@ void node_metrics_config_default(node_metrics_config_t *cfg)
         return;
     }
     memset(cfg, 0, sizeof(*cfg));
-    cfg->sample_every = 1;
+    cfg->sample_every = ZRI_DEFAULT_METRICS_SAMPLE_EVERY;
 }
 
 void node_log_config_default(node_log_config_t *cfg)
@@ -70,7 +71,7 @@ void node_config_default(node_config_t *cfg)
         return;
     }
     memset(cfg, 0, sizeof(*cfg));
-    cfg->name = "rpc";
+    cfg->name = ZRI_DEFAULT_NODE_NAME;
     cfg->mode = MODE_MESH;
     node_runtime_config_default(&cfg->runtime);
     node_transport_config_default(&cfg->transport);
@@ -724,7 +725,7 @@ static int apply_config(config_t *out,
         }
         name = item->valuestring;
     }
-    if (cfg_copy(out->name, sizeof(out->name), name, "rpc") != OK) {
+    if (cfg_copy(out->name, sizeof(out->name), name, ZRI_DEFAULT_NODE_NAME) != OK) {
         return ERR_INVALID;
     }
     item = cJSON_GetObjectItemCaseSensitive(root, "mode");
@@ -737,7 +738,7 @@ static int apply_config(config_t *out,
     node->name = out->name;
 
     /* runtime */
-    if (rt->io_threads > 1024 || rt->handler_threads > 1024) {
+    if (rt->io_threads > ZRI_MAX_IO_THREADS || rt->handler_threads > ZRI_MAX_HANDLER_THREADS) {
         return ERR_INVALID;
     }
     node->runtime.io_threads = (unsigned)rt->io_threads;
@@ -755,7 +756,8 @@ static int apply_config(config_t *out,
         return ERR_INVALID;
     }
     node->transport.transport = kind;
-    if (cfg_copy(out->bind_host, sizeof(out->bind_host), tp->bind_host, "0.0.0.0") != OK) {
+    if (cfg_copy(out->bind_host, sizeof(out->bind_host), tp->bind_host, ZRI_DEFAULT_BIND_HOST) !=
+        OK) {
         return ERR_INVALID;
     }
     node->transport.bind_host = out->bind_host;
@@ -788,7 +790,7 @@ static int apply_config(config_t *out,
         if (cfg_copy(out->discovery_host,
                      sizeof(out->discovery_host),
                      host ? host->valuestring : NULL,
-                     "255.255.255.255") != OK) {
+                     ZRI_DEFAULT_DISCOVERY_HOST) != OK) {
             return ERR_INVALID;
         }
         node->discovery.port = (uint16_t)port;
@@ -800,7 +802,8 @@ static int apply_config(config_t *out,
     /* metrics */
     node->metrics.disabled = mt->disabled;
     node->metrics.latency_disabled = mt->latency_disabled;
-    node->metrics.sample_every = mt->sample_every ? mt->sample_every : 1;
+    node->metrics.sample_every =
+        mt->sample_every ? mt->sample_every : ZRI_DEFAULT_METRICS_SAMPLE_EVERY;
     node->metrics.per_peer_disabled = mt->per_peer_disabled;
 
     /* log */

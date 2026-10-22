@@ -17,6 +17,7 @@ add_library(rpc STATIC
     core/codec.c
     util/log.c
     util/crc32.c
+    util/metrics.c
     util/mem.c
     util/util.c
     util/iobuf.c

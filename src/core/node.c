@@ -2,6 +2,7 @@
 #include "node_internal.h"
 
 #include "atomic.h"
+#include "defaults.h"
 #include "mem.h"
 #include "transport_factory.h"
 #include "util.h"
@@ -182,9 +183,15 @@ int node_create(const node_config_t *cfg, node_t **out)
         return ERR_INVALID;
     }
     zri_copy_str(node->name, sizeof(node->name), cfg->name, "rpc");
-    zri_copy_str(node->bind_host, sizeof(node->bind_host), cfg->transport.bind_host, "0.0.0.0");
+    zri_copy_str(node->bind_host,
+                 sizeof(node->bind_host),
+                 cfg->transport.bind_host,
+                 ZRI_DEFAULT_BIND_HOST);
     zri_copy_str(
-        node->discovery_host, sizeof(node->discovery_host), cfg->discovery.host, "255.255.255.255");
+        node->discovery_host,
+        sizeof(node->discovery_host),
+        cfg->discovery.host,
+        ZRI_DEFAULT_DISCOVERY_HOST);
     node->discovery_port = cfg->discovery.port ? cfg->discovery.port : DISCOVERY_PORT;
     node->io_threads = cfg->runtime.io_threads ? cfg->runtime.io_threads : ntk_thread_hardware_concurrency();
     if (node->io_threads > IO_MAX) {
@@ -193,8 +200,11 @@ int node_create(const node_config_t *cfg, node_t **out)
     if (node->io_threads < 1) {
         node->io_threads = 1;
     }
-    node->hello_interval_ms = cfg->discovery.hello_interval_ms ? cfg->discovery.hello_interval_ms : 3000;
-    node->node_ttl_ms = cfg->discovery.node_ttl_ms ? cfg->discovery.node_ttl_ms : 9000;
+    node->hello_interval_ms = cfg->discovery.hello_interval_ms ?
+        cfg->discovery.hello_interval_ms :
+        ZRI_DEFAULT_HELLO_INTERVAL_MS;
+    node->node_ttl_ms =
+        cfg->discovery.node_ttl_ms ? cfg->discovery.node_ttl_ms : ZRI_DEFAULT_NODE_TTL_MS;
     node->mode = cfg->mode;
     node->frag_bytes = cfg->transport.frag_bytes;
     if (node->frag_bytes < FRAG_MIN) {
@@ -220,6 +230,16 @@ int node_create(const node_config_t *cfg, node_t **out)
     node->rate_limit_pps = cfg->runtime.peer_rate_limit_pps;
     node->handler_max_concurrency = cfg->runtime.handler_max_concurrency;
     node->max_inflight = cfg->runtime.max_inflight ? cfg->runtime.max_inflight : DEFAULT_MAX_INFLIGHT;
+    /*
+     * metrics / log 运行期开关：关闭后热路径只多一次全局标志判断（见 atomic.h /
+     * log.h）。sample_every 只作用于延迟直方图采样。
+     */
+    g_zri_metrics_enabled = cfg->metrics.disabled ? 0 : 1;
+    g_zri_latency_enabled = (cfg->metrics.disabled || cfg->metrics.latency_disabled) ? 0 : 1;
+    g_zri_metrics_sample_every =
+        cfg->metrics.sample_every ? cfg->metrics.sample_every : ZRI_DEFAULT_METRICS_SAMPLE_EVERY;
+    rpc_log_configure(cfg->log.disabled ? 0 : 1,
+                      cfg->log.level ? cfg->log.level : NODE_LOG_INFO);
     {
         const char *dp = getenv("DROP_PERCENT");
         int v = dp ? atoi(dp) : 0;
@@ -584,10 +604,6 @@ int node_binding_endpoint(const node_t *node, size_t index, char *out, size_t ca
 
 /* ---- 指标与对端质量 ---- */
 
-static const uint32_t g_latency_bounds[LATENCY_HIST_BUCKETS - 1] = {
-    1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000
-};
-
 /* 从累计直方图估算分位值；最后一桶返回 10000（表示 >=10s）。 */
 static uint64_t latency_percentile(const uint64_t *hist, uint64_t total, uint32_t pct)
 {
@@ -601,7 +617,7 @@ static uint64_t latency_percentile(const uint64_t *hist, uint64_t total, uint32_
     for (i = 0; i < LATENCY_HIST_BUCKETS; i++) {
         cumulative += hist[i];
         if (cumulative >= target) {
-            return i < LATENCY_HIST_BUCKETS - 1 ? g_latency_bounds[i] : 10000u;
+            return i < LATENCY_HIST_BUCKETS - 1 ? zri_latency_bounds[i] : 10000u;
         }
     }
     return 10000u;

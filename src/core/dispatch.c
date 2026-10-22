@@ -15,10 +15,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* 端到端延迟直方图上界（毫秒），与 metrics.h 的 LATENCY_HIST_BUCKETS 对应。 */
-static const uint32_t g_latency_bounds[LATENCY_HIST_BUCKETS - 1] = {
-    1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000
-};
+/* 延迟采样序号；g_zri_metrics_sample_every > 1 时用于按比例抽样。 */
+static uint32_t g_latency_sample_seq;
 
 /* 记录一次已完成 RPC 的端到端延迟（从发起 pending 到收到响应）。 */
 static void pending_record_latency(node_t *node, const zri_pending_t *p)
@@ -29,10 +27,19 @@ static void pending_record_latency(node_t *node, const zri_pending_t *p)
     if (!node || !p || p->started_ms == 0) {
         return;
     }
+    if (!g_zri_latency_enabled) {
+        return;
+    }
+    if (g_zri_metrics_sample_every > 1u) {
+        uint32_t seq = zri_atomic_fetch_add_u32(&g_latency_sample_seq, 1u);
+        if (seq % g_zri_metrics_sample_every != 0u) {
+            return;
+        }
+    }
     now = zri_now_ms();
     ms = now > p->started_ms ? now - p->started_ms : 0;
     for (bucket = 0; bucket < LATENCY_HIST_BUCKETS - 1; bucket++) {
-        if (ms <= g_latency_bounds[bucket]) {
+        if (ms <= zri_latency_bounds[bucket]) {
             break;
         }
     }

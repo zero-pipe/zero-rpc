@@ -27,6 +27,11 @@ static uint8_t log_level_from_env(void)
     return ELOG_LVL_INFO;
 }
 
+/* 运行期开关；默认开启，node_create 按配置覆盖。 */
+static volatile int s_log_enabled = 1;
+/* 初始化只做一次；之后 rpc_log_enabled 只读该标志，避免每次日志都进 once。 */
+static volatile int s_log_inited = 0;
+
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #ifndef _WIN32_WINNT
@@ -58,6 +63,27 @@ void rpc_log_init(void)
 {
     (void)InitOnceExecuteOnce(&s_log_once, log_init_once, NULL, NULL);
 }
+
+void rpc_log_configure(int enabled, uint8_t level)
+{
+    const char *env;
+
+    rpc_log_init();
+    s_log_inited = 1;
+    s_log_enabled = enabled ? 1 : 0;
+    /* 保留 RPC_LOG_LEVEL 的调试优先级，未设置时使用配置级别。 */
+    env = getenv("RPC_LOG_LEVEL");
+    elog_set_filter_lvl(env && env[0] ? log_level_from_env() : level);
+}
+
+int rpc_log_enabled(void)
+{
+    if (!s_log_inited) {
+        rpc_log_init();
+        s_log_inited = 1;
+    }
+    return s_log_enabled;
+}
 #else
 #include <pthread.h>
 
@@ -80,5 +106,25 @@ static void log_init_once(void)
 void rpc_log_init(void)
 {
     (void)pthread_once(&s_log_once, log_init_once);
+}
+
+void rpc_log_configure(int enabled, uint8_t level)
+{
+    const char *env;
+
+    rpc_log_init();
+    s_log_inited = 1;
+    s_log_enabled = enabled ? 1 : 0;
+    env = getenv("RPC_LOG_LEVEL");
+    elog_set_filter_lvl(env && env[0] ? log_level_from_env() : level);
+}
+
+int rpc_log_enabled(void)
+{
+    if (!s_log_inited) {
+        rpc_log_init();
+        s_log_inited = 1;
+    }
+    return s_log_enabled;
 }
 #endif

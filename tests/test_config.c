@@ -267,6 +267,15 @@ static void test_defaults_api(void)
     CHECK(cfg.log.level == NODE_LOG_INFO);
 }
 
+static void test_log_switch(void)
+{
+    CHECK(rpc_log_enabled() == 1);
+    rpc_log_configure(0, NODE_LOG_ERROR);
+    CHECK(rpc_log_enabled() == 0);
+    rpc_log_configure(1, NODE_LOG_INFO);
+    CHECK(rpc_log_enabled() == 1);
+}
+
 int main(void)
 {
     test_legacy_flat();
@@ -279,6 +288,7 @@ int main(void)
     test_nested_bindings();
     test_rtcp_config();
     test_defaults_api();
+    test_log_switch();
     if (g_fail) {
         rpc_log_error("config: FAIL");
         return 1;

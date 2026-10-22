@@ -10,6 +10,9 @@ extern "C" {
 /* 端到端延迟直方图桶数：<=1,2,5,10,25,50,100,250,500,1000,2500,5000,10000ms，最后一桶为 >10000ms。 */
 #define LATENCY_HIST_BUCKETS 14
 
+/* 直方图上界（毫秒），共 LATENCY_HIST_BUCKETS-1 个；最后一桶表示 >=10000ms。 */
+extern const uint32_t zri_latency_bounds[LATENCY_HIST_BUCKETS - 1];
+
 /* ---- 节点累计指标 ---- */
 typedef struct metrics {
     uint64_t requests_sent;

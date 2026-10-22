@@ -24,6 +24,11 @@ static inline void zri_atomic_add_u32(uint32_t *p, uint32_t v)
     _InterlockedExchangeAdd((volatile long *)p, (long)v);
 }
 
+static inline uint32_t zri_atomic_fetch_add_u32(uint32_t *p, uint32_t v)
+{
+    return (uint32_t)_InterlockedExchangeAdd((volatile long *)p, (long)v);
+}
+
 static inline void zri_atomic_sub_u64(uint64_t *p, uint64_t v)
 {
     _InterlockedExchangeAdd64((volatile __int64 *)p, -(__int64)v);
@@ -82,6 +87,11 @@ static inline void zri_atomic_add_u32(uint32_t *p, uint32_t v)
     __atomic_fetch_add(p, v, __ATOMIC_RELAXED);
 }
 
+static inline uint32_t zri_atomic_fetch_add_u32(uint32_t *p, uint32_t v)
+{
+    return __atomic_fetch_add(p, v, __ATOMIC_RELAXED);
+}
+
 static inline void zri_atomic_sub_u64(uint64_t *p, uint64_t v)
 {
     __atomic_fetch_sub(p, v, __ATOMIC_RELAXED);
@@ -124,9 +134,42 @@ static inline int zri_atomic_cas_u32(uint32_t *p, uint32_t *expected, uint32_t d
 
 #endif
 
-/* metrics_t 全是 uint64_t 计数；下面两个宏让调用点保持简短。 */
-#define ZRI_METRIC_INC(field) zri_atomic_add_u64((uint64_t *)&(field), 1u)
-#define ZRI_METRIC_ADD(field, v) zri_atomic_add_u64((uint64_t *)&(field), (uint64_t)(v))
-#define ZRI_METRIC_SUB(field, v) zri_atomic_sub_u64((uint64_t *)&(field), (uint64_t)(v))
+/*
+ * metrics 开关：运行期可关（node 配置 metrics.disabled），也可在编译期用
+ * RPC_METRICS_ENABLED=0 彻底编译掉。关闭时热路径只多一次全局标志判断。
+ */
+#ifndef RPC_METRICS_ENABLED
+#define RPC_METRICS_ENABLED 1
+#endif
+
+extern volatile int g_zri_metrics_enabled;
+extern volatile int g_zri_latency_enabled;
+extern volatile uint32_t g_zri_metrics_sample_every;
+
+#if RPC_METRICS_ENABLED
+/* metrics_t 全是 uint64_t 计数；下面三个宏让调用点保持简短。 */
+#define ZRI_METRIC_INC(field)                             \
+    do {                                                  \
+        if (g_zri_metrics_enabled) {                      \
+            zri_atomic_add_u64((uint64_t *)&(field), 1u); \
+        }                                                 \
+    } while (0)
+#define ZRI_METRIC_ADD(field, v)                                     \
+    do {                                                             \
+        if (g_zri_metrics_enabled) {                                 \
+            zri_atomic_add_u64((uint64_t *)&(field), (uint64_t)(v)); \
+        }                                                            \
+    } while (0)
+#define ZRI_METRIC_SUB(field, v)                                     \
+    do {                                                             \
+        if (g_zri_metrics_enabled) {                                 \
+            zri_atomic_sub_u64((uint64_t *)&(field), (uint64_t)(v)); \
+        }                                                            \
+    } while (0)
+#else
+#define ZRI_METRIC_INC(field) ((void)0)
+#define ZRI_METRIC_ADD(field, v) ((void)0)
+#define ZRI_METRIC_SUB(field, v) ((void)0)
+#endif
 
 #endif /* ZRI_ATOMIC_H */
