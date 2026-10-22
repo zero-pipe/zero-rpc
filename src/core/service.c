@@ -753,6 +753,16 @@ static zri_recv_stream_t *alloc_recv_stream(node_t *node,
                                             const zri_message_t *msg)
 {
     int i;
+    int used = 0;
+    for (i = 0; i < MAX_RECV_STREAMS; i++) {
+        if (node->recv_streams[i].used) {
+            used++;
+        }
+    }
+    if (node->max_recv_streams != 0 && (uint32_t)used >= node->max_recv_streams) {
+        ZRI_METRIC_INC(node->metrics.streams_rejected);
+        return NULL;
+    }
     for (i = 0; i < MAX_RECV_STREAMS; i++) {
         zri_recv_stream_t *stream = &node->recv_streams[i];
         if (!stream->used) {
@@ -794,6 +804,10 @@ typedef struct zri_stream_task {
     unsigned flags;
     uint64_t offset;
     const metadata_t *metadata; /* 借用 stream 状态里的副本；仅本次任务内有效 */
+    metadata_t chunk_metadata;  /* 本 chunk 自带 metadata 的解码副本 */
+    int has_chunk_metadata;
+    char message[STATUS_MSG_MAX]; /* 本 chunk 的状态消息 */
+    uint16_t message_len;
     uint64_t deadline_ms;
     service_interceptor_fn interceptor;
     void *interceptor_user;
@@ -914,8 +928,8 @@ static void stream_task_run(void *user)
     chunk.encoding = task->encoding;
     chunk.offset = task->offset;
     chunk.flags = task->flags;
-    chunk.metadata = NULL;
-    chunk.message = NULL;
+    chunk.metadata = task->has_chunk_metadata ? &task->chunk_metadata : NULL;
+    chunk.message = task->message_len ? task->message : NULL;
     if (task->first && task->interceptor) {
         int st = task->interceptor(call, &req, task->interceptor_user);
         if (st != OK) {
@@ -965,6 +979,10 @@ void zri_service_handle_stream_chunk(node_t *node,
     zri_recv_stream_t *state;
     request_t request;
     chunk_t chunk;
+    metadata_t chunk_metadata;
+    int has_chunk_metadata = 0;
+    char chunk_message[STATUS_MSG_MAX];
+    uint16_t chunk_message_len = 0;
     const stream_meta_t *stream_meta;
     int use_worker;
     service_interceptor_fn interceptor = NULL;
@@ -1085,6 +1103,20 @@ void zri_service_handle_stream_chunk(node_t *node,
         if (state->metadata) {
             task->metadata = state->metadata;
         }
+        if (msg->metadata_len > 0 && msg->metadata &&
+            metadata_decode(&task->chunk_metadata, msg->metadata, msg->metadata_len) == OK &&
+            task->chunk_metadata.count > 0) {
+            task->has_chunk_metadata = 1;
+        }
+        if (msg->status_msg_len > 0 && msg->status_msg) {
+            size_t message_len = msg->status_msg_len;
+            if (message_len >= sizeof(task->message)) {
+                message_len = sizeof(task->message) - 1;
+            }
+            memcpy(task->message, msg->status_msg, message_len);
+            task->message[message_len] = '\0';
+            task->message_len = (uint16_t)message_len;
+        }
         state->intercepted = 1;
         state->last_ms = zri_now_ms();
         state->bytes += msg->payload.len;
@@ -1125,6 +1157,22 @@ void zri_service_handle_stream_chunk(node_t *node,
     chunk.encoding = msg->payload.encoding;
     chunk.offset = stream_meta->offset;
     chunk.flags = stream_meta->flags;
+    if (msg->metadata_len > 0 && msg->metadata &&
+        metadata_decode(&chunk_metadata, msg->metadata, msg->metadata_len) == OK &&
+        chunk_metadata.count > 0) {
+        has_chunk_metadata = 1;
+    }
+    chunk.metadata = has_chunk_metadata ? &chunk_metadata : NULL;
+    if (msg->status_msg_len > 0 && msg->status_msg) {
+        size_t message_len = msg->status_msg_len;
+        if (message_len >= sizeof(chunk_message)) {
+            message_len = sizeof(chunk_message) - 1;
+        }
+        memcpy(chunk_message, msg->status_msg, message_len);
+        chunk_message[message_len] = '\0';
+        chunk_message_len = (uint16_t)message_len;
+    }
+    chunk.message = chunk_message_len ? chunk_message : NULL;
 
     if (!state->intercepted && state->interceptor) {
         int st = state->interceptor(state->call, &request, state->interceptor_user);

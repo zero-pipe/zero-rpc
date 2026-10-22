@@ -23,6 +23,10 @@ typedef struct zri_stream_send_task {
     uint8_t *data;
     size_t len;
     uint8_t encoding;
+    uint8_t metadata[METADATA_WIRE_MAX];
+    uint16_t metadata_len;
+    char message[STATUS_MSG_MAX];
+    uint16_t message_len;
     uint64_t offset;
     unsigned flags;
     int first;
@@ -132,6 +136,10 @@ static uint64_t stream_send_task_fn(void *user)
     memset(&message, 0, sizeof(message));
     message.kind = KIND_REQUEST;
     message.request_id = (uint32_t)stream->request_id;
+    message.metadata = task->metadata_len ? task->metadata : NULL;
+    message.metadata_len = task->metadata_len;
+    message.status_msg = task->message_len ? task->message : NULL;
+    message.status_msg_len = task->message_len;
     message.route = route;
     message.payload = payload;
     message.stream = meta;
@@ -359,6 +367,24 @@ int proxy_stream_send(stream_t *stream, const chunk_t *chunk)
     task->offset = chunk->offset;
     task->flags = chunk->flags;
     task->first = first;
+    if (chunk->metadata && chunk->metadata->count > 0) {
+        size_t metadata_len = 0;
+        if (metadata_encode(chunk->metadata, task->metadata, sizeof(task->metadata), &metadata_len) !=
+            OK) {
+            free(task);
+            return ERR_TOOBIG;
+        }
+        task->metadata_len = (uint16_t)metadata_len;
+    }
+    if (chunk->message && chunk->message[0]) {
+        size_t message_len = strlen(chunk->message);
+        if (message_len >= sizeof(task->message)) {
+            message_len = sizeof(task->message) - 1;
+        }
+        memcpy(task->message, chunk->message, message_len);
+        task->message[message_len] = '\0';
+        task->message_len = (uint16_t)message_len;
+    }
     if (chunk->len > 0) {
         task->data = (uint8_t *)malloc(chunk->len);
         if (!task->data) {

@@ -45,8 +45,16 @@ typedef struct zri_obj_pool {
     unsigned limit;
 } zri_obj_pool_t;
 
+/* per-peer 入站限速槽位：固定容量、rate_lock 保护，仅配置限速时使用。 */
+typedef struct zri_rate_slot {
+    int used;
+    char ip[ENDPOINT_MAX];
+    uint16_t port;
+    uint64_t window_start_ms;
+    uint32_t count;
+} zri_rate_slot_t;
+
 struct node {
-    node_config_t cfg;
     char name[ZRI_NAME_MAX];
     uint32_t node_id;
     char bind_host[ENDPOINT_MAX];
@@ -61,6 +69,10 @@ struct node {
     uint8_t drop_percent; /* 测试用：UDP 出站丢包百分比 */
     uint32_t rtcp_interval_ms;
     int rtcp_disabled;
+    uint32_t max_recv_streams;
+    uint32_t rate_limit_pps;
+    ntk_mutex *rate_lock;
+    zri_rate_slot_t rates[RATE_LIMIT_SLOTS];
 
     ntk_poller_pool *pool;
     ntk_poller *io_pollers[IO_MAX];   /* 出站分片：按 request_id 固定到某个 poller */

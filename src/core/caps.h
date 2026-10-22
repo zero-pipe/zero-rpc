@@ -32,6 +32,8 @@
 #define CODEC_MAX 8
 #define MAX_RECV_STREAMS 64
 #define STREAM_IDLE_TIMEOUT_MS 15000
+#define RATE_LIMIT_SLOTS 256
+#define RATE_WINDOW_MS 1000
 
 /* ---- 传输扇出 ---- */
 #define IO_MAX 8

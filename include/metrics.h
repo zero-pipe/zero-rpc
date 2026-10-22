@@ -7,6 +7,9 @@
 extern "C" {
 #endif
 
+/* 端到端延迟直方图桶数：<=1,2,5,10,25,50,100,250,500,1000,2500,5000,10000ms，最后一桶为 >10000ms。 */
+#define LATENCY_HIST_BUCKETS 14
+
 /* ---- 节点累计指标 ---- */
 typedef struct metrics {
     uint64_t requests_sent;
@@ -34,6 +37,19 @@ typedef struct metrics {
     uint32_t rtcp_rtt_ms;       /* 最近一次由对端报告块算得的 RTT */
     uint32_t rtcp_jitter_ms;    /* 本端接收抖动的当前估计 */
     int32_t rtcp_remote_lost;   /* 对端报告的本端流累计丢包 */
+
+    /* 可观测性：当前值（gauge）与端到端延迟分布 */
+    uint64_t connections;         /* 当前活跃链路/会话数（UDP session + TCP link） */
+    uint64_t inflight_requests;   /* 当前未完成客户端调用数 */
+    uint64_t inflight_handlers;   /* 当前未完成 worker/executor 任务数 */
+    uint64_t latency_count;       /* 已完成的端到端采样数 */
+    uint64_t latency_sum_ms;      /* 延迟总和，用于计算均值 */
+    uint64_t latency_hist[LATENCY_HIST_BUCKETS];
+    uint64_t latency_p50_ms;      /* 由直方图估算的分位值 */
+    uint64_t latency_p90_ms;
+    uint64_t latency_p99_ms;
+    uint64_t rate_limited;    /* 被 per-peer 入站限速丢弃/回退的请求数 */
+    uint64_t streams_rejected; /* 因并发流上限被拒绝的新流数 */
 } metrics_t;
 
 /* ---- 对端链路质量 ---- */

@@ -194,6 +194,19 @@ static int run_case(transport_kind_t kind, const char *label)
             rpc_log_error("[%s] udp metrics missing", label);
             failed = 1;
         }
+        /* 端到端延迟应已采样，且分位值非零。 */
+        if (metrics.latency_count < 2 || metrics.latency_p50_ms == 0) {
+            rpc_log_error("[%s] latency metrics missing: count=%llu p50=%llu",
+                          label,
+                          (unsigned long long)metrics.latency_count,
+                          (unsigned long long)metrics.latency_p50_ms);
+            failed = 1;
+        }
+        /* 活跃连接数：回环后客户端至少持有一条链路/会话。 */
+        if (metrics.connections == 0) {
+            rpc_log_error("[%s] connections gauge missing", label);
+            failed = 1;
+        }
     }
 
     /* RTCP：UDP 会话应在周期内双向交换 SR（本端发送方，故发 SR；对端也发 SR）。 */

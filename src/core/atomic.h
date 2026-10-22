@@ -24,6 +24,11 @@ static inline void zri_atomic_add_u32(uint32_t *p, uint32_t v)
     _InterlockedExchangeAdd((volatile long *)p, (long)v);
 }
 
+static inline void zri_atomic_sub_u64(uint64_t *p, uint64_t v)
+{
+    _InterlockedExchangeAdd64((volatile __int64 *)p, -(__int64)v);
+}
+
 static inline uint32_t zri_atomic_sub_u32(uint32_t *p, uint32_t v)
 {
     return (uint32_t)_InterlockedExchangeAdd((volatile long *)p, -(long)v);
@@ -77,6 +82,11 @@ static inline void zri_atomic_add_u32(uint32_t *p, uint32_t v)
     __atomic_fetch_add(p, v, __ATOMIC_RELAXED);
 }
 
+static inline void zri_atomic_sub_u64(uint64_t *p, uint64_t v)
+{
+    __atomic_fetch_sub(p, v, __ATOMIC_RELAXED);
+}
+
 static inline uint32_t zri_atomic_sub_u32(uint32_t *p, uint32_t v)
 {
     return __atomic_fetch_sub(p, v, __ATOMIC_RELAXED);
@@ -117,5 +127,6 @@ static inline int zri_atomic_cas_u32(uint32_t *p, uint32_t *expected, uint32_t d
 /* metrics_t 全是 uint64_t 计数；下面两个宏让调用点保持简短。 */
 #define ZRI_METRIC_INC(field) zri_atomic_add_u64((uint64_t *)&(field), 1u)
 #define ZRI_METRIC_ADD(field, v) zri_atomic_add_u64((uint64_t *)&(field), (uint64_t)(v))
+#define ZRI_METRIC_SUB(field, v) zri_atomic_sub_u64((uint64_t *)&(field), (uint64_t)(v))
 
 #endif /* ZRI_ATOMIC_H */

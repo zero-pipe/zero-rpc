@@ -181,7 +181,6 @@ int node_create(const node_config_t *cfg, node_t **out)
         free(node);
         return ERR_INVALID;
     }
-    node->cfg = *cfg;
     zri_copy_str(node->name, sizeof(node->name), cfg->name, "rpc");
     zri_copy_str(node->bind_host, sizeof(node->bind_host), cfg->bind_host, "0.0.0.0");
     zri_copy_str(
@@ -214,6 +213,11 @@ int node_create(const node_config_t *cfg, node_t **out)
     node->bp_high_water = cfg->backpressure_bytes ? cfg->backpressure_bytes : BACKPRESSURE_DEFAULT;
     node->rtcp_interval_ms = cfg->rtcp_interval_ms ? cfg->rtcp_interval_ms : RTCP_INTERVAL_MS;
     node->rtcp_disabled = cfg->rtcp_disabled;
+    node->max_recv_streams = cfg->max_streams ? cfg->max_streams : MAX_RECV_STREAMS;
+    if (node->max_recv_streams > MAX_RECV_STREAMS) {
+        node->max_recv_streams = MAX_RECV_STREAMS;
+    }
+    node->rate_limit_pps = cfg->peer_rate_limit_pps;
     node->handler_max_concurrency = cfg->handler_max_concurrency;
     node->max_inflight = cfg->max_inflight ? cfg->max_inflight : DEFAULT_MAX_INFLIGHT;
     {
@@ -243,7 +247,8 @@ int node_create(const node_config_t *cfg, node_t **out)
     node->services_lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
     node->codecs_lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
     node->pending_lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    if (!node->services_lock || !node->codecs_lock || !node->pending_lock) {
+    node->rate_lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    if (!node->services_lock || !node->codecs_lock || !node->pending_lock || !node->rate_lock) {
         node_destroy(node);
         return ERR_NOMEM;
     }
@@ -460,6 +465,10 @@ void node_destroy(node_t *node)
         ntk_mutex_destroy(node->pending_lock);
         node->pending_lock = NULL;
     }
+    if (node->rate_lock) {
+        ntk_mutex_destroy(node->rate_lock);
+        node->rate_lock = NULL;
+    }
     zri_route_cleanup(&node->routes);
     zri_registry_cleanup(&node->registry);
     {
@@ -575,8 +584,32 @@ int node_binding_endpoint(const node_t *node, size_t index, char *out, size_t ca
 
 /* ---- 指标与对端质量 ---- */
 
+static const uint32_t g_latency_bounds[LATENCY_HIST_BUCKETS - 1] = {
+    1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000
+};
+
+/* 从累计直方图估算分位值；最后一桶返回 10000（表示 >=10s）。 */
+static uint64_t latency_percentile(const uint64_t *hist, uint64_t total, uint32_t pct)
+{
+    uint64_t target;
+    uint64_t cumulative = 0;
+    int i;
+    if (!hist || total == 0) {
+        return 0;
+    }
+    target = (total * (uint64_t)pct + 99u) / 100u;
+    for (i = 0; i < LATENCY_HIST_BUCKETS; i++) {
+        cumulative += hist[i];
+        if (cumulative >= target) {
+            return i < LATENCY_HIST_BUCKETS - 1 ? g_latency_bounds[i] : 10000u;
+        }
+    }
+    return 10000u;
+}
+
 void node_metrics(const node_t *node, metrics_t *out)
 {
+    unsigned i;
     if (!out) {
         return;
     }
@@ -612,7 +645,24 @@ void node_metrics(const node_t *node, metrics_t *out)
     out->rtcp_jitter_ms = zri_atomic_load_u32(&node->metrics.rtcp_jitter_ms);
     out->rtcp_remote_lost =
         (int32_t)zri_atomic_load_u32((const uint32_t *)&node->metrics.rtcp_remote_lost);
+    ZRI_METRICS_SNAPSHOT_U64(connections);
+    ZRI_METRICS_SNAPSHOT_U64(latency_count);
+    ZRI_METRICS_SNAPSHOT_U64(latency_sum_ms);
+    ZRI_METRICS_SNAPSHOT_U64(rate_limited);
+    ZRI_METRICS_SNAPSHOT_U64(streams_rejected);
+    for (i = 0; i < LATENCY_HIST_BUCKETS; i++) {
+        out->latency_hist[i] = zri_atomic_load_u64(&node->metrics.latency_hist[i]);
+    }
 #undef ZRI_METRICS_SNAPSHOT_U64
+    out->latency_p50_ms = latency_percentile(out->latency_hist, out->latency_count, 50u);
+    out->latency_p90_ms = latency_percentile(out->latency_hist, out->latency_count, 90u);
+    out->latency_p99_ms = latency_percentile(out->latency_hist, out->latency_count, 99u);
+    out->inflight_requests = zri_atomic_load_u32((const uint32_t *)&node->pending_count);
+    if (node->handler_limit_mutex) {
+        ntk_mutex_lock(node->handler_limit_mutex);
+        out->inflight_handlers = (uint64_t)node->handler_inflight + node->external_inflight;
+        ntk_mutex_unlock(node->handler_limit_mutex);
+    }
 }
 
 int node_peer_stats(const node_t *node, const char *ip, uint16_t port, peer_stats_t *out)

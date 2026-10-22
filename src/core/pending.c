@@ -85,6 +85,15 @@ static void pending_recycle(node_t *node, zri_pending_t *p)
     p->len = 0;
     p->metadata = NULL;
     p->metadata_len = 0;
+    /* 回收槽位前释放响应 metadata/status message（此时回调已结束）。 */
+    if (p->response_metadata) {
+        free(p->response_metadata);
+        p->response_metadata = NULL;
+    }
+    if (p->response_message) {
+        free(p->response_message);
+        p->response_message = NULL;
+    }
     p->response_metadata = NULL;
     p->response_message = NULL;
     p->has_req = 0;
@@ -237,7 +246,8 @@ zri_pending_t *zri_pending_add(node_t *node,
     p->request_id = id;
     p->cb = cb;
     p->user = user;
-    p->deadline_ms = zri_now_ms() + (timeout_ms ? timeout_ms : DEFAULT_TIMEOUT_MS);
+    p->started_ms = zri_now_ms();
+    p->deadline_ms = p->started_ms + (timeout_ms ? timeout_ms : DEFAULT_TIMEOUT_MS);
     p->has_req = 0;
     p->streaming = 0;
     p->chunk_cb = NULL;

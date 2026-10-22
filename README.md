@@ -285,7 +285,7 @@ my_codec.release(NULL, bytes);
 ```
 
 - `discovery.broadcast` 是 `host:port`，`peers` 是额外的单播 HELLO 目标，元素为 `host:port`。
-- 可选调优字段（顶层）：`transport`、`bind_host`、`data_port`、`frag_bytes`、`max_msg_bytes`、`backpressure_bytes`、`rtcp_interval_ms`（RTCP SR/RR 上报间隔，默认 1000ms）、`rtcp`（`false` 关闭 RTCP）、`handler_threads`（阻塞 handler 线程池大小，0 = 关闭）、`handler_max_concurrency`（worker 未完成任务上限，0 = 不限）。
+- 可选调优字段（顶层）：`transport`、`bind_host`、`data_port`、`frag_bytes`、`max_msg_bytes`、`backpressure_bytes`、`rtcp_interval_ms`（RTCP SR/RR 上报间隔，默认 1000ms）、`rtcp`（`false` 关闭 RTCP）、`handler_threads`（阻塞 handler 线程池大小，0 = 关闭）、`handler_max_concurrency`（worker 未完成任务上限，0 = 不限）、`max_streams`（并发接收流上限，0 = 默认 64）、`peer_rate_limit_pps`（每对端每秒请求上限，0 = 不限）。
 
 完整可运行见 `examples/08_config_{server,client}.json`。
 
@@ -296,7 +296,8 @@ node_t *node;
 node_create_from_config(&cfg, &node); /* 创建节点并应用 peers / routes */
 ```
 
-注意：`config_t` 拥有所有字符串，节点只借用其指针，因此 `cfg` 必须比节点活得更久。
+注意：`config_t` 拥有所有字符串，但 `node_create_from_config` 会在创建时把
+所需字段拷贝进节点；`cfg` 只需活到该调用返回，之后即可释放。
 
 ## 约定
 
@@ -313,7 +314,8 @@ node_create_from_config(&cfg, &node); /* 创建节点并应用 peers / routes */
   `SERVICE_EXEC_EXECUTOR` 走调用者提供的 `service_executor_t`；`options == NULL`
   默认 INLINE，`*_worker` 系列是 WORKER 的便捷封装。
 - 未配置 `handler_threads` 时 WORKER 方法退化为 INLINE 并告警；任务入池失败
-  直接回错误状态，不会回退到 poller 内联执行。流式方法目前只支持 INLINE。
+  直接回错误状态，不会回退到 poller 内联执行。流式方法同样支持三种执行模式，
+  worker/executor 下同一 stream 的 chunk 按顺序串行派发。
 - `handler_max_concurrency > 0` 时限制 worker 未完成任务数（排队 + 执行中），
   超出上限的新请求直接回 `ERR_AGAIN`（对齐 brpc 的 `max_concurrency`/`ELIMIT`），
   避免无界排队拖垮内存和尾延迟；0 表示不限制（默认）。

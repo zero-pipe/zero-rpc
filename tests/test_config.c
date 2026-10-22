@@ -71,6 +71,38 @@ static void test_bad_json(void)
     CHECK(config_load(NULL, &cfg) == ERR_INVALID);
 }
 
+static void test_strict_validation(void)
+{
+    config_t cfg;
+    static const char *bad[] = {
+        "{\"data_port\":\"9000\"}",
+        "{\"data_port\":70000}",
+        "{\"transport\":\"sctp\"}",
+        "{\"mode\":\"foo\"}",
+        "{\"frag_bytes\":70000}",
+        "{\"name\":42}",
+        "{\"bindings\":\"tcp://127.0.0.1:1\"}",
+        "{\"bindings\":[\"not-a-uri\"]}",
+        "{\"routes\":[{\"service\":\"x\"}]}",
+        "{\"routes\":[{\"service\":\"x\",\"endpoint\":\"bad\"}]}",
+        "{\"discovery\":[]}",
+        "{\"discovery\":{\"broadcast\":\"bad\"}}",
+        "{\"discovery\":{\"peers\":[\"bad\"]}}",
+        "{\"rtcp\":\"no\"}",
+    };
+    size_t i;
+    for (i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        memset(&cfg, 0, sizeof(cfg));
+        if (config_load(bad[i], &cfg) != ERR_INVALID) {
+            rpc_log_error("strict config accepted invalid case %lu: %s",
+                          (unsigned long)i,
+                          bad[i]);
+            g_fail = 1;
+        }
+        CHECK(cfg.name[0] == '\0');
+    }
+}
+
 static void test_endpoint_model(void)
 {
     endpoint_t endpoint;
@@ -156,6 +188,7 @@ int main(void)
     test_parse();
     test_defaults();
     test_bad_json();
+    test_strict_validation();
     test_endpoint_model();
     test_binding_config();
     test_flat_format();

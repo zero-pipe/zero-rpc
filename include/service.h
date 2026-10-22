@@ -15,7 +15,8 @@
  *   - SERVICE_EXEC_EXECUTOR：在调用者提供的 service_executor_t 上执行，
  *     适合复用应用已有线程池/事件循环；生命周期由调用者负责。
  * 未配置 handler_threads 时 WORKER 退化为 INLINE 并告警；任务入池失败时回
- * 错误状态，不会回退到 poller 内联执行。流式方法目前只支持 INLINE。
+ * 错误状态，不会回退到 poller 内联执行。流式方法同样支持三种执行模式，
+ * worker/executor 下同一 stream 的 chunk 串行派发以保证顺序。
  */
 
 #include <types.h>

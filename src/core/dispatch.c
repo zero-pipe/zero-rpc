@@ -15,6 +15,32 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* 端到端延迟直方图上界（毫秒），与 metrics.h 的 LATENCY_HIST_BUCKETS 对应。 */
+static const uint32_t g_latency_bounds[LATENCY_HIST_BUCKETS - 1] = {
+    1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000
+};
+
+/* 记录一次已完成 RPC 的端到端延迟（从发起 pending 到收到响应）。 */
+static void pending_record_latency(node_t *node, const zri_pending_t *p)
+{
+    uint64_t now;
+    uint64_t ms;
+    int bucket;
+    if (!node || !p || p->started_ms == 0) {
+        return;
+    }
+    now = zri_now_ms();
+    ms = now > p->started_ms ? now - p->started_ms : 0;
+    for (bucket = 0; bucket < LATENCY_HIST_BUCKETS - 1; bucket++) {
+        if (ms <= g_latency_bounds[bucket]) {
+            break;
+        }
+    }
+    ZRI_METRIC_ADD(node->metrics.latency_hist[bucket], 1u);
+    ZRI_METRIC_INC(node->metrics.latency_count);
+    ZRI_METRIC_ADD(node->metrics.latency_sum_ms, ms);
+}
+
 /* 把响应帧上的 metadata / status message 解析到 pending（按需分配）。 */
 static void pending_attach_response(zri_pending_t *p, const zri_message_t *msg)
 {
@@ -77,6 +103,57 @@ int zri_node_resolve(node_t *node, const char *service, int prefer_stream, stub_
     out->port = endpoint.port;
     out->transport = endpoint.transport;
     return OK;
+}
+
+/*
+ * per-peer 入站限速：按 ip:port 做固定 1 秒窗口计数。未配置时零开销返回允许。
+ * 命中上限返回 0，调用方对 REQUEST 回 ERR_AGAIN、对 EVENT 直接丢弃。
+ */
+static int node_rate_allow(node_t *node, const zri_message_t *msg)
+{
+    uint64_t now;
+    int i;
+    int free_slot = -1;
+    if (!node->rate_limit_pps || !msg->peer_ip) {
+        return 1;
+    }
+    now = zri_now_ms();
+    ntk_mutex_lock(node->rate_lock);
+    for (i = 0; i < RATE_LIMIT_SLOTS; i++) {
+        zri_rate_slot_t *s = &node->rates[i];
+        if (s->used && s->port == msg->peer_port && strcmp(s->ip, msg->peer_ip) == 0) {
+            if (now - s->window_start_ms >= RATE_WINDOW_MS) {
+                s->window_start_ms = now;
+                s->count = 0;
+            }
+            if (s->count >= node->rate_limit_pps) {
+                ntk_mutex_unlock(node->rate_lock);
+                return 0;
+            }
+            s->count++;
+            ntk_mutex_unlock(node->rate_lock);
+            return 1;
+        }
+        if (!s->used || now - s->window_start_ms >= RATE_WINDOW_MS) {
+            if (free_slot < 0) {
+                free_slot = i;
+            }
+        }
+    }
+    if (free_slot < 0) {
+        ntk_mutex_unlock(node->rate_lock);
+        return 1; /* 槽位耗尽：退化为不限速，避免误伤新对端 */
+    }
+    {
+        zri_rate_slot_t *s = &node->rates[free_slot];
+        s->used = 1;
+        zri_copy_str(s->ip, sizeof(s->ip), msg->peer_ip, "0.0.0.0");
+        s->port = msg->peer_port;
+        s->window_start_ms = now;
+        s->count = 1;
+    }
+    ntk_mutex_unlock(node->rate_lock);
+    return 1;
 }
 
 static void node_dispatch(node_t *node, zri_transport_t *transport, const zri_message_t *msg);
@@ -195,6 +272,13 @@ static void node_dispatch(node_t *node, zri_transport_t *transport, const zri_me
         return;
     }
     if (msg->kind == KIND_REQUEST || msg->kind == KIND_EVENT) {
+        if (!node_rate_allow(node, msg)) {
+            ZRI_METRIC_INC(node->metrics.rate_limited);
+            if (msg->kind == KIND_REQUEST) {
+                zri_service_send_status(transport, msg, ERR_AGAIN);
+            }
+            return;
+        }
         if (msg->has_stream) {
             zri_service_handle_stream_chunk(node, transport, msg);
         } else {
@@ -227,6 +311,7 @@ static void node_dispatch(node_t *node, zri_transport_t *transport, const zri_me
         ZRI_METRIC_ADD(node->metrics.bytes_received, msg->payload.len);
         if (msg->flags & MSG_FLAG_FRAMEWORK_STATUS) {
             /* 框架错误走回调 status 通道，response_t.status 只放业务码。 */
+            pending_record_latency(node, p);
             zri_pending_invoke(p, msg->status, NULL);
             return;
         }
@@ -248,6 +333,7 @@ static void node_dispatch(node_t *node, zri_transport_t *transport, const zri_me
             if (chunk.flags & STREAM_LAST) {
                 stream_done_fn done = p->done_cb;
                 void *stream_user = p->stream_user;
+                pending_record_latency(node, p);
                 p->chunk_cb = NULL;
                 p->done_cb = NULL;
                 if (done) {
@@ -261,6 +347,7 @@ static void node_dispatch(node_t *node, zri_transport_t *transport, const zri_me
         resp.message = p->response_message;
         resp.payload = msg->payload;
         resp.metadata = p->response_metadata;
+        pending_record_latency(node, p);
         zri_pending_invoke(p, OK, &resp);
         return;
     }

@@ -414,6 +414,9 @@ static zri_tcp_link_t *link_find_out(zri_tcp_transport_t *t,
         memset(link, 0, sizeof(*link));
         link->used = 1;
         link->server_side = 0;
+        if (t->base.metrics) {
+            ZRI_METRIC_INC(t->base.metrics->connections);
+        }
         rx_acc_init(&link->rx);
         zri_iobuf_init(&link->tx);
         zri_copy_str(link->ip, sizeof(link->ip), ip, "0.0.0.0");
@@ -429,12 +432,18 @@ static zri_tcp_link_t *link_find_out(zri_tcp_transport_t *t,
         copts.user = t;
         link->client = ntk_tcp_client_create(&copts);
         if (!link->client) {
+            if (t->base.metrics) {
+                ZRI_METRIC_SUB(t->base.metrics->connections, 1u);
+            }
             link->used = 0;
             return NULL;
         }
         if (ntk_tcp_client_connect(link->client, link->ip, link->port) != NTK_OK) {
             ntk_tcp_client_destroy(link->client);
             link->client = NULL;
+            if (t->base.metrics) {
+                ZRI_METRIC_SUB(t->base.metrics->connections, 1u);
+            }
             link->used = 0;
             return NULL;
         }
@@ -474,6 +483,9 @@ static zri_tcp_link_t *link_for_session(zri_tcp_transport_t *t,
         memset(link, 0, sizeof(*link));
         link->used = 1;
         link->server_side = 1;
+        if (t->base.metrics) {
+            ZRI_METRIC_INC(t->base.metrics->connections);
+        }
         link->connected = 1;
         link->session = session;
         rx_acc_init(&link->rx);
@@ -532,6 +544,9 @@ static void tcp_srv_on_error(ntk_tcp_session *session, void *user)
     }
     rx_acc_free(&link->rx);
     zri_iobuf_reset(&link->tx);
+    if (t->base.metrics) {
+        ZRI_METRIC_SUB(t->base.metrics->connections, 1u);
+    }
     link->used = 0;
 }
 
@@ -579,6 +594,9 @@ static void tcp_client_on_error(ntk_tcp_client *client, void *user)
     zri_iobuf_reset(&link->tx);
     ntk_tcp_client_destroy(client);
     link->client = NULL;
+    if (t->base.metrics) {
+        ZRI_METRIC_SUB(t->base.metrics->connections, 1u);
+    }
     link->used = 0;
 }
 
@@ -638,7 +656,7 @@ static int tcp_start(zri_transport_t *base)
     return OK;
 }
 
-static void tcp_free_link(zri_tcp_link_t *link)
+static void tcp_free_link(zri_tcp_transport_t *t, zri_tcp_link_t *link)
 {
     if (!link || !link->used) {
         return;
@@ -648,6 +666,9 @@ static void tcp_free_link(zri_tcp_link_t *link)
     if (!link->server_side && link->client) {
         ntk_tcp_client_destroy(link->client);
         link->client = NULL;
+    }
+    if (link->used && t->base.metrics) {
+        ZRI_METRIC_SUB(t->base.metrics->connections, 1u);
     }
     link->used = 0;
 }
@@ -670,7 +691,7 @@ static void tcp_stop(zri_transport_t *base)
     }
     for (i = 0; i < IO_MAX; i++) {
         for (j = 0; j < TCP_LINKS_PER_IO; j++) {
-            tcp_free_link(&t->links[i][j]);
+            tcp_free_link(t, &t->links[i][j]);
         }
     }
     free(t->io_ctx);

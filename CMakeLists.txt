@@ -25,6 +25,14 @@ option(BUILD_TOOLS "Build rpc benchmark tools" ON)
 option(BUILD_EXAMPLES "Build rpc examples" ON)
 option(BUILD_GTESTS "Build GoogleTest module tests" OFF)
 option(BUILD_BENCHMARKS "Build Google Benchmark microbenchmarks" OFF)
+option(BUILD_FUZZERS "Build libFuzzer targets (requires Clang)" OFF)
+set(ZERO_RPC_SANITIZE "" CACHE STRING "Sanitizer set: address|undefined|thread|address,undefined")
+
+if(ZERO_RPC_SANITIZE)
+    add_compile_options(-fsanitize=${ZERO_RPC_SANITIZE} -fno-omit-frame-pointer -g)
+    add_link_options(-fsanitize=${ZERO_RPC_SANITIZE})
+endif()
+
 if(BUILD_GTESTS OR BUILD_BENCHMARKS)
     enable_language(CXX)
 endif()
@@ -33,6 +41,10 @@ add_subdirectory(src)
 
 if(BUILD_TESTS)
     add_subdirectory(tests)
+endif()
+
+if(BUILD_FUZZERS)
+    add_subdirectory(fuzz)
 endif()
 
 if(BUILD_TOOLS)

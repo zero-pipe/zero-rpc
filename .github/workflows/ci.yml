@@ -1,0 +1,75 @@
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  build-test:
+    name: ${{ matrix.compiler }} ${{ matrix.build_type }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+        build_type: [Debug, Release]
+    env:
+      CC: ${{ matrix.compiler == 'clang' && 'clang' || 'gcc' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+                 -DBUILD_TESTS=ON -DBUILD_TOOLS=ON -DBUILD_EXAMPLES=ON
+      - name: Build
+        run: cmake --build build -j
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  sanitizers:
+    name: sanitizer ${{ matrix.sanitize }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitize: [address,undefined,thread]
+    env:
+      CC: clang
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+                 -DZERO_RPC_SANITIZE=${{ matrix.sanitize }}
+                 -DBUILD_TESTS=ON -DBUILD_TOOLS=ON -DBUILD_EXAMPLES=ON
+      - name: Build
+        run: cmake --build build -j
+      - name: Test
+        # TSan cannot run the UDP loopback tests reliably under emulated CI; run
+        # the unit labels there and the full suite for address/undefined.
+        run: |
+          if [ "${{ matrix.sanitize }}" = "thread" ]; then
+            ctest --test-dir build --output-on-failure -L unit
+          else
+            ctest --test-dir build --output-on-failure
+          fi
+
+  fuzz-smoke:
+    name: fuzz smoke
+    runs-on: ubuntu-latest
+    env:
+      CC: clang
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+                 -DBUILD_FUZZERS=ON -DBUILD_TESTS=ON -DBUILD_TOOLS=OFF -DBUILD_EXAMPLES=OFF
+      - name: Build
+        run: cmake --build build -j
+      - name: Fuzz smoke
+        run: ctest --test-dir build --output-on-failure -L fuzz

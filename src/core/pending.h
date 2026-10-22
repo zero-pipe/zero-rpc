@@ -24,6 +24,7 @@ typedef struct zri_pending {
     uint64_t request_id;
     response_fn cb;
     void *user;
+    uint64_t started_ms;  /* 调用发起时刻，用于端到端延迟统计 */
     uint64_t deadline_ms;
     /* RTO 重传（弱网整包丢失时 NACK 无从触发，需超时重发请求） */
     int has_req;

@@ -61,6 +61,17 @@ typedef struct node_config {
     uint32_t backpressure_bytes; /* 单 link 出站队列高水位，0 = 默认 4 MiB */
     uint32_t rtcp_interval_ms;   /* UDP RTCP SR/RR 上报间隔，0 = 默认 1000ms */
     int rtcp_disabled;           /* 非 0 关闭 RTCP 报告 */
+    /*
+     * 单节点并发接收流上限：0 = 默认 MAX_RECV_STREAMS（64）。超出后新 stream
+     * 直接丢弃（FIRST chunk 不回包，客户端会超时/重试），避免流状态无界增长。
+     */
+    uint32_t max_streams;
+    /*
+     * 每对端每秒入站请求上限：0 = 不限制（默认）。按对端 ip:port 做 1 秒窗口
+     * 计数；超限的请求回框架状态 ERR_AGAIN（EVENT 直接丢弃），UDP 客户端可
+     * 据此退避，避免单个对端压垮服务端。
+     */
+    uint32_t peer_rate_limit_pps;
 
     /* New transport model. If non-empty, every binding is started. */
     const binding_config_t *bindings;

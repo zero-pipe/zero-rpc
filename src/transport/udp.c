@@ -162,6 +162,10 @@ static void session_cleanup(zri_session_t *s)
     if (!s) {
         return;
     }
+    if (s->used && s->metrics) {
+        ZRI_METRIC_SUB(s->metrics->connections, 1u);
+    }
+    s->used = 0;
     zri_tx_ring_cleanup(&s->tx_ring);
     q = s->txq_head;
     while (q) {
@@ -210,6 +214,9 @@ static void session_init(zri_udp_transport_t *udp,
     s->last_use_ms = now_ms;
     s->last_rx_data_ms = now_ms;
     s->rtcp_last_send_ms = now_ms;
+    if (udp->base.metrics) {
+        ZRI_METRIC_INC(udp->base.metrics->connections);
+    }
 }
 
 /*
