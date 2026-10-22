@@ -256,6 +256,7 @@ int proxy_call_async_ex(proxy_t *proxy,
                         uint64_t timeout_ms,
                         uint64_t *out_request_id)
 {
+    const metadata_t *use_meta = metadata;
     metadata_t meta;
     zri_proxy_cb_ctx_t *ctx = NULL;
     response_fn use_cb = cb;
@@ -266,15 +267,17 @@ int proxy_call_async_ex(proxy_t *proxy,
     if (!proxy || !proxy->node || !proxy->stub || !service || !method || !cb) {
         return ERR_INVALID;
     }
-    metadata_init(&meta);
-    if (metadata) {
-        meta = *metadata;
-    }
     if (proxy->has_interceptor && proxy->interceptor.before) {
+        if (metadata) {
+            meta = *metadata;
+        } else {
+            metadata_init(&meta);
+        }
         rc = proxy->interceptor.before(proxy->interceptor.ctx, service, method, &meta, &timeout);
         if (rc != OK) {
             return rc;
         }
+        use_meta = meta.count ? &meta : NULL;
     }
     if (proxy->has_interceptor && proxy->interceptor.after) {
         ctx = (zri_proxy_cb_ctx_t *)calloc(1, sizeof(*ctx));
@@ -298,7 +301,7 @@ int proxy_call_async_ex(proxy_t *proxy,
                           use_user,
                           timeout,
                           out_request_id,
-                          meta.count ? &meta : NULL);
+                          use_meta);
     if (rc != OK && ctx) {
         free(ctx);
     }
@@ -325,24 +328,27 @@ int proxy_call_event_ex(proxy_t *proxy,
                         const metadata_t *metadata,
                         uint64_t *out_request_id)
 {
+    const metadata_t *use_meta = metadata;
     metadata_t meta;
     int rc;
     if (!proxy || !proxy->node || !proxy->stub || !service || !method) {
         return ERR_INVALID;
     }
-    metadata_init(&meta);
-    if (metadata) {
-        meta = *metadata;
-    }
     if (proxy->has_interceptor && proxy->interceptor.before) {
         uint64_t timeout = 0;
+        if (metadata) {
+            meta = *metadata;
+        } else {
+            metadata_init(&meta);
+        }
         rc = proxy->interceptor.before(proxy->interceptor.ctx, service, method, &meta, &timeout);
         if (rc != OK) {
             return rc;
         }
+        use_meta = meta.count ? &meta : NULL;
     }
     return stub_call_ex(
-        proxy->stub, service, method, payload, meta.count ? &meta : NULL, out_request_id);
+        proxy->stub, service, method, payload, use_meta, out_request_id);
 }
 
 int proxy_call_event(proxy_t *proxy,

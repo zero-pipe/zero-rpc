@@ -86,6 +86,7 @@ static uint64_t stub_resend_task_fn(void *user)
 
 /* 在 poller 线程内完成一次请求的发送。 */
 static void stub_call_now(stub_t *stub,
+                          zri_stub_task_t *owner,
                           uint64_t id,
                           const char *service,
                           const char *method,
@@ -135,18 +136,32 @@ static void stub_call_now(stub_t *stub,
     p->metadata = NULL;
     p->metadata_len = 0;
     if (len > 0) {
-        p->data = (uint8_t *)zri_mem_alloc(len);
-        if (p->data) {
-            memcpy(p->data, data, len);
+        if (owner) {
+            /* 异步任务已持有一份拷贝：直接转移所有权，避免第二次整包拷贝。 */
+            p->data = owner->data;
+            owner->data = NULL;
         } else {
+            p->data = (uint8_t *)zri_mem_alloc(len);
+            if (p->data) {
+                memcpy(p->data, data, len);
+            }
+        }
+        if (!p->data) {
             p->has_req = 0;
             p->len = 0;
         }
     }
     if (metadata_len > 0 && metadata) {
-        p->metadata = (uint8_t *)malloc(metadata_len);
+        if (owner) {
+            p->metadata = owner->metadata;
+            owner->metadata = NULL;
+        } else {
+            p->metadata = (uint8_t *)malloc(metadata_len);
+            if (p->metadata) {
+                memcpy(p->metadata, metadata, metadata_len);
+            }
+        }
         if (p->metadata) {
-            memcpy(p->metadata, metadata, metadata_len);
             p->metadata_len = metadata_len;
         }
     }
@@ -246,6 +261,7 @@ static void stub_call_task_fn(void *user)
                        t->metadata_len);
     } else {
         stub_call_now(t->stub,
+                      t,
                       t->id,
                       t->service,
                       t->method,
@@ -278,7 +294,7 @@ static void stub_task_free(zri_stub_task_t *task)
     if (!task) {
         return;
     }
-    free(task->data);
+    zri_mem_free(task->data);
     free(task->metadata);
     free(task);
 }
@@ -307,7 +323,8 @@ static zri_stub_task_t *stub_task_create(stub_t *stub,
     task->encoding = encoding;
     task->len = len;
     if (len > 0) {
-        task->data = (uint8_t *)malloc(len);
+        /* 与 pending 的释放方式保持一致：可能被 pending 直接接管。 */
+        task->data = (uint8_t *)zri_mem_alloc(len);
         if (!task->data) {
             free(task);
             return NULL;
@@ -498,6 +515,7 @@ int zri_stub_call_ex(stub_t *stub,
 
     if (ntk_poller_is_current_thread(zri_node_pick_poller(stub->node, id))) {
         stub_call_now(stub,
+                      NULL,
                       id,
                       service,
                       method,
