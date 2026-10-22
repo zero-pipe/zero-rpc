@@ -173,7 +173,7 @@ static void tcp_link_dispatch(zri_tcp_transport_t *t,
 
 static void tcp_link_consume(zri_tcp_transport_t *t, zri_tcp_link_t *link)
 {
-    size_t max_frame = (size_t)t->base.max_msg_bytes + MAX_ROUTE + 64;
+    size_t max_frame = (size_t)t->base.max_msg_bytes + MAX_ENVELOPE_EXTRA;
     zri_rx_acc_t *a = &link->rx;
 
     for (;;) {
@@ -701,34 +701,16 @@ static void tcp_stop(zri_transport_t *base)
 static int tcp_send_common(zri_tcp_transport_t *t, zri_tcp_link_t *link, const zri_message_t *msg)
 {
     size_t route_len = (msg && msg->route) ? strlen(msg->route) : 0;
-    size_t metadata_len = msg ? msg->metadata_len : 0;
-    size_t status_len = msg ? msg->status_msg_len : 0;
     size_t payload_len = msg ? msg->payload.len : 0;
-    size_t body_len = zri_envelope_size(route_len, metadata_len, status_len, payload_len);
-    size_t need = TCP_HDR_LEN + body_len;
+    size_t body_len;
+    size_t prefix_expect;
+    size_t prefix_len;
+    size_t need;
     zri_envelope_t header_envelope;
 
     if (!t || !msg) {
         return ERR_INVALID;
     }
-    if (body_len > (size_t)t->base.max_msg_bytes + MAX_ROUTE + METADATA_WIRE_MAX + STATUS_MSG_MAX +
-                ENVELOPE_HDR_LEN ||
-        need >
-            (size_t)t->base.max_msg_bytes + MAX_ROUTE + METADATA_WIRE_MAX + STATUS_MSG_MAX + 64) {
-        return ERR_TOOBIG;
-    }
-    if (!link) {
-        link = link_find_out(t, msg->peer_ip, msg->peer_port, 1);
-        if (!link) {
-            return ERR_NOMEM;
-        }
-    }
-    if (!zri_iobuf_empty(&link->tx) &&
-        zri_iobuf_len(&link->tx) + need > (size_t)t->base.bp_high_water) {
-        ZRI_METRIC_INC(t->base.metrics->backpressure_events);
-        return ERR_AGAIN;
-    }
-
     memset(&header_envelope, 0, sizeof(header_envelope));
     header_envelope.kind = msg->kind;
     header_envelope.flags = msg->flags;
@@ -748,35 +730,54 @@ static int tcp_send_common(zri_tcp_transport_t *t, zri_tcp_link_t *link, const z
         header_envelope.stream_total_size = msg->stream.total_size;
     }
     header_envelope.payload = NULL;
-    header_envelope.payload_len = 0;
+    header_envelope.payload_len = payload_len;
 
-    if (route_len < MAX_ROUTE) {
-        uint8_t
-            header[TCP_HDR_LEN + ENVELOPE_HDR_LEN + MAX_ROUTE + METADATA_WIRE_MAX + STATUS_MSG_MAX];
-        size_t header_len = TCP_HDR_LEN + ENVELOPE_HDR_LEN + route_len + metadata_len + status_len;
-        zri_put_u32(header, (uint32_t)body_len);
-        if (zri_envelope_encode(
-                header + TCP_HDR_LEN, sizeof(header) - TCP_HDR_LEN, &header_envelope) !=
-            ENVELOPE_HDR_LEN + route_len + metadata_len + status_len) {
+    body_len = zri_envelope_size(&header_envelope);
+    if (body_len == 0 || body_len > (size_t)t->base.max_msg_bytes + MAX_ENVELOPE_EXTRA) {
+        return ERR_TOOBIG;
+    }
+    prefix_expect = body_len - payload_len;
+    need = TCP_HDR_LEN + body_len;
+    if (!link) {
+        link = link_find_out(t, msg->peer_ip, msg->peer_port, 1);
+        if (!link) {
+            return ERR_NOMEM;
+        }
+    }
+    if (!zri_iobuf_empty(&link->tx) &&
+        zri_iobuf_len(&link->tx) + need > (size_t)t->base.bp_high_water) {
+        ZRI_METRIC_INC(t->base.metrics->backpressure_events);
+        return ERR_AGAIN;
+    }
+
+    if (route_len < MAX_ROUTE && prefix_expect <= ENVELOPE_HDR_LEN + MAX_ENVELOPE_EXTRA) {
+        uint8_t header[TCP_HDR_LEN + ENVELOPE_HDR_LEN + MAX_ENVELOPE_EXTRA];
+
+        prefix_len = zri_envelope_encode_prefix(
+            header + TCP_HDR_LEN, sizeof(header) - TCP_HDR_LEN, &header_envelope);
+        if (prefix_len == 0 || prefix_len != prefix_expect) {
             return ERR_INVALID;
         }
-        return tcp_link_emit(t, link, header, header_len, msg->payload.data, payload_len);
+        zri_put_u32(header, (uint32_t)body_len);
+        return tcp_link_emit(
+            t, link, header, TCP_HDR_LEN + prefix_len, msg->payload.data, payload_len);
     }
     /* 超长 route（正常不会走到）：用池化 header，避免 body+frame 两次分配。 */
     {
-        size_t header_len = TCP_HDR_LEN + ENVELOPE_HDR_LEN + route_len + metadata_len + status_len;
-        uint8_t *header = (uint8_t *)malloc(header_len);
+        uint8_t *header = (uint8_t *)malloc(TCP_HDR_LEN + prefix_expect);
         int rc;
         if (!header) {
             return ERR_NOMEM;
         }
         zri_put_u32(header, (uint32_t)body_len);
-        if (zri_envelope_encode(header + TCP_HDR_LEN, header_len - TCP_HDR_LEN, &header_envelope) !=
-            ENVELOPE_HDR_LEN + route_len + metadata_len + status_len) {
+        prefix_len = zri_envelope_encode_prefix(
+            header + TCP_HDR_LEN, prefix_expect, &header_envelope);
+        if (prefix_len == 0 || prefix_len != prefix_expect) {
             free(header);
             return ERR_INVALID;
         }
-        rc = tcp_link_emit(t, link, header, header_len, msg->payload.data, payload_len);
+        rc = tcp_link_emit(
+            t, link, header, TCP_HDR_LEN + prefix_len, msg->payload.data, payload_len);
         free(header);
         return rc;
     }

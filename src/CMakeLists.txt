@@ -23,6 +23,7 @@ add_library(rpc STATIC
     util/iobuf.c
     util/endpoint.c
     util/json/codec_json.c
+    message/frame.c
     message/envelope.c
     router/router.c
     registry/registry.c

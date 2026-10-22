@@ -22,6 +22,8 @@ static void test_envelope_roundtrip(void)
     uint8_t buf[256];
     const char *route = "echo.ping";
     const uint8_t payload[5] = { 1, 2, 3, 4, 5 };
+    const uint8_t metadata[3] = { 0xde, 0xad, 0xbe };
+    const char status_msg[] = "boom";
     zri_envelope_t envelope;
     zri_envelope_t view;
     size_t n;
@@ -35,11 +37,16 @@ static void test_envelope_roundtrip(void)
     envelope.stream_id = 99;
     envelope.stream_offset = 0x1122334455667788ull;
     envelope.stream_total_size = 0x0a0b0c0d0e0f1011ull;
+    envelope.timeout_ms = 1234;
     envelope.route = route;
+    envelope.metadata = metadata;
+    envelope.metadata_len = sizeof(metadata);
+    envelope.status_msg = status_msg;
+    envelope.status_msg_len = (uint16_t)strlen(status_msg);
     envelope.payload = payload;
     envelope.payload_len = sizeof(payload);
     n = zri_envelope_encode(buf, sizeof(buf), &envelope);
-    CHECK(n == zri_envelope_size(strlen(route), 0, 0, sizeof(payload)));
+    CHECK(n == zri_envelope_size(&envelope));
     CHECK(zri_envelope_decode(buf, n, &view) == OK);
     CHECK(view.kind == KIND_REQUEST);
     CHECK(view.encoding == 3);
@@ -51,8 +58,82 @@ static void test_envelope_roundtrip(void)
     CHECK(view.stream_total_size == 0x0a0b0c0d0e0f1011ull);
     CHECK(view.route_len == strlen(route));
     CHECK(memcmp(view.route, route, strlen(route)) == 0);
+    CHECK(view.metadata_len == sizeof(metadata));
+    CHECK(memcmp(view.metadata, metadata, sizeof(metadata)) == 0);
+    CHECK(view.status_msg_len == strlen(status_msg));
+    CHECK(memcmp(view.status_msg, status_msg, strlen(status_msg)) == 0);
+    CHECK(view.timeout_ms == 1234);
     CHECK(view.payload_len == sizeof(payload));
     CHECK(memcmp(view.payload, payload, sizeof(payload)) == 0);
+}
+
+static void test_envelope_control_cancel(void)
+{
+    uint8_t buf[64];
+    zri_envelope_t envelope;
+    zri_envelope_t view;
+    zri_frame_t frame;
+    size_t n;
+
+    memset(&envelope, 0, sizeof(envelope));
+    envelope.kind = KIND_CANCEL;
+    envelope.request_id = 77;
+    n = zri_envelope_encode(buf, sizeof(buf), &envelope);
+    CHECK(n > 0);
+    CHECK(zri_frame_decode(buf, n, &frame) == OK);
+    CHECK(frame.header.frame_type == ZRI_FRAME_CONTROL);
+    CHECK(frame.header.kind == ZRI_CTRL_CANCEL);
+    CHECK(zri_envelope_decode(buf, n, &view) == OK);
+    CHECK(view.kind == KIND_CANCEL);
+    CHECK(view.request_id == 77);
+}
+
+static void test_frame_ext_roundtrip(void)
+{
+    uint8_t buf[256];
+    uint8_t ext[64];
+    const uint8_t payload[3] = { 9, 8, 7 };
+    const uint8_t deadline[4] = { 0x00, 0x00, 0x05, 0xdc };
+    const char route[] = "echo.ping";
+    zri_ext_set_t set;
+    zri_ext_t got;
+    zri_frame_header_t header;
+    zri_frame_t frame;
+    size_t ext_len;
+    size_t n;
+
+    zri_ext_set_init(&set, ext, sizeof(ext));
+    CHECK(zri_ext_set_add(&set, ZRI_EXT_ROUTE, route, strlen(route)));
+    CHECK(zri_ext_set_add(&set, ZRI_EXT_DEADLINE, deadline, sizeof(deadline)));
+    CHECK(zri_ext_set_add(&set, ZRI_EXT_APP_BASE, "x", 1));
+    ext_len = set.len;
+
+    memset(&header, 0, sizeof(header));
+    header.frame_type = ZRI_FRAME_DATA;
+    header.kind = ZRI_KIND_REQUEST;
+    header.request_id = 7;
+    header.ext_len = (uint32_t)ext_len;
+    header.payload_len = sizeof(payload);
+    n = zri_frame_encode(buf, sizeof(buf), &header, ext, ext_len, payload, sizeof(payload));
+    CHECK(n == zri_frame_size(ext_len, sizeof(payload)));
+    CHECK(n == (size_t)ZRI_FRAME_HDR_LEN + ext_len + sizeof(payload));
+    CHECK(zri_frame_decode(buf, n, &frame) == OK);
+    CHECK(frame.header.frame_type == ZRI_FRAME_DATA);
+    CHECK(frame.header.request_id == 7);
+    CHECK(frame.header.payload_len == sizeof(payload));
+    CHECK(memcmp(frame.payload, payload, sizeof(payload)) == 0);
+
+    CHECK(zri_ext_get(frame.ext, frame.header.ext_len, ZRI_EXT_ROUTE, &got) == 1);
+    CHECK(got.len == strlen(route));
+    CHECK(memcmp(got.value, route, got.len) == 0);
+    CHECK(zri_ext_get(frame.ext, frame.header.ext_len, ZRI_EXT_DEADLINE, &got) == 1);
+    CHECK(got.len == sizeof(deadline));
+    CHECK(zri_ext_get(frame.ext, frame.header.ext_len, ZRI_EXT_APP_BASE, &got) == 1);
+    CHECK(zri_ext_get(frame.ext, frame.header.ext_len, 0x0999, &got) == 0);
+
+    /* 篡改扩展长度必须被拒绝（越界或 CRC）。 */
+    buf[ZRI_FRAME_HDR_LEN + 2] = 0x10;
+    CHECK(zri_frame_decode(buf, n, &frame) == ERR_INVALID);
 }
 
 static void test_envelope_rejects_bad_header(void)
@@ -254,6 +335,8 @@ static void test_rtcp_bye_roundtrip(void)
 int main(void)
 {
     test_envelope_roundtrip();
+    test_envelope_control_cancel();
+    test_frame_ext_roundtrip();
     test_envelope_rejects_bad_header();
     test_udp_fragment_roundtrip();
     test_tcp_opaque_frame();

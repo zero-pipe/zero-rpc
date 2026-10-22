@@ -29,9 +29,8 @@ TEST(Envelope, RoundTripPreservesStreamMetadata) {
     input.payload_len = sizeof(payload) - 1;
 
     ASSERT_EQ(zri_envelope_encode(buffer, sizeof(buffer), &input),
-              zri_envelope_size(strlen(route), 0, 0, sizeof(payload) - 1));
-    ASSERT_EQ(zri_envelope_decode(buffer, zri_envelope_size(strlen(route), 0, 0, sizeof(payload) - 1),
-                                   &output), OK);
+              zri_envelope_size(&input));
+    ASSERT_EQ(zri_envelope_decode(buffer, zri_envelope_size(&input), &output), OK);
     EXPECT_EQ(output.stream_flags, input.stream_flags);
     EXPECT_EQ(output.status, input.status);
     EXPECT_EQ(output.stream_id, input.stream_id);

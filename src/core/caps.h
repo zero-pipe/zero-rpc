@@ -19,6 +19,11 @@
 #define MAX_ROUTE (SERVICE_NAME_MAX + METHOD_NAME_MAX + 2)
 #define MAX_MSG 1048576u /* 1 MiB */
 #define MAX_MSG_LIMIT (64u * 1024u * 1024u)
+/*
+ * frame 固定头 + 扩展相对 payload 的最大额外字节：route/metadata/status 值，
+ * 加上 5 个 TLV 头、status code、stream/deadline 定长值与 28B 固定头（80B 余量）。
+ */
+#define MAX_ENVELOPE_EXTRA (MAX_ROUTE + METADATA_WIRE_MAX + STATUS_MSG_MAX + 80u)
 /* 单条消息分片数硬上限：覆盖 max_msg 上限 + 最小分片的最坏情况，仅拦截异常值。 */
 #define MAX_FRAGMENTS (MAX_MSG_LIMIT / FRAG_MIN)
 

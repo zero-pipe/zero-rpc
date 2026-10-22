@@ -1,141 +1,287 @@
 #include "envelope.h"
 
-#include "util.h"
+#include "bytes.h"
 
 #include <string.h>
 
-size_t zri_envelope_size(size_t route_len,
-                         size_t metadata_len,
-                         size_t status_msg_len,
-                         size_t payload_len)
+static size_t envelope_route_len(const zri_envelope_t *envelope)
 {
-    return (size_t)ENVELOPE_HDR_LEN + route_len + metadata_len + status_msg_len + payload_len;
+    return envelope->route ? strlen(envelope->route) : 0;
 }
 
-/*
- * CRC32 覆盖控制段（header + route + metadata + status_msg），不含 payload。
- * UDP/TCP 发送时只编码前缀、payload 零拷贝直发，因此校验必须在二者拼接前
- * 就能确定；payload 完整性由传输层（UDP 校验和 / TCP）负责。
- */
-static uint32_t envelope_checksum(const uint8_t *buf, size_t len)
+static int envelope_has_stream(const zri_envelope_t *envelope)
 {
-    static const uint8_t zero[4] = { 0, 0, 0, 0 };
-    uint32_t crc = zri_crc32(buf, ENVELOPE_OFF_CHECKSUM, 0);
-    crc = zri_crc32(zero, sizeof(zero), crc);
-    if (len > (size_t)ENVELOPE_OFF_CHECKSUM + 4u) {
-        crc = zri_crc32(buf + ENVELOPE_OFF_CHECKSUM + 4u,
-                        len - ENVELOPE_OFF_CHECKSUM - 4u,
-                        crc);
+    return (envelope->stream_flags & STREAM_FLAG_STREAM) != 0;
+}
+
+/* 扩展区字节数（不含固定头与 payload）。 */
+static size_t envelope_ext_size(const zri_envelope_t *envelope, size_t route_len)
+{
+    size_t n = 0;
+
+    if (route_len > 0) {
+        n += ZRI_EXT_TLV_HDR_LEN + route_len;
     }
-    return crc;
+    if (envelope->metadata_len > 0) {
+        n += ZRI_EXT_TLV_HDR_LEN + envelope->metadata_len;
+    }
+    if (envelope->status != 0 || envelope->status_msg_len > 0) {
+        n += ZRI_EXT_TLV_HDR_LEN + ZRI_EXT_STATUS_HDR_LEN + envelope->status_msg_len;
+    }
+    if (envelope_has_stream(envelope)) {
+        n += ZRI_EXT_TLV_HDR_LEN + ZRI_EXT_STREAM_LEN;
+    }
+    if (envelope->timeout_ms > 0) {
+        n += ZRI_EXT_TLV_HDR_LEN + ZRI_EXT_DEADLINE_LEN;
+    }
+    return n;
 }
 
-size_t zri_envelope_encode(uint8_t *buf, size_t cap, const zri_envelope_t *envelope)
+static size_t ext_reserve(uint8_t *buf, size_t cap, size_t off, uint16_t tag, size_t len)
+{
+    if (len > 0xffffu || off > cap || cap - off < ZRI_EXT_TLV_HDR_LEN + len) {
+        return 0;
+    }
+    zri_put_u16(buf + off, tag);
+    zri_put_u16(buf + off + 2, (uint16_t)len);
+    return off + ZRI_EXT_TLV_HDR_LEN;
+}
+
+static size_t envelope_build_ext(const zri_envelope_t *envelope,
+                                 size_t route_len,
+                                 uint8_t *buf,
+                                 size_t cap)
+{
+    size_t off = 0;
+
+    if (route_len > 0) {
+        off = ext_reserve(buf, cap, off, ZRI_EXT_ROUTE, route_len);
+        if (off == 0) {
+            return 0;
+        }
+        memcpy(buf + off, envelope->route, route_len);
+        off += route_len;
+    }
+    if (envelope->metadata_len > 0) {
+        off = ext_reserve(buf, cap, off, ZRI_EXT_METADATA, envelope->metadata_len);
+        if (off == 0) {
+            return 0;
+        }
+        memcpy(buf + off, envelope->metadata, envelope->metadata_len);
+        off += envelope->metadata_len;
+    }
+    if (envelope->status != 0 || envelope->status_msg_len > 0) {
+        off = ext_reserve(
+            buf, cap, off, ZRI_EXT_STATUS, ZRI_EXT_STATUS_HDR_LEN + envelope->status_msg_len);
+        if (off == 0) {
+            return 0;
+        }
+        zri_put_u32(buf + off, (uint32_t)envelope->status);
+        off += ZRI_EXT_STATUS_HDR_LEN;
+        if (envelope->status_msg_len > 0) {
+            memcpy(buf + off, envelope->status_msg, envelope->status_msg_len);
+            off += envelope->status_msg_len;
+        }
+    }
+    if (envelope_has_stream(envelope)) {
+        off = ext_reserve(buf, cap, off, ZRI_EXT_STREAM, ZRI_EXT_STREAM_LEN);
+        if (off == 0) {
+            return 0;
+        }
+        buf[off] = (uint8_t)(envelope->stream_flags & (STREAM_FIRST | STREAM_LAST | STREAM_CANCEL));
+        zri_put_u64(buf + off + 1, envelope->stream_offset);
+        zri_put_u64(buf + off + 9, envelope->stream_total_size);
+        off += ZRI_EXT_STREAM_LEN;
+    }
+    if (envelope->timeout_ms > 0) {
+        off = ext_reserve(buf, cap, off, ZRI_EXT_DEADLINE, ZRI_EXT_DEADLINE_LEN);
+        if (off == 0) {
+            return 0;
+        }
+        zri_put_u32(buf + off, envelope->timeout_ms);
+        off += ZRI_EXT_DEADLINE_LEN;
+    }
+    return off;
+}
+
+static void envelope_fill_header(const zri_envelope_t *envelope,
+                                 size_t ext_len,
+                                 zri_frame_header_t *header)
+{
+    memset(header, 0, sizeof(*header));
+    if (envelope->kind == KIND_CANCEL) {
+        header->frame_type = ZRI_FRAME_CONTROL;
+        header->kind = ZRI_CTRL_CANCEL;
+    } else {
+        header->frame_type = ZRI_FRAME_DATA;
+        header->kind = envelope->kind;
+    }
+    header->encoding = envelope->encoding;
+    header->flags = envelope->flags;
+    header->stream_id = envelope->stream_id;
+    header->request_id = envelope->request_id;
+    header->ext_len = (uint32_t)ext_len;
+    header->payload_len = (uint32_t)envelope->payload_len;
+}
+
+size_t zri_envelope_size(const zri_envelope_t *envelope)
 {
     size_t route_len;
-    size_t need;
-    uint8_t *p;
+
+    if (!envelope) {
+        return 0;
+    }
+    route_len = envelope_route_len(envelope);
+    return (size_t)ENVELOPE_HDR_LEN + envelope_ext_size(envelope, route_len) +
+           envelope->payload_len;
+}
+
+size_t zri_envelope_encode_prefix(uint8_t *buf, size_t cap, const zri_envelope_t *envelope)
+{
+    zri_frame_header_t header;
+    size_t route_len;
+    size_t ext_len;
+    size_t expect;
 
     if (!buf || !envelope) {
         return 0;
     }
-    route_len = envelope->route ? strlen(envelope->route) : 0;
-    if (route_len > 0xffffu || envelope->metadata_len > 0xffffu ||
-        envelope->status_msg_len > 0xffffu || (envelope->payload_len > 0 && !envelope->payload) ||
-        (envelope->metadata_len > 0 && !envelope->metadata) ||
+    if (envelope->payload_len > 0xffffffffu || envelope->metadata_len > 0xffffu ||
+        envelope->status_msg_len > 0xffffu) {
+        return 0;
+    }
+    if ((envelope->metadata_len > 0 && !envelope->metadata) ||
         (envelope->status_msg_len > 0 && !envelope->status_msg)) {
         return 0;
     }
-    need = zri_envelope_size(
-        route_len, envelope->metadata_len, envelope->status_msg_len, envelope->payload_len);
-    if (need > cap) {
+    route_len = envelope_route_len(envelope);
+    if (route_len > 0xffffu || cap < ENVELOPE_HDR_LEN) {
         return 0;
     }
-    p = buf;
-    p[0] = (uint8_t)ENVELOPE_MAGIC0;
-    p[1] = (uint8_t)ENVELOPE_MAGIC1;
-    p[2] = (uint8_t)ENVELOPE_VERSION;
-    p[3] = envelope->kind;
-    p[4] = envelope->encoding;
-    p[5] = envelope->stream_flags;
-    p[6] = envelope->flags;
-    p[7] = 0;
-    zri_put_u32(p + 8, (uint32_t)envelope->status);
-    zri_put_u32(p + 12, envelope->request_id);
-    zri_put_u32(p + 16, envelope->stream_id);
-    zri_put_u64(p + 20, envelope->stream_offset);
-    zri_put_u64(p + 28, envelope->stream_total_size);
-    zri_put_u16(p + 36, (uint16_t)route_len);
-    zri_put_u16(p + 38, envelope->metadata_len);
-    zri_put_u32(p + 40, envelope->timeout_ms);
-    zri_put_u16(p + 44, envelope->status_msg_len);
-    zri_put_u32(p + ENVELOPE_OFF_CHECKSUM, 0);
-    p += ENVELOPE_HDR_LEN;
-    if (route_len > 0) {
-        memcpy(p, envelope->route, route_len);
-        p += route_len;
+    expect = envelope_ext_size(envelope, route_len);
+    ext_len = envelope_build_ext(
+        envelope, route_len, buf + ENVELOPE_HDR_LEN, cap - ENVELOPE_HDR_LEN);
+    if (ext_len != expect) {
+        return 0;
     }
-    if (envelope->metadata_len > 0) {
-        memcpy(p, envelope->metadata, envelope->metadata_len);
-        p += envelope->metadata_len;
+    envelope_fill_header(envelope, ext_len, &header);
+    if (!zri_frame_write_header(buf, ext_len, &header)) {
+        return 0;
     }
-    if (envelope->status_msg_len > 0) {
-        memcpy(p, envelope->status_msg, envelope->status_msg_len);
-        p += envelope->status_msg_len;
+    return (size_t)ENVELOPE_HDR_LEN + ext_len;
+}
+
+size_t zri_envelope_encode(uint8_t *buf, size_t cap, const zri_envelope_t *envelope)
+{
+    size_t need;
+    size_t prefix_len;
+
+    if (!buf || !envelope) {
+        return 0;
+    }
+    if (envelope->payload_len > 0 && !envelope->payload) {
+        return 0;
+    }
+    need = zri_envelope_size(envelope);
+    if (need == 0 || need > cap) {
+        return 0;
+    }
+    prefix_len = zri_envelope_encode_prefix(buf, cap, envelope);
+    if (prefix_len == 0) {
+        return 0;
     }
     if (envelope->payload_len > 0) {
-        memcpy(p, envelope->payload, envelope->payload_len);
+        memcpy(buf + prefix_len, envelope->payload, envelope->payload_len);
     }
-    zri_put_u32(buf + ENVELOPE_OFF_CHECKSUM,
-                envelope_checksum(
-                    buf, (size_t)ENVELOPE_HDR_LEN + route_len + envelope->metadata_len +
-                             envelope->status_msg_len));
-    return need;
+    return prefix_len + envelope->payload_len;
+}
+
+static int envelope_decode_ext(const zri_frame_t *frame, zri_envelope_t *view)
+{
+    zri_ext_iter_t it;
+    zri_ext_t e;
+    int rc;
+
+    zri_ext_iter_init(&it, frame->ext, frame->header.ext_len);
+    while ((rc = zri_ext_iter_next(&it, &e)) == 1) {
+        switch (e.tag) {
+        case ZRI_EXT_ROUTE:
+            view->route = (const char *)e.value;
+            view->route_len = e.len;
+            break;
+        case ZRI_EXT_METADATA:
+            view->metadata = e.value;
+            view->metadata_len = e.len;
+            break;
+        case ZRI_EXT_STATUS:
+            if (e.len < ZRI_EXT_STATUS_HDR_LEN) {
+                return ERR_INVALID;
+            }
+            view->status = (int)zri_get_u32(e.value);
+            view->status_msg = (const char *)(e.value + ZRI_EXT_STATUS_HDR_LEN);
+            view->status_msg_len = (uint16_t)(e.len - ZRI_EXT_STATUS_HDR_LEN);
+            break;
+        case ZRI_EXT_STREAM:
+            if (e.len < ZRI_EXT_STREAM_LEN) {
+                return ERR_INVALID;
+            }
+            view->stream_flags =
+                (uint8_t)(STREAM_FLAG_STREAM |
+                          (e.value[0] & (STREAM_FIRST | STREAM_LAST | STREAM_CANCEL)));
+            view->stream_id = frame->header.stream_id;
+            view->stream_offset = zri_get_u64(e.value + 1);
+            view->stream_total_size = zri_get_u64(e.value + 9);
+            break;
+        case ZRI_EXT_DEADLINE:
+            if (e.len < ZRI_EXT_DEADLINE_LEN) {
+                return ERR_INVALID;
+            }
+            view->timeout_ms = zri_get_u32(e.value);
+            break;
+        default:
+            /* 未知扩展按长度跳过，保证前后兼容。 */
+            break;
+        }
+    }
+    return rc < 0 ? ERR_INVALID : OK;
 }
 
 int zri_envelope_decode(const uint8_t *buf, size_t len, zri_envelope_t *view)
 {
-    uint16_t route_len;
-    uint16_t metadata_len;
-    uint16_t status_msg_len;
-    if (!buf || !view || len < ENVELOPE_HDR_LEN) {
+    zri_frame_t frame;
+    int rc;
+
+    if (!view) {
         return ERR_INVALID;
     }
-    if (buf[0] != (uint8_t)ENVELOPE_MAGIC0 || buf[1] != (uint8_t)ENVELOPE_MAGIC1) {
+    rc = zri_frame_decode(buf, len, &frame);
+    if (rc != OK) {
+        return rc;
+    }
+    memset(view, 0, sizeof(*view));
+    if (frame.header.frame_type == ZRI_FRAME_DATA) {
+        if (frame.header.kind > KIND_EVENT) {
+            return ERR_INVALID;
+        }
+        view->kind = frame.header.kind;
+    } else if (frame.header.frame_type == ZRI_FRAME_CONTROL) {
+        if (frame.header.kind != ZRI_CTRL_CANCEL) {
+            return ERR_INVALID; /* 其余控制语义尚未接入 core */
+        }
+        view->kind = KIND_CANCEL;
+    } else {
         return ERR_INVALID;
     }
-    if (buf[2] != (uint8_t)ENVELOPE_VERSION) {
-        return ERR_INVALID;
+    view->encoding = frame.header.encoding;
+    view->flags = frame.header.flags;
+    view->request_id = frame.header.request_id;
+    view->stream_id = frame.header.stream_id;
+    rc = envelope_decode_ext(&frame, view);
+    if (rc != OK) {
+        return rc;
     }
-    route_len = zri_get_u16(buf + 36);
-    metadata_len = zri_get_u16(buf + 38);
-    status_msg_len = zri_get_u16(buf + 44);
-    if ((size_t)ENVELOPE_HDR_LEN + route_len + metadata_len + status_msg_len > len) {
-        return ERR_INVALID;
-    }
-    if (zri_get_u32(buf + ENVELOPE_OFF_CHECKSUM) !=
-        envelope_checksum(
-            buf, (size_t)ENVELOPE_HDR_LEN + route_len + metadata_len + status_msg_len)) {
-        return ERR_INVALID;
-    }
-    view->kind = buf[3];
-    view->encoding = buf[4];
-    view->stream_flags = buf[5];
-    view->flags = buf[6];
-    view->status = (int)zri_get_u32(buf + 8);
-    view->request_id = zri_get_u32(buf + 12);
-    view->stream_id = zri_get_u32(buf + 16);
-    view->stream_offset = zri_get_u64(buf + 20);
-    view->stream_total_size = zri_get_u64(buf + 28);
-    view->timeout_ms = zri_get_u32(buf + 40);
-    view->route = (const char *)(buf + ENVELOPE_HDR_LEN);
-    view->route_len = route_len;
-    view->metadata = buf + ENVELOPE_HDR_LEN + route_len;
-    view->metadata_len = metadata_len;
-    view->status_msg = (const char *)(buf + ENVELOPE_HDR_LEN + route_len + metadata_len);
-    view->status_msg_len = status_msg_len;
-    view->payload = buf + ENVELOPE_HDR_LEN + route_len + metadata_len + status_msg_len;
-    view->payload_len = len - ENVELOPE_HDR_LEN - route_len - metadata_len - status_msg_len;
+    view->payload = frame.payload;
+    view->payload_len = frame.header.payload_len;
     return OK;
 }
 

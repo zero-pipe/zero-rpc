@@ -75,9 +75,10 @@ zero-rpc/
     discovery/        registry backend（UDP mesh 广播）；node 作用域的控制面后端
                       自持对端表/发现 socket/单播目标（node->discovery）
                       只经 node_access.h 门面访问 node，不穿透 struct node
-    message/          provider-neutral RPC envelope 编解码 + 统一消息上下文
+    message/          wire frame + 统一消息上下文
       message.h          zri_message_t：kind/status/request_id/route/payload/stream/peer
-      envelope          编解码，以及 envelope -> zri_message_t 的转换
+      frame              报文 v2：固定头 + TLV 扩展 + payload（编解码/扩展迭代）
+      envelope           语义视图与 wire frame 的转换，以及 envelope -> zri_message_t
     transport/        传输 facade + provider SPI + UDP/TCP 驱动 + framing
       只读 zri_transport_t 上的配置快照，不穿透 node 内部
       framing         UDP 的 RTP/分片/NACK、RTCP SR/RR/SDES 与 TCP 长度前缀分帧

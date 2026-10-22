@@ -6,18 +6,29 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "frame.h"
 #include "message.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* Provider-neutral RPC envelope. All integer fields are big-endian. */
-#define ENVELOPE_MAGIC0 0x5Au /* 'Z' */
-#define ENVELOPE_MAGIC1 0x52u /* 'R' */
-#define ENVELOPE_VERSION 1u
-#define ENVELOPE_OFF_CHECKSUM 46
-#define ENVELOPE_HDR_LEN 50
+/*
+ * Provider-neutral RPC envelope: the semantic view used by core. On the wire it
+ * is encoded as a v2 frame (fixed header + TLV extensions + payload); see
+ * frame.h. All integer fields are big-endian.
+ */
+#define ENVELOPE_MAGIC0 ZRI_FRAME_MAGIC0
+#define ENVELOPE_MAGIC1 ZRI_FRAME_MAGIC1
+#define ENVELOPE_VERSION ZRI_FRAME_VERSION
+#define ENVELOPE_OFF_CHECKSUM ZRI_FRAME_OFF_CHECKSUM
+#define ENVELOPE_HDR_LEN ZRI_FRAME_HDR_LEN
+
+/*
+ * 扩展相对固定头之外的附加字节上限：5 个标准 TLV 头（route/metadata/status/
+ * stream/deadline）、status code、stream 与 deadline 的定长值。
+ */
+#define ENVELOPE_EXT_OVERHEAD 64u
 
 /* RPC kind (envelope-level semantics). */
 #define KIND_REQUEST 0
@@ -35,27 +46,9 @@ extern "C" {
  * "view" type): encode reads the fields, decode fills them. route_len is an
  * output on decode and ignored on encode (derived from strlen(route)).
  *
- * Wire header (big-endian), 50 bytes:
- *   [0..1]   magic        ('Z','R')
- *   [2]      version      (当前 1；不匹配直接拒绝)
- *   [3]      kind
- *   [4]      encoding
- *   [5]      stream_flags
- *   [6]      flags        (MSG_FLAG_*)
- *   [7]      reserved     (0)
- *   [8..11]  status       (应用状态码；仅 RESPONSE 有意义)
- *   [12..15] request_id
- *   [16..19] stream_id
- *   [20..27] stream_offset
- *   [28..35] stream_total_size
- *   [36..37] route_len
- *   [38..39] metadata_len
- *   [40..43] timeout_ms   (请求剩余超时；0 = 无 deadline；CANCEL 时忽略)
- *   [44..45] status_msg_len
- *   [46..49] checksum     (CRC32 over header+route+metadata+status_msg with
- *                          these 4 bytes zeroed; payload 由传输层负责)
- *
- * 布局：header + route + metadata + status_msg + payload。
+ * Wire layout (v2): header + extensions(route/metadata/status/stream/deadline)
+ * + payload. KIND_CANCEL is encoded as a CONTROL frame; every other kind is a
+ * DATA frame. Absent optional extensions decode to zero/NULL.
  */
 typedef struct zri_envelope {
     uint8_t kind;
@@ -78,10 +71,13 @@ typedef struct zri_envelope {
     size_t payload_len;
 } zri_envelope_t;
 
-size_t zri_envelope_size(size_t route_len,
-                         size_t metadata_len,
-                         size_t status_msg_len,
-                         size_t payload_len);
+/* 编码后的总字节数（header + extensions + payload）。 */
+size_t zri_envelope_size(const zri_envelope_t *envelope);
+/*
+ * 只编码 header + extensions（payload_len 仍写入头部），payload 由调用方紧随
+ * 其后发送。返回前缀字节数，0 表示失败。
+ */
+size_t zri_envelope_encode_prefix(uint8_t *buf, size_t cap, const zri_envelope_t *envelope);
 size_t zri_envelope_encode(uint8_t *buf, size_t cap, const zri_envelope_t *envelope);
 int zri_envelope_decode(const uint8_t *buf, size_t len, zri_envelope_t *view);
 

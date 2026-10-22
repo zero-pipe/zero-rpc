@@ -546,12 +546,10 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_me
     ntk_udp_dgram_t msgs[TX_BATCH_MAX];
     unsigned nm = 0;
     size_t route_len;
-    size_t metadata_len;
-    size_t status_len;
     const uint8_t *data;
     size_t len;
     zri_envelope_t envelope;
-    uint8_t prefix[ENVELOPE_HDR_LEN + MAX_ROUTE + METADATA_WIRE_MAX + STATUS_MSG_MAX];
+    uint8_t prefix[ENVELOPE_HDR_LEN + MAX_ENVELOPE_EXTRA];
     zri_env_view_t view;
     size_t prefix_len;
     size_t env_len;
@@ -564,8 +562,6 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_me
         return ERR_INVALID;
     }
     route_len = msg->route ? strlen(msg->route) : 0;
-    metadata_len = msg->metadata_len;
-    status_len = msg->status_msg_len;
     data = (const uint8_t *)msg->payload.data;
     len = msg->payload.len;
     if (len > udp->base.max_msg_bytes || route_len >= MAX_ROUTE) {
@@ -575,16 +571,6 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_me
         return ERR_INVALID;
     }
 
-    env_len = zri_envelope_size(route_len, metadata_len, status_len, len);
-    if (env_len > (size_t)udp->base.max_msg_bytes + MAX_ROUTE + METADATA_WIRE_MAX + STATUS_MSG_MAX +
-            ENVELOPE_HDR_LEN) {
-        return ERR_TOOBIG;
-    }
-    if (s->txq_head && s->txq_pending_bytes + env_len > udp->base.bp_high_water) {
-        /* 出站拥塞队列超过 backpressure_bytes：返回背压，交给上层退避重试。 */
-        ZRI_METRIC_INC(udp->base.metrics->backpressure_events);
-        return ERR_AGAIN;
-    }
     /* 仅把 envelope 头 + route 编进栈上前缀；payload 保持借用，不做整包拷贝。 */
     memset(&envelope, 0, sizeof(envelope));
     envelope.kind = msg->kind;
@@ -599,15 +585,24 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_me
     envelope.status_msg = msg->status_msg;
     envelope.status_msg_len = msg->status_msg_len;
     envelope.payload = NULL;
-    envelope.payload_len = 0;
+    envelope.payload_len = len;
     if (msg->has_stream) {
         envelope.stream_flags = (uint8_t)(STREAM_FLAG_STREAM | msg->stream.flags);
         envelope.stream_id = msg->stream.stream_id;
         envelope.stream_offset = msg->stream.offset;
         envelope.stream_total_size = msg->stream.total_size;
     }
-    prefix_len = zri_envelope_encode(prefix, sizeof(prefix), &envelope);
-    if (prefix_len != ENVELOPE_HDR_LEN + route_len + metadata_len + status_len) {
+    env_len = zri_envelope_size(&envelope);
+    if (env_len == 0 || env_len > (size_t)udp->base.max_msg_bytes + MAX_ENVELOPE_EXTRA) {
+        return ERR_TOOBIG;
+    }
+    if (s->txq_head && s->txq_pending_bytes + env_len > udp->base.bp_high_water) {
+        /* 出站拥塞队列超过 backpressure_bytes：返回背压，交给上层退避重试。 */
+        ZRI_METRIC_INC(udp->base.metrics->backpressure_events);
+        return ERR_AGAIN;
+    }
+    prefix_len = zri_envelope_encode_prefix(prefix, sizeof(prefix), &envelope);
+    if (prefix_len == 0 || prefix_len + len != env_len) {
         return ERR_INVALID;
     }
     view.prefix = prefix;
@@ -815,7 +810,7 @@ static int session_on_data(zri_udp_transport_t *udp,
         s->have_transit = 1;
     }
 
-    if (v->total_len > udp->base.max_msg_bytes + MAX_ROUTE + ENVELOPE_HDR_LEN) {
+    if (v->total_len > udp->base.max_msg_bytes + MAX_ENVELOPE_EXTRA) {
         return ERR_TOOBIG;
     }
     if ((v->frag_off % udp->base.frag_bytes) != 0) {
