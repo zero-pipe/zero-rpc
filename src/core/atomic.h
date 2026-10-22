@@ -24,9 +24,9 @@ static inline void zri_atomic_add_u32(uint32_t *p, uint32_t v)
     _InterlockedExchangeAdd((volatile long *)p, (long)v);
 }
 
-static inline void zri_atomic_sub_u32(uint32_t *p, uint32_t v)
+static inline uint32_t zri_atomic_sub_u32(uint32_t *p, uint32_t v)
 {
-    _InterlockedExchangeAdd((volatile long *)p, -(long)v);
+    return (uint32_t)_InterlockedExchangeAdd((volatile long *)p, -(long)v);
 }
 
 static inline uint32_t zri_atomic_exchange_u32(uint32_t *p, uint32_t v)
@@ -77,9 +77,9 @@ static inline void zri_atomic_add_u32(uint32_t *p, uint32_t v)
     __atomic_fetch_add(p, v, __ATOMIC_RELAXED);
 }
 
-static inline void zri_atomic_sub_u32(uint32_t *p, uint32_t v)
+static inline uint32_t zri_atomic_sub_u32(uint32_t *p, uint32_t v)
 {
-    __atomic_fetch_sub(p, v, __ATOMIC_RELAXED);
+    return __atomic_fetch_sub(p, v, __ATOMIC_RELAXED);
 }
 
 static inline uint32_t zri_atomic_exchange_u32(uint32_t *p, uint32_t v)

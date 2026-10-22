@@ -368,9 +368,12 @@ int proxy_cancel(proxy_t *proxy, uint64_t request_id)
     }
     t->proxy = proxy;
     t->id = request_id;
-    if (ntk_poller_async(proxy->node->poller, cancel_task_fn, t, 1) != NTK_OK) {
-        free(t);
-        return ERR_IO;
+    {
+        ntk_poller *owner = zri_pending_owner(proxy->node, request_id);
+        if (ntk_poller_async(owner ? owner : proxy->node->poller, cancel_task_fn, t, 1) != NTK_OK) {
+            free(t);
+            return ERR_IO;
+        }
     }
     return OK;
 }

@@ -83,6 +83,7 @@ static void stream_open_task_fn(void *user)
                               stream->bidi ? NULL : stream_response,
                               stream,
                               stream->timeout_ms,
+                              stream->node->poller,
                               &prc);
     if (!pending) {
         stream_response(prc == OK ? ERR_NOMEM : prc, NULL, stream);

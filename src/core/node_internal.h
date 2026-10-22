@@ -63,6 +63,11 @@ struct node {
     int rtcp_disabled;
 
     ntk_poller_pool *pool;
+    ntk_poller *io_pollers[IO_MAX];   /* 出站分片：按 request_id 固定到某个 poller */
+    unsigned io_count;                /* io_pollers 有效个数（>= 1） */
+    zri_pending_t *pending_lanes[IO_MAX]; /* 每 poller 的 pending lane（owner-only 访问） */
+    ntk_mutex *pending_lock;          /* 保护 pending_hash 的跨 poller 查找 */
+    ntk_timer *pending_timers[IO_MAX]; /* 每 poller 的 pending 超时/重传定时器 */
     ntk_poller *poller;               /* io 0，用于发现/客户端调用 */
     ntk_thread_pool *handler_pool;    /* 可选：业务 handler 线程池（0 = 关闭） */
     int worker_fallback_warned;       /* handler_threads=0 时只告警一次 */
@@ -71,7 +76,7 @@ struct node {
     unsigned handler_inflight;        /* worker 排队 + 执行中的任务数 */
     unsigned external_inflight;       /* 自定义 executor 未完成任务数（诊断用） */
     uint32_t max_inflight;             /* 客户端 pending 上限 */
-    unsigned pending_count;            /* 当前未完成调用数（仅 node->poller 线程访问） */
+    unsigned pending_count;            /* 当前未完成调用数（跨 poller 原子访问） */
     int shutting_down;                 /* node_destroy 已开始 */
     zri_obj_pool_t worker_call_pool;  /* worker 路径 call_t 复用池 */
     zri_obj_pool_t handler_task_pool; /* worker/executor 任务头复用池 */
@@ -107,6 +112,10 @@ struct node {
 
 /* node.c */
 uint64_t zri_now_ms(void);
+/* 出站分片：按 key 稳定选择 poller；未启用池时回退到 node->poller。 */
+ntk_poller *zri_node_pick_poller(const node_t *node, uint64_t key);
+/* poller 在 node 出站分片中的下标；找不到返回 -1。 */
+int zri_node_poller_index(const node_t *node, ntk_poller *poller);
 void zri_node_on_message(node_t *node, zri_transport_t *transport, const zri_message_t *message);
 int zri_node_send(node_t *node,
                   transport_kind_t transport_kind,

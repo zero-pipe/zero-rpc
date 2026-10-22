@@ -79,6 +79,115 @@ int zri_node_resolve(node_t *node, const char *service, int prefer_stream, stub_
     return OK;
 }
 
+static void node_dispatch(node_t *node, zri_transport_t *transport, const zri_message_t *msg);
+
+/*
+ * 跨 poller 响应回投：pending 归属 poller 才处理本请求的超时/回调，因此响应
+ * 若落在其他 poller，需要把消息字段深拷贝到任务，再 async 回归属 poller。
+ */
+typedef struct zri_response_task {
+    node_t *node;
+    zri_transport_t *transport;
+    zri_message_t msg;
+    char *route;
+    char *peer_ip;
+    uint8_t *metadata;
+    uint8_t *status_msg;
+    uint8_t *payload;
+} zri_response_task_t;
+
+static void response_task_destroy(zri_response_task_t *t)
+{
+    if (!t) {
+        return;
+    }
+    free(t->route);
+    free(t->peer_ip);
+    free(t->metadata);
+    free(t->status_msg);
+    free(t->payload);
+    free(t);
+}
+
+static int response_task_init(zri_response_task_t *t,
+                              node_t *node,
+                              zri_transport_t *transport,
+                              const zri_message_t *msg)
+{
+    size_t route_len = msg->route ? strlen(msg->route) + 1 : 0;
+    size_t ip_len = msg->peer_ip ? strlen(msg->peer_ip) + 1 : 0;
+
+    memset(t, 0, sizeof(*t));
+    t->node = node;
+    t->transport = transport;
+    t->msg = *msg;
+    t->msg.peer_token = NULL;
+    if (route_len) {
+        t->route = (char *)malloc(route_len);
+        if (!t->route) {
+            goto fail;
+        }
+        memcpy(t->route, msg->route, route_len);
+        t->msg.route = t->route;
+    } else {
+        t->msg.route = NULL;
+    }
+    if (ip_len) {
+        t->peer_ip = (char *)malloc(ip_len);
+        if (!t->peer_ip) {
+            goto fail;
+        }
+        memcpy(t->peer_ip, msg->peer_ip, ip_len);
+        t->msg.peer_ip = t->peer_ip;
+    } else {
+        t->msg.peer_ip = NULL;
+    }
+    if (msg->metadata_len > 0 && msg->metadata) {
+        t->metadata = (uint8_t *)malloc(msg->metadata_len);
+        if (!t->metadata) {
+            goto fail;
+        }
+        memcpy(t->metadata, msg->metadata, msg->metadata_len);
+        t->msg.metadata = t->metadata;
+    } else {
+        t->msg.metadata = NULL;
+        t->msg.metadata_len = 0;
+    }
+    if (msg->status_msg_len > 0 && msg->status_msg) {
+        t->status_msg = (uint8_t *)malloc(msg->status_msg_len);
+        if (!t->status_msg) {
+            goto fail;
+        }
+        memcpy(t->status_msg, msg->status_msg, msg->status_msg_len);
+        t->msg.status_msg = (const char *)t->status_msg;
+    } else {
+        t->msg.status_msg = NULL;
+        t->msg.status_msg_len = 0;
+    }
+    if (msg->payload.len > 0 && msg->payload.data) {
+        t->payload = (uint8_t *)malloc(msg->payload.len);
+        if (!t->payload) {
+            goto fail;
+        }
+        memcpy(t->payload, msg->payload.data, msg->payload.len);
+        t->msg.payload.data = t->payload;
+    } else {
+        t->msg.payload.data = NULL;
+        t->msg.payload.len = 0;
+    }
+    return OK;
+fail:
+    response_task_destroy(t);
+    return ERR_NOMEM;
+}
+
+static void response_dispatch_task(void *user)
+{
+    zri_response_task_t *t = (zri_response_task_t *)user;
+    node_dispatch(t->node, t->transport, &t->msg);
+    response_task_destroy(t);
+}
+
 static void node_dispatch(node_t *node, zri_transport_t *transport, const zri_message_t *msg)
 {
     if (msg->kind == KIND_CANCEL) {
@@ -94,6 +203,21 @@ static void node_dispatch(node_t *node, zri_transport_t *transport, const zri_me
         return;
     }
     if (msg->kind == KIND_RESPONSE) {
+        ntk_poller *owner = zri_pending_owner(node, msg->request_id);
+        if (owner && !ntk_poller_is_current_thread(owner)) {
+            zri_response_task_t *task =
+                (zri_response_task_t *)calloc(1, sizeof(*task));
+            if (!task) {
+                return;
+            }
+            if (response_task_init(task, node, transport, msg) != OK) {
+                return; /* response_task_init 已释放 task */
+            }
+            if (ntk_poller_async(owner, response_dispatch_task, task, 1) != NTK_OK) {
+                response_task_destroy(task);
+            }
+            return;
+        }
         zri_pending_t *p = zri_pending_find(node, msg->request_id);
         response_t resp;
         if (!p) {

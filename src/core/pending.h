@@ -4,6 +4,7 @@
 /* pending：客户端未完成调用的关联表（request_id -> 回调/超时）。 */
 
 #include <types.h>
+#include <ntk.h>
 
 #include <stddef.h>
 #include <stdint.h>
@@ -15,6 +16,10 @@
 typedef struct zri_pending {
     int used;
     node_t *node;
+    ntk_poller *poller; /* 归属 poller：发送/超时/重传/回调都在此线程 */
+    struct zri_pending *lane_prev; /* 归属 poller 的 pending lane */
+    struct zri_pending *lane_next;
+    uint32_t gen; /* 槽位复用代际，tick 迭代时用于识别被复用的槽位 */
     const void *owner; /* 创建该调用的 stub；用于 stub/proxy 销毁时批量取消 */
     uint64_t request_id;
     response_fn cb;
@@ -48,12 +53,19 @@ typedef struct zri_pending {
     struct zri_pending *free_next; /* 空闲槽位复用链表 */
 } zri_pending_t;
 
-zri_pending_t *zri_pending_add(
-    node_t *node, uint64_t id, response_fn cb, void *user, uint64_t timeout_ms, int *out_rc);
+zri_pending_t *zri_pending_add(node_t *node,
+                               uint64_t id,
+                               response_fn cb,
+                               void *user,
+                               uint64_t timeout_ms,
+                               ntk_poller *poller,
+                               int *out_rc);
 zri_pending_t *zri_pending_find(node_t *node, uint64_t id);
+/* 返回该 request_id 的归属 poller；未找到返回 NULL。 */
+ntk_poller *zri_pending_owner(node_t *node, uint64_t id);
 void zri_pending_invoke(zri_pending_t *p, int status, const response_t *resp);
 void zri_pending_release(zri_pending_t *p);
-void zri_pending_tick(node_t *node, uint64_t now_ms);
+void zri_pending_tick(node_t *node, uint64_t now_ms, ntk_poller *poller);
 void zri_pending_cleanup(node_t *node);
 
 /* RTO 重传：按保存的请求参数重发（实现于 proxy.c）。 */

@@ -23,7 +23,8 @@ static void pending_probe(void *user)
 
     memset(pending, 0, sizeof(pending));
     for (i = 0; i < sizeof(pending) / sizeof(pending[0]); i++) {
-        pending[i] = zri_pending_add(node, (uint64_t)i + 1, NULL, NULL, 60000, NULL);
+        pending[i] =
+            zri_pending_add(node, (uint64_t)i + 1, NULL, NULL, 60000, zri_node_poller(node), NULL);
         if (!pending[i]) {
             g_task_ok = 0;
             ntk_sem_post(g_sem, 1);

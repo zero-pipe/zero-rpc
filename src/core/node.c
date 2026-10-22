@@ -18,6 +18,37 @@ uint64_t zri_now_ms(void)
     return ntk_monotonic_ms();
 }
 
+/* 出站分片：按 key 稳定选择 poller；未启用池时回退到 node->poller。 */
+ntk_poller *zri_node_pick_poller(const node_t *node, uint64_t key)
+{
+    ntk_poller *poller = NULL;
+    if (!node) {
+        return NULL;
+    }
+    if (node->pool) {
+        poller = ntk_poller_pool_get_by_key((ntk_poller_pool *)node->pool, key);
+    }
+    return poller ? poller : node->poller;
+}
+
+/* poller 在 node 出站分片中的下标；找不到返回 -1。 */
+int zri_node_poller_index(const node_t *node, ntk_poller *poller)
+{
+    unsigned i;
+    if (!node || !poller) {
+        return -1;
+    }
+    for (i = 0; i < node->io_count; i++) {
+        if (node->io_pollers[i] == poller) {
+            return (int)i;
+        }
+    }
+    if (node->poller == poller) {
+        return 0;
+    }
+    return -1;
+}
+
 static uint32_t zri_rand(void)
 {
     static uint32_t st;
@@ -120,8 +151,14 @@ static void node_timer_cb(void *user)
     }
     zri_service_expire_streams(node, now);
     zri_node_expire_cancels(node, now);
-    zri_pending_tick(node, now);
     zri_dedup_expire(&node->dedup, now);
+}
+
+/* 每个 poller 各自驱动本 lane 上 pending 的超时/重传。 */
+static void pending_timer_cb(void *user)
+{
+    node_t *node = (node_t *)user;
+    zri_pending_tick(node, zri_now_ms(), ntk_poller_current());
 }
 
 /* ---- 公共 API ---- */
@@ -205,7 +242,8 @@ int node_create(const node_config_t *cfg, node_t **out)
     }
     node->services_lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
     node->codecs_lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    if (!node->services_lock || !node->codecs_lock) {
+    node->pending_lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    if (!node->services_lock || !node->codecs_lock || !node->pending_lock) {
         node_destroy(node);
         return ERR_NOMEM;
     }
@@ -238,7 +276,18 @@ int node_create(const node_config_t *cfg, node_t **out)
         node_destroy(node);
         return ERR_IO;
     }
-    node->poller = ntk_poller_pool_at(node->pool, 0);
+    {
+        unsigned i;
+        unsigned n = ntk_poller_pool_size(node->pool);
+        if (n > IO_MAX) {
+            n = IO_MAX;
+        }
+        node->io_count = n;
+        for (i = 0; i < n; i++) {
+            node->io_pollers[i] = ntk_poller_pool_at(node->pool, i);
+        }
+        node->poller = n ? node->io_pollers[0] : NULL;
+    }
 
     /*
      * 挂载 per-poller 缓冲池，先把底层能力接上，热路径再逐步迁移到
@@ -305,6 +354,13 @@ int node_create(const node_config_t *cfg, node_t **out)
     }
     node->node_timer =
         ntk_timer_start(node->poller, zri_tick_interval_ms(), 1, node_timer_cb, node);
+    {
+        unsigned i;
+        for (i = 0; i < node->io_count; i++) {
+            node->pending_timers[i] = ntk_timer_start(
+                node->io_pollers[i], zri_tick_interval_ms(), 1, pending_timer_cb, node);
+        }
+    }
     node->started = 1;
 
     if (node->mode == MODE_MESH) {
@@ -380,6 +436,15 @@ void node_destroy(node_t *node)
         node->node_timer = NULL;
     }
     {
+        unsigned i;
+        for (i = 0; i < IO_MAX; i++) {
+            if (node->pending_timers[i]) {
+                ntk_timer_stop(node->pending_timers[i]);
+                node->pending_timers[i] = NULL;
+            }
+        }
+    }
+    {
         size_t i;
         for (i = 0; i < node->transport_count; i++) {
             if (node->transports[i]) {
@@ -391,6 +456,10 @@ void node_destroy(node_t *node)
         node->registry_backend->ops->stop(node);
     }
     zri_pending_cleanup(node);
+    if (node->pending_lock) {
+        ntk_mutex_destroy(node->pending_lock);
+        node->pending_lock = NULL;
+    }
     zri_route_cleanup(&node->routes);
     zri_registry_cleanup(&node->registry);
     {

@@ -2,7 +2,7 @@
  * TCP 传输驱动：基于 ntk_tcp_server / ntk_tcp_client 的长度前缀分帧。
  *
  * 线程模型：入站会话由 ntk_tcp_server 分散到 poller_pool 的各个 poller，出站连接
- * 固定在 io0。为避免跨线程争用，link 表按 poller 分片（每个 poller 独占一行），
+ * 创建在发起调用的 poller 上。为避免跨线程争用，link 表按 poller 分片（每个 poller 独占一行），
  * 热路径无锁；同一会话的 on_recv/on_error 始终在其所属 poller 上执行。
  *
  * 缓冲模型：
@@ -52,8 +52,14 @@ typedef struct zri_tcp_transport {
     ntk_poller *pollers[IO_MAX];
     int io_count;
     zri_tcp_link_t links[IO_MAX][TCP_LINKS_PER_IO];
-    ntk_timer *tick_timer;
+    ntk_timer *tick_timers[IO_MAX];
+    struct zri_tcp_io_ctx *io_ctx;
 } zri_tcp_transport_t;
+
+typedef struct zri_tcp_io_ctx {
+    zri_tcp_transport_t *t;
+    int io;
+} zri_tcp_io_ctx_t;
 
 static void tcp_client_on_connect(ntk_tcp_client *client, void *user);
 static void tcp_client_on_recv(ntk_tcp_client *client, const void *data, size_t len, void *user);
@@ -379,9 +385,16 @@ static zri_tcp_link_t *link_find_out(zri_tcp_transport_t *t,
                                      uint16_t port,
                                      int create)
 {
-    zri_tcp_link_t *row = t->links[0]; /* 出站固定 io0 */
+    int io = io_of_poller(t, ntk_poller_current());
+    zri_tcp_link_t *row;
+    ntk_poller *poller;
     int i;
     int free_slot = -1;
+    if (io < 0) {
+        io = 0;
+    }
+    row = t->links[io];
+    poller = (io < t->io_count) ? t->pollers[io] : t->base.poller;
     for (i = 0; i < TCP_LINKS_PER_IO; i++) {
         zri_tcp_link_t *link = &row[i];
         if (link->used && !link->server_side && link->port == port && strcmp(link->ip, ip) == 0) {
@@ -411,7 +424,7 @@ static zri_tcp_link_t *link_find_out(zri_tcp_transport_t *t,
         ops.on_recv = tcp_client_on_recv;
         ops.on_error = tcp_client_on_error;
         memset(&copts, 0, sizeof(copts));
-        copts.poller = t->base.poller;
+        copts.poller = poller;
         copts.ops = &ops;
         copts.user = t;
         link->client = ntk_tcp_client_create(&copts);
@@ -478,11 +491,14 @@ static zri_tcp_link_t *link_for_session(zri_tcp_transport_t *t,
 
 static zri_tcp_link_t *link_for_client(zri_tcp_transport_t *t, ntk_tcp_client *client)
 {
-    zri_tcp_link_t *row = t->links[0];
-    int i;
-    for (i = 0; i < TCP_LINKS_PER_IO; i++) {
-        if (row[i].used && !row[i].server_side && row[i].client == client) {
-            return &row[i];
+    int io;
+    for (io = 0; io < t->io_count; io++) {
+        zri_tcp_link_t *row = t->links[io];
+        int i;
+        for (i = 0; i < TCP_LINKS_PER_IO; i++) {
+            if (row[i].used && !row[i].server_side && row[i].client == client) {
+                return &row[i];
+            }
         }
     }
     return NULL;
@@ -584,6 +600,14 @@ static int tcp_start(zri_transport_t *base)
     for (i = 0; i < n; i++) {
         t->pollers[i] = ntk_poller_pool_at(base->pool, i);
     }
+    t->io_ctx = (zri_tcp_io_ctx_t *)calloc(n ? n : 1, sizeof(*t->io_ctx));
+    if (!t->io_ctx) {
+        return ERR_NOMEM;
+    }
+    for (i = 0; i < n; i++) {
+        t->io_ctx[i].t = t;
+        t->io_ctx[i].io = (int)i;
+    }
 
     memset(&sops, 0, sizeof(sops));
     sops.on_recv = tcp_srv_on_recv;
@@ -607,7 +631,10 @@ static int tcp_start(zri_transport_t *base)
         return ERR_IO;
     }
     base->port = ntk_tcp_server_port(t->server);
-    t->tick_timer = ntk_timer_start(base->poller, zri_tick_interval_ms(), 1, tcp_tick_cb, t);
+    for (i = 0; i < n; i++) {
+        t->tick_timers[i] =
+            ntk_timer_start(t->pollers[i], zri_tick_interval_ms(), 1, tcp_tick_cb, &t->io_ctx[i]);
+    }
     return OK;
 }
 
@@ -629,9 +656,11 @@ static void tcp_stop(zri_transport_t *base)
 {
     zri_tcp_transport_t *t = (zri_tcp_transport_t *)base;
     int i, j;
-    if (t->tick_timer) {
-        ntk_timer_stop(t->tick_timer);
-        t->tick_timer = NULL;
+    for (i = 0; i < IO_MAX; i++) {
+        if (t->tick_timers[i]) {
+            ntk_timer_stop(t->tick_timers[i]);
+            t->tick_timers[i] = NULL;
+        }
     }
     /* 先停 listen，再销毁 server（会 detach 并销毁所有入站会话），最后清 link 表。 */
     if (t->server) {
@@ -644,6 +673,8 @@ static void tcp_stop(zri_transport_t *base)
             tcp_free_link(&t->links[i][j]);
         }
     }
+    free(t->io_ctx);
+    t->io_ctx = NULL;
 }
 
 static int tcp_send_common(zri_tcp_transport_t *t, zri_tcp_link_t *link, const zri_message_t *msg)
@@ -755,8 +786,9 @@ static int tcp_reply(zri_transport_t *base, const zri_message_t *msg)
 
 static void tcp_tick_cb(void *user)
 {
-    zri_tcp_transport_t *t = (zri_tcp_transport_t *)user;
-    zri_tcp_link_t *row = t->links[0]; /* 只有 io0 上的出站连接需要冲刷 */
+    zri_tcp_io_ctx_t *ctx = (zri_tcp_io_ctx_t *)user;
+    zri_tcp_transport_t *t = ctx->t;
+    zri_tcp_link_t *row = t->links[ctx->io]; /* 只冲刷本 poller 的出站连接 */
     int i;
     for (i = 0; i < TCP_LINKS_PER_IO; i++) {
         zri_tcp_link_t *link = &row[i];

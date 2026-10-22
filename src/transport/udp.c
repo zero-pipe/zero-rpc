@@ -1262,6 +1262,21 @@ static void udp_tick_cb(void *user)
     }
 }
 
+/* 当前 poller 对应的 io 分片下标；找不到回退 0。 */
+static int udp_io_current(zri_udp_transport_t *udp)
+{
+    ntk_poller *cur = ntk_poller_current();
+    int i;
+    if (cur) {
+        for (i = 0; i < udp->io_count; i++) {
+            if (udp->pollers[i] == cur) {
+                return i;
+            }
+        }
+    }
+    return 0;
+}
+
 /* ---- 传输接口 ---- */
 
 static int udp_start(zri_transport_t *t)
@@ -1367,10 +1382,12 @@ static int udp_send(zri_transport_t *t, const zri_message_t *msg)
 {
     zri_udp_transport_t *udp = (zri_udp_transport_t *)t;
     zri_session_t *s;
+    int io;
     if (!msg || !msg->peer_ip || !msg->peer_port || udp->io_count == 0) {
         return ERR_INVALID;
     }
-    s = session_for(udp, 0, udp->socks[0], msg->peer_ip, msg->peer_port, zri_now_ms());
+    io = udp_io_current(udp);
+    s = session_for(udp, io, udp->socks[io], msg->peer_ip, msg->peer_port, zri_now_ms());
     if (!s) {
         return ERR_NOMEM;
     }
@@ -1386,10 +1403,12 @@ static int udp_reply(zri_transport_t *t, const zri_message_t *msg)
     }
     s = (zri_session_t *)msg->peer_token;
     if (!s || !s->used) {
+        int io;
         if (!msg->peer_ip || !msg->peer_port || udp->io_count == 0) {
             return ERR_INVALID;
         }
-        s = session_for(udp, 0, udp->socks[0], msg->peer_ip, msg->peer_port, zri_now_ms());
+        io = udp_io_current(udp);
+        s = session_for(udp, io, udp->socks[io], msg->peer_ip, msg->peer_port, zri_now_ms());
         if (!s) {
             return ERR_NOMEM;
         }
