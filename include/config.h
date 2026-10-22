@@ -41,9 +41,8 @@
  *   "routes":  [ { "service": "EchoService", "endpoint": "tcp://127.0.0.1:42420" } ]
  * }
  *
- * 兼容：为平滑迁移，顶层扁平键（transport/bind_host/data_port/discovery_host/
- * discovery_port/io_threads/...）仍然接受，并在解析时映射进对应子结构。
- * 已知字段类型错误、取值越界或 URI 非法时返回 ERR_INVALID；未知字段忽略。
+ * 字段类型错误、取值越界或 URI 非法时返回 ERR_INVALID；未知字段忽略。
+ * 需要定位失败字段时用 config_load_ex，它额外返回字段路径与原因。
  *
  * config_t 拥有所有字符串；node_create / node_create_from_config 会把需要的
  * 字符串与端点拷进节点自身缓冲区，因此 config 只需活到建节点返回即可。
@@ -174,6 +173,13 @@ typedef struct config {
     size_t binding_count;
 } config_t;
 
+/* 结构化解析错误：path 形如 "transport.frag_bytes" / "routes[0].endpoint"。 */
+typedef struct config_error {
+    int code;         /* ERR_* */
+    char path[96];
+    char reason[128];
+} config_error_t;
+
 /* ---- 默认值 ---- */
 void node_runtime_config_default(node_runtime_config_t *cfg);
 void node_transport_config_default(node_transport_config_t *cfg);
@@ -182,12 +188,22 @@ void node_metrics_config_default(node_metrics_config_t *cfg);
 void node_log_config_default(node_log_config_t *cfg);
 /* 填充组合根默认值；用于直接构造 node_config_t 的调用方。 */
 void node_config_default(node_config_t *cfg);
+/*
+ * 归一化：把 0/NULL 字段补成默认值并夹到合法范围。node_create 内部会对传入
+ * 配置的副本调用一次，因此直接构造 node_config_t 的调用方无需再写兜底。
+ * log.level 的 0 是合法的 NODE_LOG_ASSERT，不会被改写。
+ */
+void node_config_normalize(node_config_t *cfg);
 
 /* ---- 加载与创建 ---- */
 /* 解析 JSON 字符串；成功返回 OK 并填充 out。 */
 int config_load(const char *json, config_t *out);
+/* 同 config_load，额外输出失败字段路径与原因；err 可为 NULL。 */
+int config_load_ex(const char *json, config_t *out, config_error_t *err);
 /* 读取文件后解析。 */
 int config_load_file(const char *path, config_t *out);
+/* 同 config_load_file，额外输出失败字段路径与原因；err 可为 NULL。 */
+int config_load_file_ex(const char *path, config_t *out, config_error_t *err);
 
 /* 按配置创建节点，并应用静态路由与显式发现对端。 */
 int node_create_from_config(const config_t *cfg, node_t **out);

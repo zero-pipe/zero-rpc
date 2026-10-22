@@ -11,6 +11,10 @@ static inline void zri_copy_str(char *dst, size_t cap, const char *src, const ch
     if (cap == 0) {
         return;
     }
+    if (!s) {
+        dst[0] = '\0';
+        return;
+    }
     while (i + 1 < cap && s[i]) {
         dst[i] = s[i];
         i++;

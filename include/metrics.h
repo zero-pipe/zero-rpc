@@ -1,6 +1,7 @@
 #ifndef METRICS_H
 #define METRICS_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -71,6 +72,32 @@ typedef struct peer_stats {
     uint64_t feedback_sent;     /* 本端发出的链路反馈包数（UDP: SR+RR） */
     uint64_t feedback_received; /* 本端收到的链路反馈包数（UDP: SR+RR） */
 } peer_stats_t;
+
+/* ---- 指标登记表 ----
+ *
+ * 名称/类型/单位集中登记，导出层（Prometheus 等）只需遍历这张表，不再从
+ * 散落的 ZRI_METRIC_INC 调用点猜测语义。offset 为 metrics_t 内字段偏移。
+ */
+typedef enum nb_metric_type {
+    NB_METRIC_COUNTER = 0,
+    NB_METRIC_GAUGE,
+    NB_METRIC_HISTOGRAM
+} nb_metric_type_t;
+
+typedef struct nb_metric_desc {
+    const char *name;
+    nb_metric_type_t type;
+    const char *unit;
+    size_t offset;
+} nb_metric_desc_t;
+
+extern const nb_metric_desc_t nb_metric_table[];
+extern const size_t nb_metric_table_count;
+
+/* 按名称查登记项；未找到返回 NULL。 */
+const nb_metric_desc_t *nb_metric_find(const char *name);
+/* 延迟直方图分桶上界（毫秒），返回桶数；bounds 可为 NULL。 */
+size_t nb_metric_latency_bounds(const uint32_t **bounds);
 
 #ifdef __cplusplus
 }

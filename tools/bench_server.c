@@ -121,7 +121,7 @@ int main(int argc, char **argv)
     memset(&main_executor, 0, sizeof(main_executor));
     memset(&block_executor, 0, sizeof(block_executor));
     block_options.echo_request = 1;
-    memset(&node_cfg, 0, sizeof(node_cfg));
+    node_config_default(&node_cfg);
     node_cfg.name = "bench_server";
     node_cfg.transport.bind_host = "127.0.0.1";
     node_cfg.discovery.host = "127.0.0.1";

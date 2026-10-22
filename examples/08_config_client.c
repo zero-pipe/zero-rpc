@@ -15,15 +15,17 @@ int main(int argc, char **argv)
 {
     const char *path = argc > 1 ? argv[1] : "08_config_client.json";
     config_t cfg;
+    config_error_t err;
     node_t *node = NULL;
     proxy_t *proxy = NULL;
     response_t response;
     payload_t request;
     int rc;
 
-    rc = config_load_file(path, &cfg);
+    rc = config_load_file_ex(path, &cfg, &err);
     if (rc != OK) {
-        rpc_log_error("load config failed: %s (%d)", path, rc);
+        rpc_log_error(
+            "load config failed: %s (%d) path=%s reason=%s", path, rc, err.path, err.reason);
         return 1;
     }
     rc = node_create_from_config(&cfg, &node);

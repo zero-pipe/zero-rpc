@@ -16,48 +16,6 @@ static int g_fail;
         }                                                               \
     } while (0)
 
-/* 旧扁平格式：顶层字段 + URI 端点 + 字符串 peer/binding。 */
-static void test_legacy_flat(void)
-{
-    const char *json = "{"
-                       "\"name\":\"n1\",\"transport\":\"tcp\",\"data_port\":9000,"
-                       "\"io_threads\":2,\"handler_threads\":3,\"handler_max_concurrency\":64,"
-                       "\"mode\":\"static\",\"frag_bytes\":1024,\"max_msg_bytes\":4194304,"
-                       "\"discovery\":{\"broadcast\":\"127.0.0.1:41953\",\"hello_interval_ms\":500,"
-                       "\"node_ttl_ms\":9000,"
-                       "\"peers\":[\"10.0.0.1:41953\"]},"
-                       "\"bindings\":[\"tcp://127.0.0.1:8080\"],"
-                       "\"routes\":[{\"service\":\"echo\",\"endpoint\":\"tcp://10.0.0.2:9001\"}]"
-                       "}";
-    config_t cfg;
-
-    memset(&cfg, 0, sizeof(cfg));
-    CHECK(config_load(json, &cfg) == OK);
-    CHECK(strcmp(cfg.name, "n1") == 0);
-    CHECK(cfg.node.name == cfg.name);
-    CHECK(cfg.node.transport.transport == TRANSPORT_TCP);
-    CHECK(cfg.node.mode == MODE_STATIC);
-    CHECK(cfg.node.transport.data_port == 9000);
-    CHECK(cfg.node.runtime.io_threads == 2);
-    CHECK(cfg.node.runtime.handler_threads == 3);
-    CHECK(cfg.node.runtime.handler_max_concurrency == 64);
-    CHECK(cfg.node.transport.frag_bytes == 1024);
-    CHECK(cfg.node.transport.max_msg_bytes == 4194304);
-    CHECK(strcmp(cfg.discovery_host, "127.0.0.1") == 0);
-    CHECK(cfg.node.discovery.host == cfg.discovery_host);
-    CHECK(cfg.node.discovery.port == 41953);
-    CHECK(cfg.node.discovery.hello_interval_ms == 500);
-    CHECK(cfg.binding_count == 1);
-    CHECK(strcmp(cfg.binding_configs[0].name, "tcp") == 0);
-    CHECK(strcmp(cfg.binding_configs[0].endpoint, "tcp://127.0.0.1:8080") == 0);
-    CHECK(cfg.peer_count == 1);
-    CHECK(strcmp(cfg.peers[0].ip, "10.0.0.1") == 0);
-    CHECK(cfg.peers[0].port == 41953);
-    CHECK(cfg.route_count == 1);
-    CHECK(strcmp(cfg.routes[0].service, "echo") == 0);
-    CHECK(strcmp(cfg.routes[0].endpoint, "tcp://10.0.0.2:9001") == 0);
-}
-
 /* 新格式：按模块拆成子对象。 */
 static void test_nested(void)
 {
@@ -145,28 +103,21 @@ static void test_strict_validation(void)
 {
     config_t cfg;
     static const char *bad[] = {
-        /* 旧扁平格式 */
-        "{\"data_port\":\"9000\"}",
-        "{\"data_port\":70000}",
-        "{\"transport\":\"sctp\"}",
         "{\"mode\":\"foo\"}",
-        "{\"frag_bytes\":70000}",
         "{\"name\":42}",
-        "{\"bindings\":\"tcp://127.0.0.1:1\"}",
-        "{\"bindings\":[\"not-a-uri\"]}",
         "{\"routes\":[{\"service\":\"x\"}]}",
         "{\"routes\":[{\"service\":\"x\",\"endpoint\":\"bad\"}]}",
         "{\"discovery\":[]}",
         "{\"discovery\":{\"broadcast\":\"bad\"}}",
         "{\"discovery\":{\"peers\":[\"bad\"]}}",
-        "{\"rtcp\":\"no\"}",
-        /* 新子结构格式 */
         "{\"runtime\":[]}",
         "{\"runtime\":{\"io_threads\":\"2\"}}",
         "{\"runtime\":{\"io_threads\":2000}}",
         "{\"transport\":[]}",
         "{\"transport\":{\"kind\":\"sctp\"}}",
         "{\"transport\":{\"data_port\":70000}}",
+        "{\"transport\":{\"frag_bytes\":70000}}",
+        "{\"transport\":{\"rtcp\":\"no\"}}",
         "{\"transport\":{\"bindings\":\"tcp://127.0.0.1:1\"}}",
         "{\"transport\":{\"bindings\":[\"not-a-uri\"]}}",
         "{\"metrics\":\"off\"}",
@@ -202,9 +153,9 @@ static void test_endpoint_model(void)
 static void test_binding_config(void)
 {
     const char *json = "{\"name\":\"dual\",\"mode\":\"static\","
-                       "\"bindings\":["
+                       "\"transport\":{\"bindings\":["
                        "{\"name\":\"tcp\",\"endpoint\":\"tcp://127.0.0.1:8080\"},"
-                       "{\"name\":\"udp\",\"endpoint\":\"udp://127.0.0.1:8081\"}],"
+                       "{\"name\":\"udp\",\"endpoint\":\"udp://127.0.0.1:8081\"}]},"
                        "\"routes\":[{\"service\":\"order\","
                        "\"endpoint\":\"tcp://127.0.0.1:9000\"}]}";
     config_t cfg;
@@ -237,21 +188,42 @@ static void test_rtcp_config(void)
 {
     config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
-    CHECK(config_load("{\"name\":\"r\",\"rtcp_interval_ms\":2000}", &cfg) == OK);
+    CHECK(config_load("{\"name\":\"r\",\"transport\":{\"rtcp_interval_ms\":2000}}", &cfg) == OK);
     CHECK(cfg.node.transport.rtcp_interval_ms == 2000);
     CHECK(cfg.node.transport.rtcp_disabled == 0);
 
     memset(&cfg, 0, sizeof(cfg));
-    CHECK(config_load("{\"name\":\"r\",\"rtcp\":false}", &cfg) == OK);
+    CHECK(config_load("{\"name\":\"r\",\"transport\":{\"rtcp\":false}}", &cfg) == OK);
     CHECK(cfg.node.transport.rtcp_disabled == 1);
 
     memset(&cfg, 0, sizeof(cfg));
-    CHECK(config_load("{\"name\":\"r\",\"rtcp\":true}", &cfg) == OK);
+    CHECK(config_load("{\"name\":\"r\",\"transport\":{\"rtcp\":true}}", &cfg) == OK);
     CHECK(cfg.node.transport.rtcp_disabled == 0);
+}
+
+static void test_structured_errors(void)
+{
+    config_t cfg;
+    config_error_t err;
 
     memset(&cfg, 0, sizeof(cfg));
-    CHECK(config_load("{\"transport\":{\"rtcp\":false}}", &cfg) == OK);
-    CHECK(cfg.node.transport.rtcp_disabled == 1);
+    memset(&err, 0, sizeof(err));
+    CHECK(config_load_ex("{\"transport\":{\"frag_bytes\":70000}}", &cfg, &err) == ERR_INVALID);
+    CHECK(strcmp(err.path, "transport.frag_bytes") == 0);
+    CHECK(err.reason[0] != '\0');
+
+    memset(&cfg, 0, sizeof(cfg));
+    CHECK(config_load_ex("{\"mode\":\"nope\"}", &cfg, &err) == ERR_INVALID);
+    CHECK(strcmp(err.path, "mode") == 0);
+
+    memset(&cfg, 0, sizeof(cfg));
+    CHECK(config_load_ex("{\"routes\":[{\"service\":\"x\",\"endpoint\":\"bad\"}]}", &cfg, &err) ==
+          ERR_INVALID);
+    CHECK(strcmp(err.path, "routes.endpoint") == 0);
+
+    memset(&cfg, 0, sizeof(cfg));
+    CHECK(config_load_ex("{ not json", &cfg, &err) == ERR_INVALID);
+    CHECK(strcmp(err.path, "") == 0);
 }
 
 static void test_defaults_api(void)
@@ -278,11 +250,11 @@ static void test_log_switch(void)
 
 int main(void)
 {
-    test_legacy_flat();
     test_nested();
     test_defaults();
     test_bad_json();
     test_strict_validation();
+    test_structured_errors();
     test_endpoint_model();
     test_binding_config();
     test_nested_bindings();

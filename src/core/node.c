@@ -1,6 +1,8 @@
 /* 节点：生命周期、传输装配、线程/发现配置与阻塞运行（分发见 zri_dispatch.c）。 */
 #include "node_internal.h"
 
+#include <config.h>
+
 #include "atomic.h"
 #include "defaults.h"
 #include "mem.h"
@@ -167,12 +169,16 @@ static void pending_timer_cb(void *user)
 int node_create(const node_config_t *cfg, node_t **out)
 {
     node_t *node;
+    node_config_t local;
     ntk_poller_pool_opts_t popts;
     static int platform_inited = 0;
 
     if (!cfg || !out) {
         return ERR_INVALID;
     }
+    local = *cfg;
+    node_config_normalize(&local);
+    cfg = &local;
     *out = NULL;
     node = (node_t *)calloc(1, sizeof(*node));
     if (!node) {
@@ -182,64 +188,31 @@ int node_create(const node_config_t *cfg, node_t **out)
         free(node);
         return ERR_INVALID;
     }
-    zri_copy_str(node->name, sizeof(node->name), cfg->name, "rpc");
-    zri_copy_str(node->bind_host,
-                 sizeof(node->bind_host),
-                 cfg->transport.bind_host,
-                 ZRI_DEFAULT_BIND_HOST);
-    zri_copy_str(
-        node->discovery_host,
-        sizeof(node->discovery_host),
-        cfg->discovery.host,
-        ZRI_DEFAULT_DISCOVERY_HOST);
-    node->discovery_port = cfg->discovery.port ? cfg->discovery.port : DISCOVERY_PORT;
-    node->io_threads = cfg->runtime.io_threads ? cfg->runtime.io_threads : ntk_thread_hardware_concurrency();
-    if (node->io_threads > IO_MAX) {
-        node->io_threads = IO_MAX;
-    }
-    if (node->io_threads < 1) {
-        node->io_threads = 1;
-    }
-    node->hello_interval_ms = cfg->discovery.hello_interval_ms ?
-        cfg->discovery.hello_interval_ms :
-        ZRI_DEFAULT_HELLO_INTERVAL_MS;
-    node->node_ttl_ms =
-        cfg->discovery.node_ttl_ms ? cfg->discovery.node_ttl_ms : ZRI_DEFAULT_NODE_TTL_MS;
+    zri_copy_str(node->name, sizeof(node->name), cfg->name, NULL);
+    zri_copy_str(node->bind_host, sizeof(node->bind_host), cfg->transport.bind_host, NULL);
+    zri_copy_str(node->discovery_host, sizeof(node->discovery_host), cfg->discovery.host, NULL);
+    node->discovery_port = cfg->discovery.port;
+    node->io_threads = cfg->runtime.io_threads;
+    node->hello_interval_ms = cfg->discovery.hello_interval_ms;
+    node->node_ttl_ms = cfg->discovery.node_ttl_ms;
     node->mode = cfg->mode;
     node->frag_bytes = cfg->transport.frag_bytes;
-    if (node->frag_bytes < FRAG_MIN) {
-        node->frag_bytes = FRAG_DEFAULT;
-    }
-    if (node->frag_bytes > FRAG_MAX) {
-        node->frag_bytes = FRAG_MAX;
-    }
-    node->max_msg_bytes = cfg->transport.max_msg_bytes ? cfg->transport.max_msg_bytes : MAX_MSG;
-    if (node->max_msg_bytes > MAX_MSG_LIMIT) {
-        node->max_msg_bytes = MAX_MSG_LIMIT;
-    }
-    if (node->max_msg_bytes < node->frag_bytes) {
-        node->max_msg_bytes = node->frag_bytes;
-    }
-    node->bp_high_water = cfg->transport.backpressure_bytes ? cfg->transport.backpressure_bytes : BACKPRESSURE_DEFAULT;
-    node->rtcp_interval_ms = cfg->transport.rtcp_interval_ms ? cfg->transport.rtcp_interval_ms : RTCP_INTERVAL_MS;
+    node->max_msg_bytes = cfg->transport.max_msg_bytes;
+    node->bp_high_water = cfg->transport.backpressure_bytes;
+    node->rtcp_interval_ms = cfg->transport.rtcp_interval_ms;
     node->rtcp_disabled = cfg->transport.rtcp_disabled;
-    node->max_recv_streams = cfg->runtime.max_streams ? cfg->runtime.max_streams : MAX_RECV_STREAMS;
-    if (node->max_recv_streams > MAX_RECV_STREAMS) {
-        node->max_recv_streams = MAX_RECV_STREAMS;
-    }
+    node->max_recv_streams = cfg->runtime.max_streams;
     node->rate_limit_pps = cfg->runtime.peer_rate_limit_pps;
     node->handler_max_concurrency = cfg->runtime.handler_max_concurrency;
-    node->max_inflight = cfg->runtime.max_inflight ? cfg->runtime.max_inflight : DEFAULT_MAX_INFLIGHT;
+    node->max_inflight = cfg->runtime.max_inflight;
     /*
      * metrics / log 运行期开关：关闭后热路径只多一次全局标志判断（见 atomic.h /
      * log.h）。sample_every 只作用于延迟直方图采样。
      */
     g_zri_metrics_enabled = cfg->metrics.disabled ? 0 : 1;
     g_zri_latency_enabled = (cfg->metrics.disabled || cfg->metrics.latency_disabled) ? 0 : 1;
-    g_zri_metrics_sample_every =
-        cfg->metrics.sample_every ? cfg->metrics.sample_every : ZRI_DEFAULT_METRICS_SAMPLE_EVERY;
-    rpc_log_configure(cfg->log.disabled ? 0 : 1,
-                      cfg->log.level ? cfg->log.level : NODE_LOG_INFO);
+    g_zri_metrics_sample_every = cfg->metrics.sample_every;
+    rpc_log_configure(cfg->log.disabled ? 0 : 1, cfg->log.level);
     {
         const char *dp = getenv("DROP_PERCENT");
         int v = dp ? atoi(dp) : 0;

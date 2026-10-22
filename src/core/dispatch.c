@@ -12,6 +12,8 @@
 #include "service_internal.h"
 #include "util.h"
 
+#include <log.h>
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -276,6 +278,29 @@ static void node_dispatch(node_t *node, zri_transport_t *transport, const zri_me
 {
     if (msg->kind == KIND_CANCEL) {
         zri_service_handle_cancel(node, transport, msg);
+        return;
+    }
+    if (msg->kind == KIND_PING) {
+        zri_message_t pong;
+
+        /* PING 是控制面心跳：原样回显 request_id，不进入业务分发。 */
+        memset(&pong, 0, sizeof(pong));
+        pong.kind = KIND_PING;
+        pong.request_id = msg->request_id;
+        pong.peer_ip = msg->peer_ip;
+        pong.peer_port = msg->peer_port;
+        pong.peer_token = msg->peer_token;
+        if (transport && transport->ops && transport->ops->reply) {
+            (void)transport->ops->reply(transport, &pong);
+        }
+        return;
+    }
+    if (msg->kind == KIND_GOAWAY) {
+        /* 对端声明不再接收新请求；已发起的调用仍按各自超时处理。 */
+        rpc_log_warn("GOAWAY from %s:%u (request_id=%u)",
+                     msg->peer_ip ? msg->peer_ip : "?",
+                     (unsigned)msg->peer_port,
+                     (unsigned)msg->request_id);
         return;
     }
     if (msg->kind == KIND_REQUEST || msg->kind == KIND_EVENT) {

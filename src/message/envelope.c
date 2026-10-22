@@ -109,9 +109,9 @@ static void envelope_fill_header(const zri_envelope_t *envelope,
                                  zri_frame_header_t *header)
 {
     memset(header, 0, sizeof(*header));
-    if (envelope->kind == KIND_CANCEL) {
+    if (envelope->kind >= KIND_CANCEL && envelope->kind <= KIND_PING) {
         header->frame_type = ZRI_FRAME_CONTROL;
-        header->kind = ZRI_CTRL_CANCEL;
+        header->kind = (uint8_t)(envelope->kind - KIND_CANCEL);
     } else {
         header->frame_type = ZRI_FRAME_DATA;
         header->kind = envelope->kind;
@@ -265,10 +265,10 @@ int zri_envelope_decode(const uint8_t *buf, size_t len, zri_envelope_t *view)
         }
         view->kind = frame.header.kind;
     } else if (frame.header.frame_type == ZRI_FRAME_CONTROL) {
-        if (frame.header.kind != ZRI_CTRL_CANCEL) {
-            return ERR_INVALID; /* 其余控制语义尚未接入 core */
+        if (frame.header.kind > ZRI_CTRL_PING) {
+            return ERR_INVALID;
         }
-        view->kind = KIND_CANCEL;
+        view->kind = (uint8_t)(KIND_CANCEL + frame.header.kind);
     } else {
         return ERR_INVALID;
     }

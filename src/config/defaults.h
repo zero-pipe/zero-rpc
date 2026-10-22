@@ -9,7 +9,7 @@
  *
  * 项                        默认               范围                 语义
  * ------------------------- ------------------ -------------------- --------------------
- * io_threads                0(=硬件并发)       0..ZRI_MAX_IO        poller 分片线程数
+ * io_threads                0(=硬件并发)       1..IO_MAX            poller 分片线程数
  * handler_threads           0(关)              0..ZRI_MAX_HANDLER   worker 线程池
  * handler_max_concurrency   0(不限)            0..N                 worker 在途上限
  * max_inflight              65536              0..N                 客户端 pending 上限
@@ -22,6 +22,9 @@
  * hello_interval_ms         3000               0..N                 发现 HELLO 周期
  * node_ttl_ms               9000               0..N                 对端过期
  * metrics.sample_every      1                  1..N                 延迟采样
+ *
+ * 说明：capacity（缓冲/分片/队列容量）仍定义在 caps.h / transport_caps.h；
+ * 本头只登记 policy 默认值与校验上界，避免同一默认值散落多处。
  */
 
 #include "caps.h" /* MAX_MSG / MAX_RECV_STREAMS / IO_MAX */
@@ -32,6 +35,18 @@
 #define ZRI_DEFAULT_HELLO_INTERVAL_MS 3000u
 #define ZRI_DEFAULT_NODE_TTL_MS 9000u
 #define ZRI_DEFAULT_METRICS_SAMPLE_EVERY 1u
+
+/* capacity 常量经 defaults 单点引用，node/config 不再各自挑来源。 */
+#define ZRI_DEFAULT_MAX_MSG MAX_MSG
+#define ZRI_DEFAULT_FRAG_BYTES FRAG_DEFAULT
+#define ZRI_DEFAULT_FRAG_MIN FRAG_MIN
+#define ZRI_DEFAULT_FRAG_MAX FRAG_MAX
+#define ZRI_DEFAULT_MAX_INFLIGHT DEFAULT_MAX_INFLIGHT
+#define ZRI_DEFAULT_MAX_STREAMS MAX_RECV_STREAMS
+#define ZRI_DEFAULT_BACKPRESSURE_BYTES BACKPRESSURE_DEFAULT
+#define ZRI_DEFAULT_RTCP_INTERVAL_MS RTCP_INTERVAL_MS
+#define ZRI_DEFAULT_DISCOVERY_PORT DISCOVERY_PORT
+#define ZRI_DEFAULT_TIMEOUT_MS DEFAULT_TIMEOUT_MS
 
 /* 校验上界：超过即判非法（对应旧 config.c 的硬编码）。 */
 #define ZRI_MAX_IO_THREADS 1024u

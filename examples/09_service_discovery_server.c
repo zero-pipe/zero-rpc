@@ -31,7 +31,7 @@ int main(int argc, char **argv)
     uint16_t client_discovery_port = (uint16_t)(argc > 4 ? atoi(argv[4]) : 41954);
     int rc;
 
-    memset(&cfg, 0, sizeof(cfg));
+    node_config_default(&cfg);
     cfg.name = "DiscoveryServer";
     cfg.transport.transport = TRANSPORT_TCP;
     cfg.transport.bind_host = "0.0.0.0";

@@ -29,7 +29,7 @@ int main(int argc, char **argv)
     uint16_t port = (uint16_t)(argc > 1 ? atoi(argv[1]) : 42410);
     int rc;
 
-    memset(&cfg, 0, sizeof(cfg));
+    node_config_default(&cfg);
     cfg.name = "HealthServer";
     cfg.transport.transport = TRANSPORT_TCP;
     cfg.transport.bind_host = "127.0.0.1";

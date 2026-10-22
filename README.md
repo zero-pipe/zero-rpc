@@ -259,8 +259,8 @@ my_codec.release(NULL, bytes);
 {
   "name": "echo-server",
   "mode": "static",
-  "io_threads": 2,
-  "bindings": ["tcp://127.0.0.1:42420"],
+  "runtime": { "io_threads": 2 },
+  "transport": { "bindings": ["tcp://127.0.0.1:42420"] },
   "routes": [
     { "service": "EchoService", "endpoint": "tcp://127.0.0.1:42420" }
   ]
@@ -275,7 +275,7 @@ my_codec.release(NULL, bytes);
 {
   "name": "echo-server",
   "mode": "mesh",
-  "bindings": ["udp://0.0.0.0:42420"],
+  "transport": { "bindings": ["udp://0.0.0.0:42420"] },
   "discovery": {
     "broadcast": "255.255.255.255:41953",
     "hello_interval_ms": 3000,
@@ -292,6 +292,7 @@ my_codec.release(NULL, bytes);
 
 ```c
 config_t cfg;
+config_error_t err; /* config_load_ex 时用于定位非法字段 */
 config_load_file("config.json", &cfg);
 node_t *node;
 node_create_from_config(&cfg, &node); /* 创建节点并应用 peers / routes */

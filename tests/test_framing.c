@@ -67,25 +67,37 @@ static void test_envelope_roundtrip(void)
     CHECK(memcmp(view.payload, payload, sizeof(payload)) == 0);
 }
 
-static void test_envelope_control_cancel(void)
+static void test_envelope_control_kinds(void)
 {
+    static const struct {
+        uint8_t kind;
+        uint8_t opcode;
+    } cases[] = {
+        { KIND_CANCEL, ZRI_CTRL_CANCEL },
+        { KIND_GOAWAY, ZRI_CTRL_GOAWAY },
+        { KIND_PING, ZRI_CTRL_PING },
+    };
     uint8_t buf[64];
     zri_envelope_t envelope;
     zri_envelope_t view;
     zri_frame_t frame;
-    size_t n;
+    size_t i;
 
-    memset(&envelope, 0, sizeof(envelope));
-    envelope.kind = KIND_CANCEL;
-    envelope.request_id = 77;
-    n = zri_envelope_encode(buf, sizeof(buf), &envelope);
-    CHECK(n > 0);
-    CHECK(zri_frame_decode(buf, n, &frame) == OK);
-    CHECK(frame.header.frame_type == ZRI_FRAME_CONTROL);
-    CHECK(frame.header.kind == ZRI_CTRL_CANCEL);
-    CHECK(zri_envelope_decode(buf, n, &view) == OK);
-    CHECK(view.kind == KIND_CANCEL);
-    CHECK(view.request_id == 77);
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        size_t n;
+
+        memset(&envelope, 0, sizeof(envelope));
+        envelope.kind = cases[i].kind;
+        envelope.request_id = 77;
+        n = zri_envelope_encode(buf, sizeof(buf), &envelope);
+        CHECK(n > 0);
+        CHECK(zri_frame_decode(buf, n, &frame) == OK);
+        CHECK(frame.header.frame_type == ZRI_FRAME_CONTROL);
+        CHECK(frame.header.kind == cases[i].opcode);
+        CHECK(zri_envelope_decode(buf, n, &view) == OK);
+        CHECK(view.kind == cases[i].kind);
+        CHECK(view.request_id == 77);
+    }
 }
 
 static void test_frame_ext_roundtrip(void)
@@ -335,7 +347,7 @@ static void test_rtcp_bye_roundtrip(void)
 int main(void)
 {
     test_envelope_roundtrip();
-    test_envelope_control_cancel();
+    test_envelope_control_kinds();
     test_frame_ext_roundtrip();
     test_envelope_rejects_bad_header();
     test_udp_fragment_roundtrip();

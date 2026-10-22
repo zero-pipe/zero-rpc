@@ -19,7 +19,7 @@ int main(void)
     payload_t request;
     int rc;
 
-    memset(&cfg, 0, sizeof(cfg));
+    node_config_default(&cfg);
     cfg.name = "StaticClient";
     cfg.transport.transport = TRANSPORT_TCP;
     cfg.transport.bind_host = "127.0.0.1";

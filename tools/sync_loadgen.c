@@ -221,7 +221,7 @@ int main(int argc, char **argv)
         }
     }
 
-    memset(&cfg, 0, sizeof(cfg));
+    node_config_default(&cfg);
     cfg.name = opt.worker_id ? opt.worker_id : "sync_loadgen";
     cfg.transport.transport = opt.transport;
     cfg.transport.bind_host = "0.0.0.0";

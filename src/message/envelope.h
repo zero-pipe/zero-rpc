@@ -35,6 +35,8 @@ extern "C" {
 #define KIND_RESPONSE 1
 #define KIND_EVENT 2
 #define KIND_CANCEL 3 /* 客户端取消：靠 request_id + 对端定位在途调用 */
+#define KIND_GOAWAY 4 /* 对端不再接收新请求 */
+#define KIND_PING 5   /* 控制面心跳；收到后原样回显 */
 
 #define STREAM_FLAG_STREAM 0x80
 #define STREAM_FLAG_FIRST STREAM_FIRST

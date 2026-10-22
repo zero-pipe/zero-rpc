@@ -23,7 +23,7 @@ int main(void)
     service_t *svc = NULL;
     int rc;
 
-    memset(&cfg, 0, sizeof(cfg));
+    node_config_default(&cfg);
     cfg.name = "StaticServer";
     cfg.transport.transport = TRANSPORT_TCP;
     cfg.transport.bind_host = "127.0.0.1";
