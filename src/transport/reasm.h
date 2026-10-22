@@ -8,6 +8,11 @@
 #define MAX_REASM 16
 #endif
 
+/* 单个重组池默认内存预算（字节）：并发在途消息的 total_len 之和上限。 */
+#ifndef REASM_BUDGET_DEFAULT
+#define REASM_BUDGET_DEFAULT (4u * 1024u * 1024u)
+#endif
+
 /* One in-progress message reassembly. Buffers are owned by the slot. */
 typedef struct zri_reasm_slot {
     int used;
@@ -24,9 +29,13 @@ typedef struct zri_reasm_slot {
 
 typedef struct zri_reasm {
     zri_reasm_slot_t slots[MAX_REASM];
+    uint32_t budget_bytes; /* 0 = 不限（默认 REASM_BUDGET_DEFAULT） */
+    uint32_t used_bytes;   /* 在途 slot 的 total_len 之和 */
 } zri_reasm_t;
 
 void zri_reasm_init(zri_reasm_t *reasm);
+/* 设置内存预算（字节）；0 表示不限。 */
+void zri_reasm_set_budget(zri_reasm_t *reasm, uint32_t budget_bytes);
 void zri_reasm_reset(zri_reasm_t *reasm);
 
 /* Find an existing slot or create one for msg_id. NULL on allocation failure. */
@@ -41,7 +50,7 @@ int zri_reasm_put(zri_reasm_slot_t *slot,
                   const uint8_t *data,
                   uint32_t len);
 
-void zri_reasm_release(zri_reasm_slot_t *slot);
+void zri_reasm_release(zri_reasm_t *reasm, zri_reasm_slot_t *slot);
 
 /* Collect missing fragments as (base_seq + index) into out. */
 size_t zri_reasm_missing(const zri_reasm_t *reasm, uint16_t *out, size_t cap);

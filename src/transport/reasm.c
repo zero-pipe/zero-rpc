@@ -12,13 +12,29 @@ void zri_reasm_init(zri_reasm_t *reasm)
             reasm->slots[i].buf = NULL;
             reasm->slots[i].bits = NULL;
         }
+        reasm->budget_bytes = REASM_BUDGET_DEFAULT;
+        reasm->used_bytes = 0;
     }
 }
 
-void zri_reasm_release(zri_reasm_slot_t *slot)
+void zri_reasm_set_budget(zri_reasm_t *reasm, uint32_t budget_bytes)
+{
+    if (reasm) {
+        reasm->budget_bytes = budget_bytes;
+    }
+}
+
+void zri_reasm_release(zri_reasm_t *reasm, zri_reasm_slot_t *slot)
 {
     if (!slot) {
         return;
+    }
+    if (reasm && slot->used) {
+        if (reasm->used_bytes >= slot->total_len) {
+            reasm->used_bytes -= slot->total_len;
+        } else {
+            reasm->used_bytes = 0;
+        }
     }
     if (slot->buf) {
         zri_mem_free(slot->buf);
@@ -37,8 +53,9 @@ void zri_reasm_reset(zri_reasm_t *reasm)
         return;
     }
     for (size_t i = 0; i < MAX_REASM; i++) {
-        zri_reasm_release(&reasm->slots[i]);
+        zri_reasm_release(reasm, &reasm->slots[i]);
     }
+    reasm->used_bytes = 0;
 }
 
 zri_reasm_slot_t *zri_reasm_find(zri_reasm_t *reasm, uint32_t msg_id)
@@ -72,6 +89,9 @@ zri_reasm_slot_t *zri_reasm_acquire(
     if (!slot) {
         return NULL;
     }
+    if (reasm->budget_bytes != 0 && reasm->used_bytes + total_len > reasm->budget_bytes) {
+        return NULL; /* 超出重组内存预算：丢包由对端超时重传兜底 */
+    }
     slot->used = 1;
     slot->msg_id = msg_id;
     slot->total_len = total_len;
@@ -97,6 +117,7 @@ zri_reasm_slot_t *zri_reasm_acquire(
         slot->used = 0;
         return NULL;
     }
+    reasm->used_bytes += total_len;
     return slot;
 }
 
@@ -153,7 +174,7 @@ void zri_reasm_expire(zri_reasm_t *reasm,
             if (on_lost) {
                 on_lost(slot, user);
             }
-            zri_reasm_release(slot);
+            zri_reasm_release(reasm, slot);
         }
     }
 }

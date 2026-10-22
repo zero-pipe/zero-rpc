@@ -21,6 +21,15 @@
 #include <sys/socket.h>
 #endif
 
+/* 出站拥塞排空队列节点：一条尚未发完的消息（连续逻辑缓冲）。 */
+typedef struct zri_udp_txq {
+    struct zri_udp_txq *next;
+    uint8_t *buf;
+    uint32_t sent;
+    uint32_t total;
+    uint32_t msgid;
+} zri_udp_txq_t;
+
 /* 每个对端一个会话（仅在所属 io 分片上访问，无锁） */
 typedef struct zri_session {
     int used;
@@ -45,10 +54,9 @@ typedef struct zri_session {
 
     zri_tx_ring_t tx_ring;
 
-    uint8_t *txq;
-    uint32_t txq_sent;
-    uint32_t txq_total;
-    uint32_t txq_msgid;
+    zri_udp_txq_t *txq_head; /* 拥塞排队消息（FIFO）；backpressure 按字节高水位 */
+    zri_udp_txq_t *txq_tail;
+    uint32_t txq_pending_bytes; /* 队列中尚未发送的字节数 */
     uint32_t cc_burst;
     uint32_t cc_burst_max;
     uint64_t cc_last_loss_ms;
@@ -150,15 +158,21 @@ static uint32_t udp_rand(void)
 
 static void session_cleanup(zri_session_t *s)
 {
+    zri_udp_txq_t *q;
     if (!s) {
         return;
     }
     zri_tx_ring_cleanup(&s->tx_ring);
-    if (s->txq) {
-        free(s->txq);
-        s->txq = NULL;
-        s->txq_sent = 0;
+    q = s->txq_head;
+    while (q) {
+        zri_udp_txq_t *next = q->next;
+        free(q->buf);
+        free(q);
+        q = next;
     }
+    s->txq_head = NULL;
+    s->txq_tail = NULL;
+    s->txq_pending_bytes = 0;
     if (s->fec_rx_buf) {
         free(s->fec_rx_buf);
         s->fec_rx_buf = NULL;
@@ -184,6 +198,7 @@ static void session_init(zri_udp_transport_t *udp,
     s->sock = sock;
     zri_rx_window_reset(&s->rx_window);
     zri_reasm_init(&s->reasm);
+    zri_reasm_set_budget(&s->reasm, udp->base.bp_high_water);
     s->cc_burst_max = 1024;
     s->cc_burst = 16;
     s->peer_port = port;
@@ -553,15 +568,15 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_me
         return ERR_INVALID;
     }
 
-    if (s->txq) {
-        /* 上一条消息仍在拥塞排空：返回背压，不覆盖，避免隐性丢包。 */
-        ZRI_METRIC_INC(udp->base.metrics->backpressure_events);
-        return ERR_AGAIN;
-    }
     env_len = zri_envelope_size(route_len, metadata_len, status_len, len);
     if (env_len > (size_t)udp->base.max_msg_bytes + MAX_ROUTE + METADATA_WIRE_MAX + STATUS_MSG_MAX +
             ENVELOPE_HDR_LEN) {
         return ERR_TOOBIG;
+    }
+    if (s->txq_head && s->txq_pending_bytes + env_len > udp->base.bp_high_water) {
+        /* 出站拥塞队列超过 backpressure_bytes：返回背压，交给上层退避重试。 */
+        ZRI_METRIC_INC(udp->base.metrics->backpressure_events);
+        return ERR_AGAIN;
     }
     /* 仅把 envelope 头 + route 编进栈上前缀；payload 保持借用，不做整包拷贝。 */
     memset(&envelope, 0, sizeof(envelope));
@@ -594,6 +609,9 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_me
     view.payload_len = len;
 
     nfrag = env_len ? (uint32_t)((env_len + udp->base.frag_bytes - 1) / udp->base.frag_bytes) : 1;
+    if (nfrag > MAX_FRAGMENTS) {
+        return ERR_TOOBIG;
+    }
     for (i = 0; i < nfrag; i++) {
         size_t chunk = env_len - off;
         int last;
@@ -603,7 +621,7 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_me
         }
         last = (off + chunk) >= env_len;
 
-        if (i < s->cc_burst) {
+        if (i < s->cc_burst && s->txq_head == NULL) {
             if (nm == TX_BATCH_MAX) {
                 udp_send_msgs(s, msgs, nm);
                 nm = 0;
@@ -620,14 +638,26 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_me
                       msgs,
                       &nm);
         } else {
-            s->txq = (uint8_t *)malloc(env_len);
-            if (!s->txq) {
+            zri_udp_txq_t *q = (zri_udp_txq_t *)calloc(1, sizeof(*q));
+            if (!q) {
                 break;
             }
-            env_view_copy(&view, 0, env_len, s->txq);
-            s->txq_sent = (uint32_t)off;
-            s->txq_total = (uint32_t)env_len;
-            s->txq_msgid = msg->request_id;
+            q->buf = (uint8_t *)malloc(env_len);
+            if (!q->buf) {
+                free(q);
+                break;
+            }
+            env_view_copy(&view, 0, env_len, q->buf);
+            q->sent = (uint32_t)off;
+            q->total = (uint32_t)env_len;
+            q->msgid = msg->request_id;
+            if (s->txq_tail) {
+                s->txq_tail->next = q;
+            } else {
+                s->txq_head = q;
+            }
+            s->txq_tail = q;
+            s->txq_pending_bytes += (uint32_t)(env_len - off);
             break;
         }
         off += chunk;
@@ -635,7 +665,7 @@ static int session_send(zri_udp_transport_t *udp, zri_session_t *s, const zri_me
     if (nm > 0) {
         udp_send_msgs(s, msgs, nm);
     }
-    if (nfrag >= 2 && s->txq == NULL && udp_fec_enabled()) {
+    if (nfrag >= 2 && s->txq_head == NULL && udp_fec_enabled()) {
         send_fec(udp, s, &view, env_len, msg->request_id);
     }
     return OK;
@@ -650,37 +680,45 @@ static void session_txq_drain_budget(zri_udp_transport_t *udp,
     unsigned nm = 0;
     zri_env_view_t view;
 
-    if (!s->txq) {
-        return;
-    }
-    /* 排空时 txq 已是连续逻辑缓冲：整段作为 prefix，无独立 payload。 */
-    view.prefix = s->txq;
-    view.prefix_len = s->txq_total;
-    view.payload = NULL;
-    view.payload_len = 0;
-    while (s->txq_sent < s->txq_total && budget-- > 0) {
-        uint32_t off = s->txq_sent;
-        uint32_t chunk = s->txq_total - s->txq_sent;
-        int last;
-        if (chunk > udp->base.frag_bytes) {
-            chunk = udp->base.frag_bytes;
+    while (s->txq_head && budget > 0) {
+        zri_udp_txq_t *q = s->txq_head;
+        /* 排空时 txq 已是连续逻辑缓冲：整段作为 prefix，无独立 payload。 */
+        view.prefix = q->buf;
+        view.prefix_len = q->total;
+        view.payload = NULL;
+        view.payload_len = 0;
+        while (q->sent < q->total && budget > 0) {
+            uint32_t off = q->sent;
+            uint32_t chunk = q->total - q->sent;
+            int last;
+            if (chunk > udp->base.frag_bytes) {
+                chunk = udp->base.frag_bytes;
+            }
+            last = (off + chunk) >= q->total;
+            if (nm == TX_BATCH_MAX) {
+                udp_send_msgs(s, msgs, nm);
+                nm = 0;
+            }
+            emit_frag(udp, s, q->msgid, q->total, off, chunk, &view, last, now, msgs, &nm);
+            q->sent += chunk;
+            budget--;
+            if (s->txq_pending_bytes >= chunk) {
+                s->txq_pending_bytes -= chunk;
+            } else {
+                s->txq_pending_bytes = 0;
+            }
         }
-        last = (off + chunk) >= s->txq_total;
-        if (nm == TX_BATCH_MAX) {
-            udp_send_msgs(s, msgs, nm);
-            nm = 0;
+        if (q->sent >= q->total) {
+            s->txq_head = q->next;
+            if (!s->txq_head) {
+                s->txq_tail = NULL;
+            }
+            free(q->buf);
+            free(q);
         }
-        emit_frag(udp, s, s->txq_msgid, s->txq_total, off, chunk, &view, last, now, msgs, &nm);
-        s->txq_sent += chunk;
     }
     if (nm > 0) {
         udp_send_msgs(s, msgs, nm);
-    }
-    if (s->txq_sent >= s->txq_total) {
-        free(s->txq);
-        s->txq = NULL;
-        s->txq_sent = 0;
-        s->txq_total = 0;
     }
 }
 
@@ -801,7 +839,7 @@ static int session_on_data(zri_udp_transport_t *udp,
 
     if (r->got == r->frag_count) {
         deliver_message(udp, s, r->buf, r->total_len);
-        zri_reasm_release(r);
+        zri_reasm_release(&s->reasm, r);
         return OK;
     }
     /* FEC：若本消息恰好缺一枚分片且已缓存其校验包，尝试重建补齐。 */
@@ -1099,7 +1137,7 @@ static void session_tick(zri_udp_transport_t *udp, zri_session_t *s, uint64_t no
     session_txq_drain(udp, s, now_ms);
 
     /* Plan A: idle sender-side RTO retransmit of the unacked tail. */
-    if (s->tx_pkts > 0 && !s->txq && s->rto_attempts < RTO_MAX_ROUNDS &&
+    if (s->tx_pkts > 0 && !s->txq_head && s->rto_attempts < RTO_MAX_ROUNDS &&
         (now_ms - s->last_rx_data_ms) >= session_rto_ms(s) &&
         (int16_t)(s->send_seq - s->acked_upto) > 0) {
         uint32_t rto = session_rto_ms(s);

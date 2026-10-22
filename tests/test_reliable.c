@@ -99,10 +99,23 @@ static void test_tx_ring(void)
     zri_tx_ring_cleanup(&ring);
 }
 
+static void test_reasm_budget(void)
+{
+    zri_reasm_t reasm;
+    zri_reasm_init(&reasm);
+    zri_reasm_set_budget(&reasm, 10);
+    CHECK(zri_reasm_acquire(&reasm, 1, 8, 2, 0) != NULL);
+    CHECK(zri_reasm_acquire(&reasm, 2, 8, 2, 0) == NULL); /* 8 + 8 > 10 */
+    zri_reasm_reset(&reasm);
+    CHECK(zri_reasm_acquire(&reasm, 3, 8, 2, 0) != NULL); /* reset 归还预算 */
+    zri_reasm_reset(&reasm);
+}
+
 int main(void)
 {
     test_rx_window();
     test_reasm();
+    test_reasm_budget();
     test_tx_ring();
     if (g_fail) {
         rpc_log_error("zri_reliable: FAIL");

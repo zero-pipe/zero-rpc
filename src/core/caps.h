@@ -48,7 +48,8 @@
 #define RX_BATCH_MAX 16
 /* 拥塞窗口下限：保证 16 KiB（14 个分片）始终能一次批量发出。 */
 #define CC_BURST_MIN 16
-#define MAX_FRAGMENTS (MAX_MSG / FRAG_MIN)
+/* 单条消息分片数硬上限：覆盖 max_msg 上限 + 最小分片的最坏情况，仅拦截异常值。 */
+#define MAX_FRAGMENTS (MAX_MSG_LIMIT / FRAG_MIN)
 #define RTX_SLOT_MAX (RTP_HDR_LEN + FRAG_HDR_LEN + FRAG_MAX)
 
 /* ---- RTCP 报告 ---- */
