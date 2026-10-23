@@ -160,5 +160,5 @@ ZERO_RPC_SANITIZE  address|undefined|thread|address,undefined
 
 ## 压测
 
-`tools/bench_server` + `tools/loadgen` + `tools/perf/zbench.py`，CLI/结果 JSON 契约见
-脚本头部说明。
+性能与稳定性场景统一由 `tools/gate.py perf` / `tools/gate.py stability` 驱动，
+底层压测引擎为 `tools/bench_server` + `tools/loadgen`。
