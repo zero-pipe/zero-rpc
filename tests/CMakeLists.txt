@@ -41,7 +41,7 @@ target_include_directories(test_pool PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/registry
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/router
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/transport
-    ${CMAKE_SOURCE_DIR}/3rdpart/uthash)
+    ${CMAKE_SOURCE_DIR}/3rdparty/uthash)
 target_link_libraries(test_pool PRIVATE rpc)
 add_test(NAME pool COMMAND test_pool)
 

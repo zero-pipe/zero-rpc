@@ -1,4 +1,4 @@
-add_library(rpc STATIC
+set(NB_RPC_SOURCES
     core/node.c
     core/node_access.c
     core/transport_factory.c
@@ -38,8 +38,10 @@ add_library(rpc STATIC
     transport/tx_ring.c
     transport/udp.c
     transport/tcp.c
-    ${CMAKE_SOURCE_DIR}/3rdpart/cjson/cJSON.c
+    ${CMAKE_SOURCE_DIR}/3rdparty/cjson/cJSON.c
 )
+
+add_library(rpc STATIC ${NB_RPC_SOURCES})
 
 target_include_directories(rpc
     PUBLIC
@@ -55,8 +57,9 @@ target_include_directories(rpc
         ${CMAKE_CURRENT_SOURCE_DIR}/registry
         ${CMAKE_CURRENT_SOURCE_DIR}/discovery
         ${CMAKE_CURRENT_SOURCE_DIR}/config
-        ${CMAKE_SOURCE_DIR}/3rdpart/uthash
-        ${CMAKE_SOURCE_DIR}/3rdpart/cjson
+        ${CMAKE_SOURCE_DIR}/3rdparty/uthash
+        ${CMAKE_SOURCE_DIR}/3rdparty/cjson
+        ${CMAKE_CURRENT_SOURCE_DIR}/transport
 )
 
 install(TARGETS rpc

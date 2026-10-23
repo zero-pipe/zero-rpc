@@ -32,4 +32,4 @@ __pycache__/
 !tests/google/gtest/lib/**/*.a
 
 # Local vendored dependency metadata
-3rdpart/ntk/.git/
+3rdparty/ntk/.git/

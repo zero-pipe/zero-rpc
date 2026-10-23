@@ -1,6 +1,6 @@
 # network bridge framework
 
-基于 [network-tool-kit](3rdpart/ntk) 的异步 RPC/消息运行时，内置 UDP 与 TCP 传输。
+基于 [network-tool-kit](3rdparty/ntk) 的异步 RPC/消息运行时，内置 UDP 与 TCP 传输。
 上层只面对 `node / service / proxy / payload`，传输和序列化都是可替换实现细节。
 
 ## 特性
@@ -97,7 +97,7 @@ examples/    按主题组织的可运行示例
 docs/        API、配置、错误码和示例文档
 tests/       unit / integration 测试
 tools/       压测与基准工具
-3rdpart/     ntk、elog、cJSON 等依赖
+3rdparty/    ntk、elog、cJSON、Cyclone DDS 等依赖
 ```
 
 命名约定：库自有函数/类型/变量使用 `nb_`，宏/枚举常量使用 `NB_`。不透明句柄为
