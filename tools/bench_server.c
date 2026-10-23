@@ -6,6 +6,7 @@
  * load generator conventions apply. Not a shipped example.
  */
 #include <server.h>
+#include <dds.h>
 #include <platform.h>
 #include <thread/thread_pool.h>
 
@@ -106,6 +107,10 @@ int main(int argc, char **argv)
     int rc;
     int index;
     int use_worker = 0;
+    int use_dds = 0;
+    int dds_domain = 0;
+    char dds_endpoint[32];
+    nb_binding_config_t dds_binding;
     unsigned main_executor_threads = 0;
     int block_worker = 0;
     size_t block_delay_ms = 0;
@@ -143,6 +148,10 @@ int main(int argc, char **argv)
             node_cfg.runtime.handler_max_concurrency = (unsigned)strtoul(argv[++index], NULL, 10);
         } else if (strcmp(argv[index], "--worker") == 0) {
             use_worker = 1;
+        } else if (strcmp(argv[index], "--dds") == 0) {
+            use_dds = 1;
+        } else if (strcmp(argv[index], "--dds-domain") == 0 && index + 1 < argc) {
+            dds_domain = atoi(argv[++index]);
         } else if (strcmp(argv[index], "--executor") == 0 && index + 1 < argc) {
             main_executor_threads = (unsigned)strtoul(argv[++index], NULL, 10);
         } else if (strcmp(argv[index], "--block-method") == 0 && index + 1 < argc) {
@@ -198,6 +207,7 @@ int main(int argc, char **argv)
                           "[--mode static|mesh] "
                           "[--service <name>] [--method <name>] [--bind <ip>] [--io-threads <n>] "
                           "[--handler-threads <n>] [--handler-max-concurrency <n>] [--worker] "
+                          "[--dds] [--dds-domain <n>] "
                           "[--executor <threads>] "
                           "[--discovery-port <p>] [--data-port <p>] [--max-msg-bytes <n>] "
                           "[--backpressure-bytes <n>] [--peer <ip:port>]",
@@ -209,6 +219,20 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    if (use_dds) {
+        if (nb_cyclone_dds_register() != NB_OK) {
+            nb_log_error("dds provider register failed");
+            return 1;
+        }
+        snprintf(dds_endpoint, sizeof(dds_endpoint), "dds://%d:1", dds_domain);
+        memset(&dds_binding, 0, sizeof(dds_binding));
+        dds_binding.name = "dds";
+        dds_binding.endpoint = dds_endpoint;
+        dds_binding.intra_process = NB_INTRA_OFF;
+        node_cfg.transport.bindings = &dds_binding;
+        node_cfg.transport.binding_count = 1;
+        mode = NB_MODE_STATIC;
+    }
     node_cfg.mode = mode;
     rc = nb_node_create(&node_cfg, &node);
     if (rc != NB_OK) {
