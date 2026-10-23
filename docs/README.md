@@ -4,6 +4,8 @@
 - [配置参考](api/config.md)：JSON 字段、默认值与校验规则。
 - [错误码](api/error-codes.md)：稳定数值、名称、描述与重试语义。
 - [示例索引](examples.md)：按场景查找可运行示例。
+- [测试与门禁](testing.md)：unit / e2e / perf / stability / fuzz 的统一入口与判定。
+- [性能对比记录](BENCH-STATUS.md)：TCP/UDP/DDS 远程对比与压测记录。
 
 配置文件的编辑器校验使用 [`config.schema.json`](config.schema.json)。
 

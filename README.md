@@ -73,7 +73,8 @@ int main(void)
 | [配置参考](docs/api/config.md) | JSON 字段、默认值与校验 |
 | [错误码](docs/api/error-codes.md) | 稳定数值、名称、描述与重试语义 |
 | [示例索引](docs/examples.md) | 按场景查找示例 |
-| [性能报告](PERF.md) | 指标开关开销与 loopback 基准 |
+| [测试与门禁](docs/testing.md) | unit / e2e / perf / stability / fuzz 的统一入口与判定 |
+| [性能对比记录](docs/BENCH-STATUS.md) | TCP/UDP/DDS 远程对比与压测记录 |
 
 入口头文件：
 
@@ -96,10 +97,24 @@ include/     公共头文件
 src/         内部实现（core / transport / message / router / registry / discovery / config / util）
 examples/    按主题组织的可运行示例
 docs/        API、配置、错误码和示例文档
-tests/       unit / integration 测试
-tools/       压测与基准工具
+tests/       unit / e2e 测试
+tools/       统一门禁、压测与基准工具
 3rdparty/    ntk、elog、cJSON、Cyclone DDS 等依赖
 ```
+
+## 测试门禁
+
+统一入口是 `tools/gate.py`，分类和 CTest label 对齐：
+
+```bash
+python3 tools/gate.py unit
+python3 tools/gate.py e2e --transports tcp,udp,dds
+python3 tools/gate.py perf --perf-duration 10
+python3 tools/gate.py stability --transports tcp --stability-duration 60
+python3 tools/gate.py all
+```
+
+详细判定标准、产物目录和新增测试约定见 [docs/testing.md](docs/testing.md)。
 
 命名约定：库自有函数/类型/变量使用 `nb_`，宏/枚举常量使用 `NB_`。不透明句柄为
 `struct nb_node` 等。

@@ -86,3 +86,62 @@ endif()
 if(BUILD_GTESTS OR BUILD_BENCHMARKS)
     add_subdirectory(tests/google)
 endif()
+
+# Unified quality gates. Build the target first, then the gate runs:
+#   cmake --build build --target gate-unit
+#   cmake --build build --target gate-e2e
+#   cmake --build build --target gate-perf
+#   cmake --build build --target gate-stability
+#   cmake --build build --target gate-all
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+    set(NB_GATE_SCRIPT ${CMAKE_SOURCE_DIR}/tools/gate.py)
+    set(NB_GATE_ARGS --build-dir ${CMAKE_BINARY_DIR} --no-build)
+    if(CMAKE_CONFIGURATION_TYPES)
+        list(APPEND NB_GATE_ARGS --config $<CONFIG>)
+    endif()
+
+    if(TARGET test_framing)
+        add_custom_target(gate-unit
+            COMMAND ${Python3_EXECUTABLE} ${NB_GATE_SCRIPT} unit ${NB_GATE_ARGS}
+            DEPENDS test_framing test_config test_metrics test_registry
+                    test_reliable test_pool test_iobuf test_headers
+            USES_TERMINAL VERBATIM)
+    endif()
+
+    if(TARGET bench_server AND TARGET loadgen AND TARGET test_loopback)
+        add_custom_target(gate-e2e
+            COMMAND ${Python3_EXECUTABLE} ${NB_GATE_SCRIPT} e2e ${NB_GATE_ARGS}
+            DEPENDS test_loopback test_stream test_api test_worker test_semantics
+                    bench_server loadgen
+            USES_TERMINAL VERBATIM)
+    endif()
+
+    if(TARGET bench_server AND TARGET loadgen)
+        add_custom_target(gate-perf
+            COMMAND ${Python3_EXECUTABLE} ${NB_GATE_SCRIPT} perf ${NB_GATE_ARGS}
+            DEPENDS bench_server loadgen
+            USES_TERMINAL VERBATIM)
+        add_custom_target(gate-stability
+            COMMAND ${Python3_EXECUTABLE} ${NB_GATE_SCRIPT} stability ${NB_GATE_ARGS}
+            DEPENDS bench_server loadgen
+            USES_TERMINAL VERBATIM)
+    endif()
+
+    if(TARGET fuzz_envelope)
+        add_custom_target(gate-fuzz
+            COMMAND ${Python3_EXECUTABLE} ${NB_GATE_SCRIPT} fuzz ${NB_GATE_ARGS}
+            DEPENDS fuzz_envelope fuzz_metadata fuzz_framing
+            USES_TERMINAL VERBATIM)
+    endif()
+
+    if(TARGET gate-unit AND TARGET gate-e2e AND TARGET gate-perf AND TARGET gate-stability)
+        add_custom_target(gate-all
+            COMMAND ${Python3_EXECUTABLE} ${NB_GATE_SCRIPT} all ${NB_GATE_ARGS}
+            DEPENDS test_framing test_config test_metrics test_registry
+                    test_reliable test_pool test_iobuf test_headers
+                    test_loopback test_stream test_api test_worker test_semantics
+                    bench_server loadgen
+            USES_TERMINAL VERBATIM)
+    endif()
+endif()

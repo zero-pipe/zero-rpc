@@ -28,6 +28,36 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+  quality-gates:
+    name: unit / e2e / perf / stability
+    runs-on: ubuntu-latest
+    env:
+      CC: gcc
+      LD_LIBRARY_PATH: ${{ github.workspace }}/3rdparty/cyclonedds/linux_amd64/lib
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+                 -DBUILD_TESTS=ON -DBUILD_TOOLS=ON -DBUILD_EXAMPLES=OFF
+      - name: Build
+        run: cmake --build build -j
+      - name: Unit gate
+        run: python3 tools/gate.py unit --no-build
+      - name: E2E gate
+        run: python3 tools/gate.py e2e --no-build --e2e-requests 100
+      - name: Perf smoke
+        run: python3 tools/gate.py perf --no-build --perf-duration 5
+      - name: Stability smoke
+        run: python3 tools/gate.py stability --no-build --stability-duration 20
+      - name: Upload gate artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-artifacts
+          path: artifacts/gate/
+
   sanitizers:
     name: sanitizer ${{ matrix.sanitize }}
     runs-on: ubuntu-latest

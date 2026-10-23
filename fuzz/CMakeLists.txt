@@ -25,8 +25,8 @@ target_compile_options(fuzz_framing PRIVATE -fsanitize=fuzzer,address,undefined)
 target_link_options(fuzz_framing PRIVATE -fsanitize=fuzzer,address,undefined)
 
 # Smoke-run a fixed corpus for a short time when ctest is invoked in fuzz builds.
-add_test(NAME fuzz_smoke_envelope COMMAND fuzz_envelope -runs=2000)
-add_test(NAME fuzz_smoke_metadata COMMAND fuzz_metadata -runs=2000)
-add_test(NAME fuzz_smoke_framing COMMAND fuzz_framing -runs=2000)
-set_tests_properties(fuzz_smoke_envelope fuzz_smoke_metadata fuzz_smoke_framing
+add_test(NAME fuzz.envelope COMMAND fuzz_envelope -runs=2000)
+add_test(NAME fuzz.metadata COMMAND fuzz_metadata -runs=2000)
+add_test(NAME fuzz.framing COMMAND fuzz_framing -runs=2000)
+set_tests_properties(fuzz.envelope fuzz.metadata fuzz.framing
     PROPERTIES LABELS "fuzz" TIMEOUT 120)
