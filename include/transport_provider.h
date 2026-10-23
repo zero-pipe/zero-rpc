@@ -47,6 +47,7 @@ typedef struct nb_transport_provider_options {
     const char *endpoint;
     void *receiver;
     transport_receive_fn on_receive;
+    nb_intra_process_t intra_process;
 } nb_transport_provider_options_t;
 
 /* send() returning NB_OK means the provider accepted the message for delivery. */

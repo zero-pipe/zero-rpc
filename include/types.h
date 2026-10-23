@@ -93,6 +93,13 @@ typedef enum nb_transport_kind {
     NB_TRANSPORT_CUSTOM = 255
 } nb_transport_kind_t;
 
+/* Optional transport-local fast path for event/pub-sub delivery. */
+typedef enum nb_intra_process {
+    NB_INTRA_OFF = 0,
+    NB_INTRA_AUTO = 1,
+    NB_INTRA_ONLY = 2
+} nb_intra_process_t;
+
 /* 节点发现模式：MESH 广播发现；STATIC 只用静态路由，不启动发现。 */
 typedef enum nb_node_mode {
     NB_MODE_MESH = 0,

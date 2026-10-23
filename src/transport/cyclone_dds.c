@@ -52,6 +52,7 @@ typedef struct nb_dds_endpoint {
     int have_responder;
     int have_requester;
     int have_publisher;
+    int local_event;
     nb_dds_instance_t *owner;
 } nb_dds_endpoint_t;
 
@@ -161,6 +162,28 @@ static dds_entity_t nb_dds_make_topic(nb_dds_instance_t *inst, const char *name)
     return topic;
 }
 
+static dds_entity_t nb_dds_make_reader(nb_dds_instance_t *inst,
+                                       dds_entity_t topic,
+                                       dds_listener_t *listener,
+                                       int ignore_local)
+{
+    dds_qos_t *qos = NULL;
+    dds_entity_t reader;
+
+    if (ignore_local) {
+        qos = dds_create_qos();
+        if (!qos) {
+            return DDS_ENTITY_NIL;
+        }
+        dds_qset_ignorelocal(qos, DDS_IGNORELOCAL_PARTICIPANT);
+    }
+    reader = dds_create_reader(inst->participant, topic, qos, listener);
+    if (qos) {
+        dds_delete_qos(qos);
+    }
+    return reader;
+}
+
 static void nb_dds_on_data(dds_entity_t reader, void *arg)
 {
     nb_dds_endpoint_t *ep = (nb_dds_endpoint_t *)arg;
@@ -258,12 +281,21 @@ static nb_dds_endpoint_t *nb_dds_endpoint_ensure(nb_dds_instance_t *inst, const 
             return NULL;
         }
         dds_lset_data_available(ep->listener, nb_dds_on_data);
-        ep->rd_req = dds_create_reader(inst->participant, ep->topic_req_ent, NULL, ep->listener);
-        ep->rd_evt = dds_create_reader(inst->participant, ep->topic_evt_ent, NULL, ep->listener);
+        ep->rd_req = nb_dds_make_reader(inst, ep->topic_req_ent, ep->listener, 0);
+        if (inst->options.intra_process != NB_INTRA_ONLY) {
+            ep->rd_evt = nb_dds_make_reader(inst,
+                                            ep->topic_evt_ent,
+                                            ep->listener,
+                                            inst->options.intra_process == NB_INTRA_AUTO);
+        }
         ep->wr_res = dds_create_writer(inst->participant, ep->topic_res_ent, NULL, NULL);
-        if (ep->rd_req < 0 || ep->rd_evt < 0 || ep->wr_res < 0) {
+        if (ep->rd_req < 0 || ep->wr_res < 0 ||
+            (inst->options.intra_process != NB_INTRA_ONLY && ep->rd_evt < 0)) {
             ntk_mutex_unlock(inst->lock);
             return NULL;
+        }
+        if (inst->options.intra_process != NB_INTRA_OFF) {
+            ep->local_event = 1;
         }
         ep->have_responder = 1;
     }
@@ -285,10 +317,12 @@ static nb_dds_endpoint_t *nb_dds_endpoint_ensure(nb_dds_instance_t *inst, const 
         ep->have_requester = 1;
     }
     if ((roles & 4) && !ep->have_publisher) { /* publisher */
-        ep->wr_evt = dds_create_writer(inst->participant, ep->topic_evt_ent, NULL, NULL);
-        if (ep->wr_evt < 0) {
-            ntk_mutex_unlock(inst->lock);
-            return NULL;
+        if (inst->options.intra_process != NB_INTRA_ONLY) {
+            ep->wr_evt = dds_create_writer(inst->participant, ep->topic_evt_ent, NULL, NULL);
+            if (ep->wr_evt < 0) {
+                ntk_mutex_unlock(inst->lock);
+                return NULL;
+            }
         }
         ep->have_publisher = 1;
     }
@@ -348,6 +382,36 @@ static int nb_dds_publish(nb_dds_instance_t *inst, dds_entity_t writer, const nb
     free(wire);
     (void)inst;
     return nb_dds_status(rc, "dds_write");
+}
+
+/*
+ * Deliver one event to every in-process subscriber of the same topic without
+ * encoding a frame or touching the DDS reader path. The message pointers stay
+ * valid for the synchronous callback; no payload copy is made.
+ */
+static void nb_dds_local_deliver(nb_dds_instance_t *inst,
+                                 const nb_transport_message_t *message,
+                                 const char *method)
+{
+    nb_dds_endpoint_t *targets[NB_DDS_MAX_ENDPOINTS];
+    size_t count = 0;
+    size_t i;
+
+    if (!inst || !message || !method || !inst->options.on_receive) {
+        return;
+    }
+    ntk_mutex_lock(inst->lock);
+    for (i = 0; i < inst->endpoint_count; ++i) {
+        nb_dds_endpoint_t *ep = &inst->endpoints[i];
+        if (ep->used && ep->local_event && strcmp(ep->method, method) == 0) {
+            targets[count++] = ep;
+        }
+    }
+    ntk_mutex_unlock(inst->lock);
+
+    for (i = 0; i < count; ++i) {
+        inst->options.on_receive(inst->options.receiver, targets[i], "dds-local", 0, message);
+    }
 }
 
 /* ---- provider ops ---- */
@@ -465,9 +529,18 @@ static int nb_dds_op_send(nb_transport_instance_t *instance,
         return NB_ERR_INVALID;
     }
     if (message->kind == KIND_EVENT) {
+        if (inst->options.intra_process != NB_INTRA_OFF) {
+            nb_dds_local_deliver(inst, message, method);
+            if (inst->options.intra_process == NB_INTRA_ONLY) {
+                return NB_OK;
+            }
+        }
         roles = 4;
         ep = nb_dds_endpoint_ensure(inst, method, roles);
-        return ep ? nb_dds_publish(inst, ep->wr_evt, message) : NB_ERR_NOMEM;
+        if (!ep) {
+            return NB_ERR_NOMEM;
+        }
+        return ep->wr_evt == DDS_ENTITY_NIL ? NB_OK : nb_dds_publish(inst, ep->wr_evt, message);
     }
     roles = 2;
     ep = nb_dds_endpoint_ensure(inst, method, roles);

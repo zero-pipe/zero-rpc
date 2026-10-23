@@ -229,6 +229,7 @@ typedef struct nb_cfg_route_in {
 typedef struct nb_cfg_binding_in {
     char *name;
     char *endpoint;
+    char *intra_process;
 } nb_cfg_binding_in_t;
 
 /* 用显式结构体字段偏移描述每个子对象，交给 codec_json 填充。 */
@@ -320,6 +321,11 @@ static const nb_codec_json_model_t nb_g_binding_model[] = {
     { NB_CODEC_JSON_OBJ, NULL, 0, 0, { .obj_size = sizeof(nb_cfg_binding_in_t) } },
     { NB_CODEC_JSON_STRING, "name", offsetof(nb_cfg_binding_in_t, name), 0, { 0 } },
     { NB_CODEC_JSON_STRING, "endpoint", offsetof(nb_cfg_binding_in_t, endpoint), 0, { 0 } },
+    { NB_CODEC_JSON_STRING,
+      "intra_process",
+      offsetof(nb_cfg_binding_in_t, intra_process),
+      0,
+      { 0 } },
 };
 
 #define CFG_MODEL_N(model_) (sizeof(model_) / sizeof((model_)[0]))
@@ -588,6 +594,7 @@ static int nb_fill_bindings(nb_config_t *out, const cJSON *bindings, nb_config_e
         const char *endpoint;
         const char *name;
         nb_endpoint_t endpoint_parsed;
+        nb_intra_process_t intra = NB_INTRA_OFF;
         int rc = NB_OK;
         int frc;
 
@@ -623,6 +630,19 @@ static int nb_fill_bindings(nb_config_t *out, const cJSON *bindings, nb_config_e
         }
         endpoint = parsed.endpoint;
         name = parsed.name;
+        if (parsed.intra_process) {
+            if (strcmp(parsed.intra_process, "off") == 0) {
+                intra = NB_INTRA_OFF;
+            } else if (strcmp(parsed.intra_process, "auto") == 0) {
+                intra = NB_INTRA_AUTO;
+            } else if (strcmp(parsed.intra_process, "only") == 0) {
+                intra = NB_INTRA_ONLY;
+            } else {
+                rc = nb_cfg_fail(err, "transport.bindings.intra_process",
+                                 "must be off/auto/only");
+                goto done;
+            }
+        }
         if (!endpoint || nb_endpoint_parse(endpoint, &endpoint_parsed) != NB_OK) {
             rc = nb_cfg_fail(err, "transport.bindings", "invalid endpoint URI");
             goto done;
@@ -649,6 +669,7 @@ static int nb_fill_bindings(nb_config_t *out, const cJSON *bindings, nb_config_e
         }
         view->name = binding->name;
         view->endpoint = binding->endpoint;
+        view->intra_process = intra;
         out->binding_count++;
     done:
         nb_codec_json_clear(&parsed, nb_g_binding_model, CFG_MODEL_N(nb_g_binding_model));

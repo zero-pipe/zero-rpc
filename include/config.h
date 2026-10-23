@@ -68,6 +68,7 @@ extern "C" {
 typedef struct nb_binding_config {
     const char *name;     /* provider/binding name, e.g. "tcp" */
     const char *endpoint; /* URI, e.g. tcp://127.0.0.1:8080 */
+    nb_intra_process_t intra_process; /* provider-local event fast path */
 } nb_binding_config_t;
 
 /* ---- 分模块配置 ---- */

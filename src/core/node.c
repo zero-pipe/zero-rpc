@@ -328,14 +328,19 @@ int nb_node_create(const nb_node_config_t *cfg, nb_node_t **out)
                 nb_node_destroy(node);
                 return NB_ERR_INVALID;
             }
-            if (nb_node_transport_add(node, endpoint.scheme, endpoint.host, endpoint.port) != NB_OK) {
+            if (nb_node_transport_add(node,
+                                      endpoint.scheme,
+                                      endpoint.host,
+                                      endpoint.port,
+                                      binding->intra_process) != NB_OK) {
                 nb_node_destroy(node);
                 return NB_ERR_IO;
             }
         }
     } else {
         const char *scheme = cfg->transport.transport == NB_TRANSPORT_TCP ? "tcp" : "udp";
-        if (nb_node_transport_add(node, scheme, node->bind_host, cfg->transport.data_port) != NB_OK) {
+        if (nb_node_transport_add(
+                node, scheme, node->bind_host, cfg->transport.data_port, NB_INTRA_OFF) != NB_OK) {
             nb_node_destroy(node);
             return NB_ERR_IO;
         }

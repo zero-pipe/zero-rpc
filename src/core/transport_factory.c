@@ -127,7 +127,11 @@ static const nb_transport_ops_t nb_g_provider_ops = {
     nb_provider_op_reply, nb_provider_op_peer_stats,
 };
 
-int nb_node_transport_add(nb_node_t *node, const char *scheme, const char *host, uint16_t port)
+int nb_node_transport_add(nb_node_t *node,
+                          const char *scheme,
+                          const char *host,
+                          uint16_t port,
+                          nb_intra_process_t intra_process)
 {
     nb_transport_t *transport;
     nb_transport_kind_t kind;
@@ -177,6 +181,7 @@ int nb_node_transport_add(nb_node_t *node, const char *scheme, const char *host,
         options.endpoint = endpoint;
         options.receiver = transport;
         options.on_receive = nb_provider_on_receive;
+        options.intra_process = intra_process;
         if (provider->ops->create(&options, &instance) != NB_OK || !instance) {
             free(transport);
             return NB_ERR_IO;

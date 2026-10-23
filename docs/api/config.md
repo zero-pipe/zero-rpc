@@ -95,6 +95,10 @@ URI 非法时返回 `NB_ERR_INVALID`，`_ex` 版本会给出 `path` 和 `reason`
 | `rtcp_interval_ms` | uint | `1000` | UDP RTCP 上报周期 |
 | `rtcp` | bool | `true` | `false` 关闭 RTCP |
 
+`bindings` 还支持 `intra_process` 字段（字符串：`off` / `auto` / `only`），
+用于 DDS 事件发布订阅的进程内快路径。`only` 不创建 DDS event writer/reader，
+直接把消息指针投递给同 provider 的本地订阅者；`auto` 本地投递后仍走 DDS。
+
 `bindings` 元素支持两种写法：
 
 ```json

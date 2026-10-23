@@ -61,6 +61,7 @@ int main(void)
     memset(&binding, 0, sizeof(binding));
     binding.name = "dds";
     binding.endpoint = "dds://0:1";
+    binding.intra_process = NB_INTRA_ONLY;
 
     nb_node_config_default(&cfg);
     cfg.name = "DdsPubSub";

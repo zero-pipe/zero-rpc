@@ -271,6 +271,10 @@ topic 由方法名派生：
 自动创建请求/事件 reader 和响应 writer；客户端首次请求时懒创建请求 writer 和
 响应 reader。
 
+DDS binding 的 `intra_process` 支持 `off` / `auto` / `only`。`auto` 对事件先做
+进程内直接投递，再照常发布 DDS；`only` 完全跳过 DDS event writer/reader 和
+`dds_write`，只投递给同 provider 的本地订阅者，payload 在投递期间零拷贝。
+
 ## 指标与日志
 
 ```c

@@ -93,6 +93,11 @@
                   "endpoint": {
                     "type": "string",
                     "maxLength": 87
+                  },
+                  "intra_process": {
+                    "type": "string",
+                    "enum": ["off", "auto", "only"],
+                    "description": "DDS event in-process fast path."
                   }
                 },
                 "additionalProperties": true
