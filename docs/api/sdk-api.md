@@ -242,6 +242,35 @@ nb_transport_provider_register(&my_provider);
 
 provider 的 descriptor 和 ops 必须具有静态生命周期。
 
+## Cyclone DDS
+
+内置 `dds` provider 把 v2 frame 作为不透明 octet sample 承载在 Cyclone DDS 上。
+注册后在 binding 中使用 `dds://<domain>:1`：
+
+```c
+#include <dds.h>
+
+nb_cyclone_dds_register();
+
+nb_binding_config_t binding = { "dds", "dds://0:1" };
+nb_node_config_t cfg;
+nb_node_config_default(&cfg);
+cfg.mode = NB_MODE_STATIC;
+cfg.transport.bindings = &binding;
+cfg.transport.binding_count = 1;
+```
+
+topic 由方法名派生：
+
+- 请求：`<method>_req`
+- 响应：`<method>_res`
+- 事件/pub-sub：`<method>_evt`
+
+发布使用 `nb_publisher_publish`（等价于 `nb_proxy_call_event`），订阅使用
+`nb_subscriber_subscribe`（等价于 `nb_service_add_method`）。服务端方法注册时会
+自动创建请求/事件 reader 和响应 writer；客户端首次请求时懒创建请求 writer 和
+响应 reader。
+
 ## 指标与日志
 
 ```c

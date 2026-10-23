@@ -1,0 +1,14 @@
+// Transport-only payload type: the framework owns the RPC header and routing,
+// so the DDS sample only carries an opaque already-encoded frame.
+//
+// Source of truth for the generated cy_dds_message.h / cy_dds_message.c.
+// Regenerate with (Cyclone DDS 0.11.0):
+//   idlc -l c -o idl idl/cy_dds_message.idl
+// Generated artifacts must be regenerated, never hand-edited.
+module dds {
+  struct Message {
+    sequence<octet> payload;
+  };
+
+  #pragma keylist Message
+};

@@ -46,3 +46,23 @@ int nb_transport_reply(nb_transport_t *t, const nb_message_t *message)
     }
     return t->ops->reply(t, message);
 }
+
+int nb_transport_subscribe(nb_transport_t *t, const char *service, const char *method)
+{
+    if (!t || !service || !method) {
+        return NB_ERR_INVALID;
+    }
+    if (!t->provider || !t->provider_instance || !t->provider->ops->subscribe) {
+        return NB_OK;
+    }
+    return t->provider->ops->subscribe(t->provider_instance, service, method);
+}
+
+void nb_transport_unsubscribe(nb_transport_t *t, const char *service, const char *method)
+{
+    if (!t || !service || !method || !t->provider || !t->provider_instance ||
+        !t->provider->ops->unsubscribe) {
+        return;
+    }
+    t->provider->ops->unsubscribe(t->provider_instance, service, method);
+}

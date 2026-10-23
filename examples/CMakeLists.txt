@@ -28,8 +28,9 @@ add_subdirectory(10_payload_codec)
 add_subdirectory(11_streaming)
 add_subdirectory(12_worker)
 add_subdirectory(13_metadata_cancel)
+add_subdirectory(14_dds_pubsub)
 
-install(TARGETS
+set(NB_EXAMPLE_TARGETS
     example_01_hello_node
     example_02_service
     example_03_proxy
@@ -47,8 +48,11 @@ install(TARGETS
     example_11_streaming
     example_12_worker
     example_13_metadata_cancel
-    RUNTIME DESTINATION bin
 )
+if(NB_ENABLE_DDS)
+    list(APPEND NB_EXAMPLE_TARGETS example_14_dds_pubsub)
+endif()
+install(TARGETS ${NB_EXAMPLE_TARGETS} RUNTIME DESTINATION bin)
 
 install(FILES
     08_config/server.json

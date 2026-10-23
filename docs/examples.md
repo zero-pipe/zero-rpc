@@ -17,6 +17,7 @@
 | [11_streaming](../examples/11_streaming/README.md) | 分片上传与流式回复 | 单进程 |
 | [12_worker](../examples/12_worker/README.md) | WORKER handler 线程池 | 单进程 |
 | [13_metadata_cancel](../examples/13_metadata_cancel/README.md) | metadata/deadline/cancel | 单进程 |
+| [14_dds_pubsub](../examples/14_dds_pubsub/README.md) | Cyclone DDS 事件 pub/sub | 单进程 |
 
 ## 构建
 
@@ -38,4 +39,5 @@ cmake --build build --config Release
 ## 阅读顺序
 
 先看 01、02、03 理解 node/service/proxy，再看 04/05 理解声明契约和调用，
-然后看 06/07 理解路由，最后看 08/09 和 10-13 理解配置、发现、codec、流和并发语义。
+然后看 06/07 理解路由，最后看 08/09 和 10-14 理解配置、发现、codec、流、
+并发语义与 DDS pub/sub。

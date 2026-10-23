@@ -41,6 +41,10 @@ set(NB_RPC_SOURCES
     ${CMAKE_SOURCE_DIR}/3rdparty/cjson/cJSON.c
 )
 
+if(NB_ENABLE_DDS)
+    list(APPEND NB_RPC_SOURCES transport/cyclone_dds.c transport/cy_dds_message.c)
+endif()
+
 add_library(rpc STATIC ${NB_RPC_SOURCES})
 
 target_include_directories(rpc
@@ -70,6 +74,10 @@ install(TARGETS rpc
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/include/ DESTINATION include)
 
 target_link_libraries(rpc PUBLIC ntk elog)
+
+if(NB_ENABLE_DDS)
+    target_link_libraries(rpc PUBLIC nb_cyclonedds)
+endif()
 
 set_target_properties(rpc PROPERTIES
     C_STANDARD 99

@@ -111,6 +111,9 @@ URI 非法时返回 `NB_ERR_INVALID`，`_ex` 版本会给出 `path` 和 `reason`
 字符串形式会根据 URI scheme 选择 UDP/TCP。对象形式的 `name` 是 binding 名称，省略时
 使用 scheme。端口 `0` 表示由系统分配临时端口。
 
+Cyclone DDS 使用 `dds://<domain>:1`，host 是 DDS domain，port 仅用于满足 URI
+解析，provider 会忽略。DDS 首版使用默认 QoS，reliability/history 等字段后续再扩展。
+
 `kind`、`bind_host`、`data_port` 适用于没有显式 `bindings` 的默认 binding。
 
 ## discovery

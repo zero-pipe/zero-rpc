@@ -64,6 +64,17 @@ typedef struct nb_transport_provider_ops {
                  const char *host,
                  uint16_t port,
                  const nb_transport_message_t *message);
+    /*
+     * Optional topic/service registration hooks for transports that need
+     * explicit subscribers (for example DDS topics). Providers that do not
+     * need them may leave these NULL.
+     */
+    int (*subscribe)(nb_transport_instance_t *instance,
+                     const char *service,
+                     const char *method);
+    void (*unsubscribe)(nb_transport_instance_t *instance,
+                        const char *service,
+                        const char *method);
 } nb_transport_provider_ops_t;
 
 struct nb_transport_provider {

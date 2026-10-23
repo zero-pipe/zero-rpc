@@ -16,5 +16,8 @@
 #include <extensions.h>
 #include <config.h>
 #include <log.h>
+#include <publish.h>
+#include <subscribe.h>
+#include <dds.h>
 
 #endif /* NB_H */

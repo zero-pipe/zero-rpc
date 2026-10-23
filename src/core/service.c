@@ -68,10 +68,14 @@ static void nb_svc_link_task(void *user)
 static void nb_svc_method_task(void *user)
 {
     nb_svc_task_t *t = (nb_svc_task_t *)user;
+    size_t i;
     ntk_mutex_lock(t->node->services_lock);
     t->method->next = t->svc->methods;
     t->svc->methods = t->method;
     ntk_mutex_unlock(t->node->services_lock);
+    for (i = 0; i < t->node->transport_count; i++) {
+        (void)nb_transport_subscribe(t->node->transports[i], t->svc->name, t->method->name);
+    }
     free(t);
 }
 

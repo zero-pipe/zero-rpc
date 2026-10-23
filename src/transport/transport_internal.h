@@ -83,6 +83,8 @@ void nb_transport_stop(nb_transport_t *t);
 void nb_transport_destroy(nb_transport_t *t);
 int nb_transport_send(nb_transport_t *t, const nb_message_t *message);
 int nb_transport_reply(nb_transport_t *t, const nb_message_t *message);
+int nb_transport_subscribe(nb_transport_t *t, const char *service, const char *method);
+void nb_transport_unsubscribe(nb_transport_t *t, const char *service, const char *method);
 const nb_transport_provider_t *nb_transport_provider_find(const char *scheme);
 
 #ifdef __cplusplus
