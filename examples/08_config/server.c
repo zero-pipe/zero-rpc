@@ -19,7 +19,7 @@ static void echo_handler(nb_call_t *call, const nb_request_t *req, void *user)
 
 int main(int argc, char **argv)
 {
-    const char *path = argc > 1 ? argv[1] : "08_config_server.json";
+    const char *path = argc > 1 ? argv[1] : "server.json";
     nb_config_t cfg;
     nb_config_error_t err;
     nb_node_t *node = NULL;

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.14)
 if(POLICY CMP0091)
     cmake_policy(SET CMP0091 NEW)
 endif()
-project(zero-rpc C)
+project(network_bridge C)
 
 if(MSVC)
     add_compile_options(/utf-8)

@@ -1,0 +1,2 @@
+nb_add_example(example_09_service_discovery_server server.c)
+nb_add_example(example_09_service_discovery_client client.c)

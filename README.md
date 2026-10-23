@@ -1,161 +1,107 @@
-# zero-rpc
+# network bridge framework
 
-基于 [network-tool-kit](3rdpart/ntk) 的**异步核心 RPC**，内置 **UDP** 与 **TCP**
-传输，唯一底层依赖为 NTK。整体分层解耦：上层只面对 `node / service / proxy / payload`，
-传输与序列化都是可替换的实现细节。
-
-接口抽象对齐 fastcall-c：`node` 管生命周期与传输，`stub` 承载传输无关的调用原语，
-`proxy` 在 `stub` 之上注入路由；`service` 声明/处理方法；`service_table` 让两端共享一份
-声明契约。详见下文「分层抽象」。
+基于 [network-tool-kit](3rdpart/ntk) 的异步 RPC/消息运行时，内置 UDP 与 TCP 传输。
+上层只面对 `node / service / proxy / payload`，传输和序列化都是可替换实现细节。
 
 ## 特性
 
-- **三种调用形态**：`nb_proxy_call_async(...)` 异步回调、`nb_proxy_call_sync(...)` 阻塞等待、
-  `nb_proxy_call_event(...)` 单向事件。核心仍是异步的，sync 只是可选的阻塞封装。
-- **默认不新增线程**：默认全部运行在 NTK 的 `ntk_poller_pool` 线程上；回调都在 poller 线程触发（禁止阻塞）。
-  需要阻塞的 handler 在注册时选择 `NB_SERVICE_EXEC_WORKER`（或 `nb_service_add_method_worker`），
-  框架把它调度到 `handler_threads` 线程池；也可以选择 `NB_SERVICE_EXEC_EXECUTOR`
-  接入调用者自己的线程池。回复都会自动回投原 poller 发送。
-- **可组合传输**：node 管理一个或多个 binding；每个 binding 用 `scheme://host:port` 标识。
-  上层只看到统一的 envelope + 消息上下文。UDP 在内部用 RTP/RTCP 承载分片、NACK/RTX 与
-  链路反馈来实现可靠性；TCP 本身可靠，只加长度前缀分帧，不引入 RTP/RTCP。
-- **路由**：静态路由（显式登记 `service -> endpoint`）与 **mesh 服务发现**（UDP 广播 HELLO/BYE）统一进路由表。
-- **payload 对框架透明**：框架只透传字节 + `encoding` 标签；序列化/反序列化通过可插拔 `nb_codec_t` 留给应用层。
-- **简单 JSON 配置**：内置 cJSON，`nb_config_load[_file]` 一行加载。
-- **流式 RPC（Phase 1）**：`nb_service_add_stream_method` + `proxy_stream_*` 支持
-  客户端分片上传；`nb_reply_stream` + `nb_proxy_call_stream` 支持服务端分片下载；
-  UDP/TCP 共用同一 envelope。
-- **分层 stub**：`nb_stub_t` 是 `node` 之上、传输无关的调用原语（请求/事件 + 关联 +
-  重传 + 可插拔 send），`nb_proxy_t` 构建在其之上。
-- **共享声明表**：`NB_SERVICE_DEFINE` 在两端共享一个头文件，install 后即可按名查 ID。
-- **同步风格 handler**：`nb_service_add_sync_method` 让 handler 直接返回状态码并写响应
-  view，框架异步回复。
-- **同步便捷层**：`nb_proxy_call_sync` / `nb_response_release`（可选的阻塞封装，核心
-  仍是异步）。
+- **三种调用形态**：`nb_proxy_call_async`、`nb_proxy_call_sync`、`nb_proxy_call_event`。
+- **默认不新增线程**：回调在 NTK poller 线程运行；阻塞 handler 可选 WORKER 或自定义
+  EXECUTOR。
+- **可组合传输**：UDP 内置分片、NACK/RTX 与 RTCP 反馈；TCP 使用长度前缀分帧。
+- **统一路由**：静态路由与 mesh 服务发现进入同一路由表。
+- **payload 对框架透明**：框架只透传字节和 `encoding`，序列化通过 `nb_codec_t` 扩展。
+- **流式 RPC**：支持客户端分片上传、服务端分片下载和双向流。
+- **可观测性**：指标、延迟分位、日志运行期开关。
+- **错误码体系**：稳定数值、名称、描述、可重试标记和应用错误保留区。
+
+## 快速开始
+
+```c
+#include <nb.h>
+
+static void on_response(int status, const nb_response_t *resp, void *user)
+{
+    (void)user;
+    if (status == NB_OK) {
+        /* resp->payload 仅在本次回调内有效 */
+    }
+}
+
+int main(void)
+{
+    nb_node_config_t cfg;
+    nb_node_t *node = NULL;
+    nb_proxy_t *proxy = NULL;
+    nb_payload_t payload = { "hi", 2, 0 };
+
+    nb_node_config_default(&cfg);
+    cfg.name = "demo";
+    cfg.mode = NB_MODE_STATIC;
+    if (nb_node_create(&cfg, &node) != NB_OK) {
+        return 1;
+    }
+    if (nb_proxy_create(node, NULL, &proxy) != NB_OK) {
+        nb_node_destroy(node);
+        return 1;
+    }
+
+    (void)nb_proxy_call_async(proxy,
+                              "EchoService",
+                              "echo",
+                              &payload,
+                              on_response,
+                              NULL,
+                              1000,
+                              NULL);
+    (void)nb_node_spin_once(node, 1000);
+
+    nb_proxy_destroy(proxy);
+    nb_node_destroy(node);
+    return 0;
+}
+```
+
+完整可运行代码见 [examples/](examples/)，索引见 [docs/examples.md](docs/examples.md)。
+
+## 文档
+
+| 文档 | 内容 |
+| --- | --- |
+| [SDK API](docs/api/sdk-api.md) | 对象模型、生命周期、线程与所有权 |
+| [配置参考](docs/api/config.md) | JSON 字段、默认值与校验 |
+| [错误码](docs/api/error-codes.md) | 稳定数值、名称、描述与重试语义 |
+| [示例索引](docs/examples.md) | 按场景查找示例 |
+| [性能报告](PERF.md) | 指标开关开销与 loopback 基准 |
+
+入口头文件：
+
+- 完整 API：`#include <nb.h>`
+- 按角色最小引入：
+
+| 头文件 | 适用场景 |
+| --- | --- |
+| `runtime.h` | 节点、调度、发现、路由、指标 |
+| `server.h` | service、handler、reply、message view |
+| `client.h` | proxy、stub、异步/同步/事件/流式调用 |
+| `transport.h` | endpoint 与自定义 transport provider |
+| `extensions.h` | codec、message view、service table |
+| `config.h` | JSON 配置加载 |
 
 ## 目录
 
-```
-zero-rpc/
-  include/            公共头文件（角色入口 + 细粒度头）
-    runtime.h    运行时入口：node / metrics
-    server.h     服务端入口：service / nb_reply / message view
-    client.h     客户端入口：proxy / stub / async / sync / stream
-    transport.h  传输扩展入口：endpoint / provider
-    extensions.h 扩展入口：codec / message view / service table
-    config.h     JSON 配置入口
-    types.h      状态码 / transport / payload 视图
-    node.h       节点的细粒度接口
-    service.h    服务端的细粒度接口
-    proxy.h      客户端 proxy 的细粒度接口
-    stub.h       客户端 stub 的细粒度接口
-    endpoint.h / transport_provider.h
-    codec.h / message_view.h / service_table.h
-    metrics.h    运行指标细粒度接口
-  src/                内部实现（文件用短名，目录已表达归属）
-    core/             组合根与内部子模块（按文件/职责切分）
-      node.c              节点生命周期 + 传输装配 + 阻塞运行
-      dispatch.c          入站消息分发 + 出站传输选择
-      service.c           方法注册 + 请求/分片分发
-      nb_reply.c             服务端回复编码
-      proxy.c             代理生命周期 + 路由解析 + 普通调用
-      stream.c            客户端流式会话
-      stub.c              传输无关调用原语
-      pending.c           pending 关联表
-      sync.c              同步便捷层
-      message_view.c / service_table.c / codec.c / mem.c / util.c
-      内部头按模块拆分（无聚合“上帝头”，各模块只 include 自己需要的）：
-        caps.h               容量常量
-        pending.h            pending 表
-        service_internal.h   服务端内部结构
-        proxy_internal.h     客户端内部结构（proxy/stub/stream）
-        node_internal.h      节点（组合根）
-    router/           静态路由表（自带锁，独立于 node，操作 nb_route_table_t）
-    registry/         service instance / endpoint snapshot / selector（自带锁，独立于 node）
-    discovery/        registry backend（UDP mesh 广播）；node 作用域的控制面后端
-                      自持对端表/发现 socket/单播目标（node->discovery）
-                      只经 node_access.h 门面访问 node，不穿透 struct nb_node
-    message/          wire frame + 统一消息上下文
-      message.h          nb_message_t：kind/status/request_id/route/payload/stream/peer
-      frame              报文 v2：固定头 + TLV 扩展 + payload（编解码/扩展迭代）
-      envelope           语义视图与 wire frame 的转换，以及 envelope -> nb_message_t
-    transport/        传输 facade + provider SPI + UDP/TCP 驱动 + framing
-      只读 nb_transport_t 上的配置快照，不穿透 node 内部
-      framing         UDP 的 RTP/分片/NACK、RTCP SR/RR/SDES 与 TCP 长度前缀分帧
-                      （均为传输内部实现，不进入上层消息抽象）
-      rx_window       UDP 接收窗口与缺口检测
-      reasm           UDP 分片重组
-      tx_ring         UDP RTX 重传环
-    config/           JSON 配置解析
-
-  命名约定：库自有符号统一前缀 —— 函数/类型/变量/struct tag 用 `nb_`，
-  宏/枚举常量用 `NB_`（对齐 nng 的 `nng_`/`NNG_`）；不透明句柄 tag 为
-  `struct nb_node` 等，结构体成员名不带前缀。
-  tests/              framing / loopback(udp+tcp) / config / registry
-  tools/              压测 server / loadgen
-  examples/           编号示例（对齐 fastcall-c：node / service / proxy / stub / table / 路由）
-  3rdpart/ntk         network-tool-kit（唯一底层依赖）
+```text
+include/     公共头文件
+src/         内部实现（core / transport / message / router / registry / discovery / config / util）
+examples/    按主题组织的可运行示例
+docs/        API、配置、错误码和示例文档
+tests/       unit / integration 测试
+tools/       压测与基准工具
+3rdpart/     ntk、elog、cJSON 等依赖
 ```
 
-## 公共 API 分层
-
-新代码按使用角色选择入口头文件；这些入口只负责组合现有细粒度头，不改变已有类型和函数名。
-
-| 入口 | 适用场景 | 主要内容 |
-| --- | --- | --- |
-| `runtime.h` | 所有程序 | 节点生命周期、调度、发现、路由、指标 |
-| `server.h` | 提供 RPC 服务 | service、handler、nb_reply、消息视图 |
-| `client.h` | 调用 RPC 服务 | proxy、stub、异步/同步/事件/流式调用 |
-| `transport.h` | 自定义传输或端点处理 | endpoint URI、provider SPI |
-| `extensions.h` | 接入业务序列化或共享契约 | codec、消息视图、service table |
-| `config.h` | 使用 JSON 配置 | 配置加载和按配置创建节点 |
-
-例如，服务端通常只需要：
-
-```c
-#include <server.h>
-#include <config.h>  /* 使用 JSON 配置时再引入 */
-```
-
-客户端通常只需要：
-
-```c
-#include <client.h>
-```
-
-细粒度的 `node.h`、`proxy.h`、`service.h` 等头文件继续保留，适合库封装层
-或需要最小 include 集合的项目。
-
-## 分层抽象
-
-```
-node            生命周期 / binding / 发现 / 静态路由
-  ├─ service    注册方法；handler 可异步 nb_reply，或用同步风格直接返回
-  ├─ stub       service.method + payload -> 关联(request_id) + 重传 + send 钩子
-  └─ proxy      在 stub 上注入端点覆盖 / 路由；提供 call_async / call_sync / call_event
-```
-
-- **node 的角色**：一个 node 可以只做客户端（创建 proxy）、只做服务端（创建 service），
-  也可以两者兼具。proxy 借用 node 的 poller/路由，不持有独立线程。
-- **统一消息上下文**：传输层与 core 之间只传一个 `nb_message_t`（kind/status/request_id/
-  route/payload/stream/peer），不再用一长串位置参数穿过 dispatch / service / nb_reply。
-- **stub**：不注入 send 时走节点默认路由；`nb_proxy_create` 会自动创建一个注入了
-  `proxy` send 钩子的 stub，因此 `nb_proxy_call_async` 与 `nb_stub_call_async` 共享同一条
-  发送/重传路径。
-- **service_table**：把 service/method 及数字 ID 声明在一个共享头文件里，两端 install
-  同一张表；`nb_node_config_t::service_table` 会在节点创建时自动 install。
-- **同步 handler**：`sync_handler_fn(req, resp, user)` 返回值即应用状态码，响应写进
-  `nb_message_view_t`；框架在回调返回后释放视图并异步回复。
-
-示例（`examples/`，编号对齐 fastcall-c）：
-
-- `01_hello_node` 节点生命周期。
-- `02_service` / `05_sync_call` 同步 handler 服务端 + 同步调用客户端。
-- `03_proxy` proxy 生命周期。
-- `04_service_table` 共享声明契约。
-- `06_static_route_{server,client}` 静态路由。
-- `07_direct_endpoint_{server,client}` 直连端点。
-- `08_config_{server,client}` 从 JSON 配置创建节点（`bindings` / `routes` 用 URI）。
+命名约定：库自有函数/类型/变量使用 `nb_`，宏/枚举常量使用 `NB_`。不透明句柄为
+`struct nb_node` 等。
 
 ## 构建
 
@@ -164,7 +110,7 @@ Linux：
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-cd build && ctest --output-on-failure   # CMake < 3.20 用这种方式；>= 3.20 可用 ctest --test-dir build
+cd build && ctest --output-on-failure
 ```
 
 Windows：
@@ -176,201 +122,27 @@ cd build
 ctest -C Debug --output-on-failure
 ```
 
-## 最小用法
+可选开关：
 
-```c
-#include <client.h>
-#include <server.h>
-
-static void handler(nb_call_t *call, const nb_request_t *req, void *user) {
-    nb_reply(call, 0, &req->payload); /* 异步回显，payload 原样返回 */
-}
-
-static void on_resp(int status, const nb_response_t *resp, void *user) {
-    if (status == NB_OK) {
-        /* resp->payload.data / len / encoding */
-    }
-}
-
-/* 服务端 */
-nb_node_config_t cfg = {0};
-cfg.name = "srv";
-cfg.transport = NB_TRANSPORT_UDP; /* 或 NB_TRANSPORT_TCP */
-cfg.discovery_port = 41953;
-nb_node_t *node = NULL;
-nb_node_create(&cfg, &node);
-nb_service_t *svc = NULL;
-nb_service_create(node, "echo", &svc);
-nb_service_add_method(svc, "ping", handler, NULL);
-
-/* 客户端 */
-nb_proxy_t *proxy = NULL;
-nb_proxy_create(node, NULL, &proxy);
-nb_payload_t pl = { "hi", 2, 0 };
-nb_proxy_call_async(proxy, "echo", "ping", &pl, on_resp, NULL, 1000, NULL);
+```text
+BUILD_TESTS      构建测试（默认 ON）
+BUILD_TOOLS      构建压测工具（默认 ON）
+BUILD_EXAMPLES   构建示例（默认 ON）
+BUILD_FUZZERS    构建 libFuzzer 目标（默认 OFF，需要 Clang）
+ZERO_RPC_SANITIZE  address|undefined|thread|address,undefined
 ```
-
-完整可运行见 `examples/`（编号对齐 fastcall-c）：
-
-```bash
-./example_01_hello_node
-./example_02_service             # 服务端 TCP 127.0.0.1:42410
-./example_05_sync_call           # 客户端（先启动 02）
-./example_06_static_route_server &
-./example_06_static_route_client
-./example_08_config_server &       # 读取 08_config_server.json
-./example_08_config_client         # 读取 08_config_client.json
-./example_09_service_discovery_server &
-./example_09_service_discovery_client # 不配置服务端数据端口，靠 mesh 发现
-```
-
-`09_service_discovery` 使用两个不同的发现端口（服务端 `41953`、客户端
-`41954`）和互相的单播 peer，因此同机运行时不依赖 UDP 广播端口复用。跨主机运行时，
-服务端参数依次为 `data_port discovery_port client_ip client_discovery_port`，客户端参数
-依次为 `server_ip client_discovery_port server_discovery_port`。
-
-## payload 与 codec（序列化扩展点）
-
-框架不解释 payload。业务对象与字节流的转换由应用通过 `nb_codec_t` 完成：
-
-```c
-static const nb_codec_t my_codec = {
-    "json", 1, my_encode, my_decode, my_release, NULL,
-};
-nb_node_register_codec(node, &my_codec);
-
-void *bytes; size_t len;
-my_codec.encode(NULL, &order, &bytes, &len);
-nb_payload_t pl = { bytes, len, my_codec.encoding };
-nb_proxy_call_async(proxy, "OrderService", "get", &pl, on_resp, NULL, 1000, NULL);
-/* 框架已在返回前复制 payload，可立即释放 encode 产生的字节。 */
-my_codec.release(NULL, bytes);
-```
-
-注意：`nb_proxy_call_async` / `nb_stub_call_async` / `nb_proxy_call_event` 都会复制 payload，
-因此 `release` 放在调用返回后即可；若等回调再释放会泄漏。
-
-`encoding` 随消息透传，接收端用 `nb_node_find_codec(node, resp->payload.encoding)` 找到对应 codec 解码。
-
-## JSON 配置
-
-配置是扁平的，端点统一写成 URI，大多数场景一眼就能看懂：
-
-```json
-{
-  "name": "echo-server",
-  "mode": "static",
-  "runtime": { "io_threads": 2 },
-  "transport": { "bindings": ["tcp://127.0.0.1:42420"] },
-  "routes": [
-    { "service": "EchoService", "endpoint": "tcp://127.0.0.1:42420" }
-  ]
-}
-```
-
-- `bindings`：本节点监听的端点列表，元素是 `scheme://host:port`（端口 0 表示自动分配）。
-- `routes`：静态路由，`service` 指向目标 `endpoint`，跳过服务发现。
-- mesh 模式再加 `discovery` 段：
-
-```json
-{
-  "name": "echo-server",
-  "mode": "mesh",
-  "transport": { "bindings": ["udp://0.0.0.0:42420"] },
-  "discovery": {
-    "broadcast": "255.255.255.255:41953",
-    "hello_interval_ms": 3000,
-    "node_ttl_ms": 9000,
-    "peers": ["127.0.0.1:41953"]
-  }
-}
-```
-
-- `discovery.broadcast` 是 `host:port`，`peers` 是额外的单播 HELLO 目标，元素为 `host:port`。
-- 可选调优字段（顶层）：`transport`、`bind_host`、`data_port`、`frag_bytes`、`max_msg_bytes`、`backpressure_bytes`、`rtcp_interval_ms`（RTCP SR/RR 上报间隔，默认 1000ms）、`rtcp`（`false` 关闭 RTCP）、`handler_threads`（阻塞 handler 线程池大小，0 = 关闭）、`handler_max_concurrency`（worker 未完成任务上限，0 = 不限）、`max_streams`（并发接收流上限，0 = 默认 64）、`peer_rate_limit_pps`（每对端每秒请求上限，0 = 不限）。
-
-完整可运行见 `examples/08_config_{server,client}.json`。
-
-```c
-nb_config_t cfg;
-nb_config_error_t err; /* nb_config_load_ex 时用于定位非法字段 */
-nb_config_load_file("config.json", &cfg);
-nb_node_t *node;
-nb_node_create_from_config(&cfg, &node); /* 创建节点并应用 peers / routes */
-```
-
-注意：`nb_config_t` 拥有所有字符串，但 `nb_node_create_from_config` 会在创建时把
-所需字段拷贝进节点；`cfg` 只需活到该调用返回，之后即可释放。
 
 ## 约定
 
-- 服务/方法名用于路由（`service.method`），长度受限（`NB_SERVICE_NAME_MAX` / `NB_METHOD_NAME_MAX`）。
-- `msg_id` 为 32 位；`request_id` 对外为 `uint64_t`，内部取低 32 位。
-- 单条消息上限 1 MiB；UDP 每分片默认 1200 字节（收发两端须一致）。
-- 请求/响应视图（含 payload）仅在本次回调内有效，需要跨回调保存时请自行拷贝。
-- 发送侧 payload 所有权：`nb_proxy_call_async` / `nb_stub_call_async` / `nb_proxy_call_event`
-  会在返回前复制 payload（跨线程调用同样），调用方保留自己的缓冲区并在返回后立即释放，
-  无需等回调；框架不会 free 调用方内存。服务端 `nb_reply()` 也只在调用期间借用响应 payload。
-- 执行模式由调用者在注册时选择：`nb_service_add_method_ex` /
-  `nb_service_add_sync_method_ex` 传 `NB_SERVICE_EXEC_INLINE` 走 poller 内联，
-  传 `NB_SERVICE_EXEC_WORKER` 走 `handler_threads` 线程池，传
-  `NB_SERVICE_EXEC_EXECUTOR` 走调用者提供的 `nb_service_executor_t`；`options == NULL`
-  默认 INLINE，`*_worker` 系列是 WORKER 的便捷封装。
-- 未配置 `handler_threads` 时 WORKER 方法退化为 INLINE 并告警；任务入池失败
-  直接回错误状态，不会回退到 poller 内联执行。流式方法同样支持三种执行模式，
-  worker/executor 下同一 stream 的 chunk 按顺序串行派发。
-- `handler_max_concurrency > 0` 时限制 worker 未完成任务数（排队 + 执行中），
-  超出上限的新请求直接回 `NB_ERR_AGAIN`（对齐 brpc 的 `max_concurrency`/`ELIMIT`），
-  避免无界排队拖垮内存和尾延迟；0 表示不限制（默认）。
-
-```c
-nb_service_method_options_t opts = NB_SERVICE_METHOD_OPTIONS_INIT;
-opts.exec = NB_SERVICE_EXEC_WORKER;
-nb_service_add_method_ex(svc, "slow_query", slow_handler, user, &opts);
-nb_service_add_method(svc, "ping", ping_handler, user); /* 默认 INLINE */
-```
-
-`nb_service_method_options_t.executor` 用于接入调用者自己的执行器
-（对齐 gRPC `executor()` 的借用语义）。设置 `exec = NB_SERVICE_EXEC_EXECUTOR`
-并传入非 NULL executor 即可，框架只调用 `submit`，不负责创建/销毁/排空。
-调用者必须保证 executor 活过 node，并在 `nb_node_destroy` 前停止提交、等待所有
-已提交任务完成；未配置内置 `handler_threads` 也可以使用自定义 executor。
-
-```c
-nb_service_executor_t exec = { &my_exec_ctx, my_exec_submit };
-nb_service_method_options_t opts = NB_SERVICE_METHOD_OPTIONS_INIT;
-opts.exec = NB_SERVICE_EXEC_EXECUTOR;
-opts.executor = &exec;
-nb_service_add_method_ex(svc, "slow_query", slow_handler, user, &opts);
-```
-
-- deadline 传播（对齐 gRPC）：客户端的 `timeout_ms` 会随请求透传到服务端，换算成
-  绝对 deadline 暴露为 `req->deadline_ms` / `nb_call_deadline_ms(call)`（0 = 无）。
-  排队中的 worker/executor 任务若在启动前已过期，框架直接跳过 handler 并回
-  `NB_ERR_TIMEOUT`；handler 也可据此提前放弃注定被客户端丢弃的重活。
-- 取消传播（对齐 gRPC cancellation，best-effort）：`nb_proxy_cancel` 先向服务端发送
-  `KIND_CANCEL`，再本地回调 `NB_ERR_NOTFOUND`。服务端按 `request_id + 对端` 登记，
-  仍在排队的 worker 任务启动前被跳过；已运行的 handler 无法被抢占，可用
-  `nb_call_canceled(call)` 周期检查后尽快退出。取消登记有 TTL，不会无界增长。
-
-- metadata（对齐 gRPC metadata）：`nb_metadata_t` 是固定容量（16 项、key 64B、
-  value 256B）的 key/value 容器，支持二进制 value。服务端从
-  `req->metadata` 读取，用 `nb_reply_ex(call, status, message, payload, metadata)`
-  回传响应 metadata 与状态消息；客户端用 `nb_proxy_call_async_ex` /
-  `nb_stub_call_async_ex` / `nb_proxy_call_event_ex` 发送请求 metadata，响应回调里的
-  `nb_response_t.metadata/message` 仅在本次回调内有效。同步调用用
-  `nb_proxy_call_sync_ex`，返回的 metadata 由 `nb_response_release` 释放。
-- 拦截器：服务端 `nb_service_set_interceptor` 在 handler 前执行，返回非 NB_OK 会短路
-  并直接回复该状态；worker/executor 模式下在对应执行线程运行。客户端
-  `nb_proxy_set_interceptor` 的 `before` 在调用线程修改 metadata/timeout，
-  `after` 在 poller 线程、用户回调前执行。
-- 流式方法现在也支持 `NB_SERVICE_EXEC_WORKER` / `NB_SERVICE_EXEC_EXECUTOR`：
-  框架按 stream 串行派发 chunk（保证顺序），nb_reply 仍自动回投原 poller；
-  取消/过期时停止派发并在在途任务完成后释放 call。
-- `handler_max_concurrency` 现在同时约束内置 worker 池和自定义 executor 的
-  未完成任务数；超限统一返回 `NB_ERR_AGAIN`。
+- 服务/方法名用于路由，长度受 `NB_SERVICE_NAME_MAX` / `NB_METHOD_NAME_MAX` 限制。
+- 单条消息默认上限 1 MiB，UDP 每分片默认 1200 字节。
+- 请求/响应视图只在本次回调内有效；需要跨回调保存时请自行复制。
+- 发送侧 payload 在调用返回前复制，调用方可在返回后立即释放。
+- `nb_proxy_call_sync` 会阻塞，禁止在 poller 回调中使用。
+- 同步调用写出的响应必须用 `nb_response_release` 释放。
+- 框架错误码与应用状态码使用不同字段；应用错误码建议从 `NB_ERR_USER_BASE` 以下开始。
 
 ## 压测
 
-`tools/bench_server` + `tools/loadgen` + `tools/perf/zbench.py`，CLI/结果 JSON 与
-fastcall-c 的 `rpc_bench` 契约对齐。用法见脚本头部说明。
+`tools/bench_server` + `tools/loadgen` + `tools/perf/zbench.py`，CLI/结果 JSON 契约见
+脚本头部说明。

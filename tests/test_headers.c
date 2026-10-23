@@ -1,4 +1,5 @@
 /* Compile-time smoke test for the role-based public headers. */
+#include <nb.h>
 #include <runtime.h>
 #include <server.h>
 #include <client.h>

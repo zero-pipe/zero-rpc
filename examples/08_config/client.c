@@ -13,7 +13,7 @@
 
 int main(int argc, char **argv)
 {
-    const char *path = argc > 1 ? argv[1] : "08_config_client.json";
+    const char *path = argc > 1 ? argv[1] : "client.json";
     nb_config_t cfg;
     nb_config_error_t err;
     nb_node_t *node = NULL;

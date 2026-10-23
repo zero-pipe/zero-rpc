@@ -14,21 +14,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <error.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-/* ---- 状态码 ---- */
-#define NB_OK 0
-#define NB_ERR_INVALID (-1)
-#define NB_ERR_NOMEM (-2)
-#define NB_ERR_NOTFOUND (-3) /* 服务未发现 / 请求已失效 */
-#define NB_ERR_TIMEOUT (-4)
-#define NB_ERR_IO (-5)
-#define NB_ERR_STATE (-6)
-#define NB_ERR_AGAIN (-7)
-#define NB_ERR_TOOBIG (-8)
-#define NB_ERR_CLOSED (-9)
 
 /* ---- 消息标志 ---- */
 /*

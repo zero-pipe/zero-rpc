@@ -1,0 +1,2 @@
+nb_add_example(example_06_static_route_server server.c)
+nb_add_example(example_06_static_route_client client.c)

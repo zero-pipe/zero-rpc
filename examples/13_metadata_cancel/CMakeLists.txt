@@ -1,0 +1,1 @@
+nb_add_example(example_13_metadata_cancel main.c)

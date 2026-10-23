@@ -1,0 +1,236 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://network-bridge.local/config.schema.json",
+  "title": "network bridge framework configuration",
+  "description": "JSON configuration accepted by nb_config_load and nb_config_load_file.",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "maxLength": 63,
+      "description": "Node name. Default: rpc."
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["mesh", "static", "MESH", "STATIC"],
+      "description": "Discovery mode. Default: mesh."
+    },
+    "runtime": {
+      "type": "object",
+      "properties": {
+        "io_threads": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1024,
+          "description": "Poller threads. 0 means hardware concurrency; normalized to IO_MAX (8)."
+        },
+        "handler_threads": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1024,
+          "description": "Worker thread count. 0 disables the worker pool."
+        },
+        "handler_max_concurrency": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum queued plus running worker/executor tasks. 0 means unlimited."
+        },
+        "max_inflight": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum client pending calls. 0 means the default 65536."
+        },
+        "max_streams": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64,
+          "description": "Maximum concurrent inbound streams. 0 means the default 64."
+        },
+        "peer_rate_limit_pps": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Per-peer inbound request limit per second. 0 means unlimited."
+        }
+      },
+      "additionalProperties": true
+    },
+    "transport": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "pattern": "^([uU][dD][pP]|[tT][cC][pP])$",
+          "description": "Default transport when no explicit bindings are given."
+        },
+        "bind_host": {
+          "type": "string",
+          "maxLength": 63,
+          "description": "Default bind address. Default: 0.0.0.0."
+        },
+        "data_port": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "Default data port. 0 lets the OS choose."
+        },
+        "bindings": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "Endpoint URI such as tcp://127.0.0.1:42420."
+              },
+              {
+                "type": "object",
+                "required": ["endpoint"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 31
+                  },
+                  "endpoint": {
+                    "type": "string",
+                    "maxLength": 87
+                  }
+                },
+                "additionalProperties": true
+              }
+            ]
+          },
+          "description": "Explicit listening endpoints."
+        },
+        "frag_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "UDP fragment size. Default 1200; normalized to 256..8192."
+        },
+        "max_msg_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 67108864,
+          "description": "Maximum envelope size. Default 1 MiB."
+        },
+        "backpressure_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Outbound high-water mark. Default 4 MiB."
+        },
+        "rtcp_interval_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "UDP RTCP report interval. Default 1000 ms."
+        },
+        "rtcp": {
+          "type": "boolean",
+          "description": "Set false to disable RTCP."
+        }
+      },
+      "additionalProperties": true
+    },
+    "discovery": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["mesh", "static", "off", "none", "MESH", "STATIC", "OFF", "NONE"],
+          "description": "Mesh enables discovery; static/off/none disable it."
+        },
+        "broadcast": {
+          "type": "string",
+          "description": "Discovery host:port. Default 255.255.255.255:41953."
+        },
+        "peers": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "description": "Unicast HELLO target in host:port form."
+          }
+        },
+        "hello_interval_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "HELLO interval. Default 3000 ms."
+        },
+        "node_ttl_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Peer expiration time. Default 9000 ms."
+        }
+      },
+      "additionalProperties": true
+    },
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "disabled": {
+          "type": "boolean",
+          "description": "Disable all metric collection."
+        },
+        "latency_disabled": {
+          "type": "boolean",
+          "description": "Disable the latency histogram only."
+        },
+        "sample_every": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Latency sampling interval. 0 or 1 means every call."
+        },
+        "per_peer_disabled": {
+          "type": "boolean",
+          "description": "Disable per-peer link statistics."
+        }
+      },
+      "additionalProperties": true
+    },
+    "log": {
+      "type": "object",
+      "properties": {
+        "disabled": {
+          "type": "boolean",
+          "description": "Disable log output."
+        },
+        "level": {
+          "type": "string",
+          "enum": ["assert", "error", "warn", "info", "debug", "verbose"],
+          "description": "Log level. Default: info."
+        },
+        "sink": {
+          "type": "string",
+          "description": "Reserved output backend selector."
+        },
+        "file": {
+          "type": "string",
+          "maxLength": 63,
+          "description": "Reserved log file path."
+        }
+      },
+      "additionalProperties": true
+    },
+    "routes": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "required": ["service", "endpoint"],
+        "properties": {
+          "service": {
+            "type": "string",
+            "maxLength": 63
+          },
+          "endpoint": {
+            "type": "string",
+            "maxLength": 87,
+            "description": "Endpoint URI such as tcp://127.0.0.1:42420."
+          }
+        },
+        "additionalProperties": true
+      },
+      "description": "Static service routes that bypass discovery."
+    }
+  },
+  "additionalProperties": true
+}
