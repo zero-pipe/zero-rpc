@@ -28,7 +28,7 @@ if(BUILD_GTESTS)
     target_include_directories(test_gtest_modules PRIVATE
         ${GOOGLE_GTEST_ROOT}/include
         ${CMAKE_CURRENT_SOURCE_DIR}/../../src/message
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/transport
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/transport/common
         ${CMAKE_CURRENT_SOURCE_DIR}/../../src/core)
     target_link_libraries(test_gtest_modules PRIVATE rpc ${GTEST_MAIN_LIB}
         ${GTEST_LIB})
@@ -57,7 +57,7 @@ if(BUILD_BENCHMARKS)
         target_include_directories(bench_modules PRIVATE
             ${GOOGLE_BENCH_ROOT}/include
             ${CMAKE_CURRENT_SOURCE_DIR}/../../src/message
-            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/transport)
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/transport/common)
         target_link_libraries(bench_modules PRIVATE rpc ${BENCH_LIB})
         if(UNIX)
             find_package(Threads REQUIRED)

@@ -6,6 +6,7 @@
  */
 #include <client.h>
 #include <dds.h>
+#include <shm.h>
 #include <platform.h>
 #include <thread/sem.h>
 
@@ -105,6 +106,8 @@ typedef struct options {
     unsigned io_threads;
     int use_dds;
     int dds_domain;
+    int use_shm;
+    const char *shm_channel;
     nb_transport_kind_t transport;
     uint64_t window; /* 0 = 收一发一；>0 = 滑动窗口在途上限 */
 } options_t;
@@ -188,7 +191,8 @@ static int parse_size(const char *s, size_t *out)
 static void usage(const char *argv0)
 {
     nb_log_error("usage: %s [--service s] [--method m] [--duration-seconds n]\n"
-                  "          [--transport udp|tcp] [--dds] [--dds-domain n] [--io-threads n]\n"
+                  "          [--transport udp|tcp] [--dds] [--dds-domain n] "
+                  "[--shm] [--shm-channel name] [--io-threads n]\n"
                   "          [--max-requests n] [--payload-bytes n] [--expect-response-bytes n]\n"
                   "          [--timeout-ms n] [--rate qps] [--window n] [--verify-response]\n"
                   "          [--connect-timeout-seconds n] [--worker-id id] [--output path|-]\n"
@@ -368,6 +372,7 @@ int main(int argc, char **argv)
     nb_node_t *node = NULL;
     nb_proxy_t *proxy = NULL;
     nb_binding_config_t dds_binding;
+    nb_binding_config_t shm_binding;
     ntk_sem *sem = NULL;
     callout_t co;
     uint8_t *payload = NULL;
@@ -381,6 +386,8 @@ int main(int argc, char **argv)
     char peer_host[64];
     char target_host[64];
     char dds_endpoint[32];
+    char shm_endpoint[128];
+    char shm_target[128];
     int i;
     int rc;
     nb_node_mode_t mode = NB_MODE_MESH;
@@ -395,6 +402,7 @@ int main(int argc, char **argv)
     opt.timeout_ms = 5000;
     opt.connect_timeout_seconds = 20;
     opt.io_threads = 1;
+    opt.shm_channel = "zrpc-shm-bench";
     opt.bind = "0.0.0.0";
 
     for (i = 1; i < argc; i++) {
@@ -407,6 +415,10 @@ int main(int argc, char **argv)
             opt.use_dds = 1;
         } else if (strcmp(a, "--dds-domain") == 0 && i + 1 < argc) {
             opt.dds_domain = atoi(argv[++i]);
+        } else if (strcmp(a, "--shm") == 0) {
+            opt.use_shm = 1;
+        } else if (strcmp(a, "--shm-channel") == 0 && i + 1 < argc) {
+            opt.shm_channel = argv[++i];
         } else if (strcmp(a, "--io-threads") == 0 && i + 1 < argc) {
             opt.io_threads = (unsigned)strtoul(argv[++i], NULL, 10);
         } else if (strcmp(a, "--service") == 0 && i + 1 < argc) {
@@ -498,7 +510,25 @@ int main(int argc, char **argv)
     cfg.transport.max_msg_bytes = opt.max_msg_bytes;
     cfg.transport.backpressure_bytes = opt.backpressure_bytes;
 
-    if (opt.use_dds) {
+    if (opt.use_shm && opt.use_dds) {
+        nb_log_error("--shm and --dds are mutually exclusive");
+        return 1;
+    }
+    if (opt.use_shm) {
+        if (nb_shm_register() != NB_OK) {
+            nb_log_error("shm provider register failed");
+            return 1;
+        }
+        snprintf(shm_endpoint, sizeof(shm_endpoint), "shm://%s:2", opt.shm_channel);
+        snprintf(shm_target, sizeof(shm_target), "shm://%s:1", opt.shm_channel);
+        memset(&shm_binding, 0, sizeof(shm_binding));
+        shm_binding.name = "shm";
+        shm_binding.endpoint = shm_endpoint;
+        shm_binding.intra_process = NB_INTRA_OFF;
+        cfg.transport.bindings = &shm_binding;
+        cfg.transport.binding_count = 1;
+        cfg.mode = NB_MODE_STATIC;
+    } else if (opt.use_dds) {
         if (nb_cyclone_dds_register() != NB_OK) {
             nb_log_error("dds provider register failed");
             return 1;
@@ -541,7 +571,14 @@ int main(int argc, char **argv)
         nb_log_error("proxy create failed: %d", rc);
         return 1;
     }
-    if (opt.use_dds) {
+    if (opt.use_shm) {
+        rc = nb_proxy_set_endpoint_uri(proxy, shm_target);
+        if (rc != NB_OK) {
+            nb_log_error("proxy set shm endpoint failed: %d", rc);
+            nb_node_destroy(node);
+            return 1;
+        }
+    } else if (opt.use_dds) {
         rc = nb_proxy_set_endpoint_uri(proxy, dds_endpoint);
         if (rc != NB_OK) {
             nb_log_error("proxy set dds endpoint failed: %d", rc);
@@ -556,7 +593,7 @@ int main(int argc, char **argv)
     co.sem = sem;
 
     /* MESH：先等目标服务进入路由表（启动等待），再做预热。 */
-    if (!opt.use_dds && !(opt.target_ip && opt.target_port)) {
+    if (!opt.use_shm && !opt.use_dds && !(opt.target_ip && opt.target_port)) {
         (void)nb_node_wait_for_service(
             node, opt.service, (uint64_t)opt.connect_timeout_seconds * 1000ull);
     }
@@ -582,7 +619,8 @@ int main(int argc, char **argv)
             }
             (void)ntk_sem_timedwait(sem, (unsigned)(opt.timeout_ms + 100));
             /* DDS discovery may still be converging: require a real reply. */
-            if (co.status != NB_ERR_NOTFOUND && (!opt.use_dds || co.status == NB_OK)) {
+            if (co.status != NB_ERR_NOTFOUND &&
+                (!(opt.use_dds || opt.use_shm) || co.status == NB_OK)) {
                 warmed = 1;
                 break;
             }

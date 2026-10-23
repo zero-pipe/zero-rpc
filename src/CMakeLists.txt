@@ -30,19 +30,22 @@ set(NB_RPC_SOURCES
     registry/registry.c
     discovery/discovery.c
     config/config.c
-    transport/framing.c
-    transport/transport.c
-    transport/provider.c
-    transport/rx_window.c
-    transport/reasm.c
-    transport/tx_ring.c
-    transport/udp.c
-    transport/tcp.c
+    transport/common/framing.c
+    transport/common/transport.c
+    transport/common/provider.c
+    transport/common/rx_window.c
+    transport/common/reasm.c
+    transport/common/tx_ring.c
+    transport/udp/udp.c
+    transport/tcp/tcp.c
+    transport/shm/shm.c
     ${CMAKE_SOURCE_DIR}/3rdparty/cjson/cJSON.c
 )
 
 if(NB_ENABLE_DDS)
-    list(APPEND NB_RPC_SOURCES transport/cyclone_dds.c transport/cy_dds_message.c)
+    list(APPEND NB_RPC_SOURCES
+        transport/dds/cyclone_dds.c
+        transport/dds/cy_dds_message.c)
 endif()
 
 add_library(rpc STATIC ${NB_RPC_SOURCES})
@@ -56,14 +59,16 @@ target_include_directories(rpc
         ${CMAKE_CURRENT_SOURCE_DIR}/util
         ${CMAKE_CURRENT_SOURCE_DIR}/util/json
         ${CMAKE_CURRENT_SOURCE_DIR}/message
-        ${CMAKE_CURRENT_SOURCE_DIR}/transport
+        ${CMAKE_CURRENT_SOURCE_DIR}/transport/common
+        ${CMAKE_CURRENT_SOURCE_DIR}/transport/dds
         ${CMAKE_CURRENT_SOURCE_DIR}/router
         ${CMAKE_CURRENT_SOURCE_DIR}/registry
         ${CMAKE_CURRENT_SOURCE_DIR}/discovery
         ${CMAKE_CURRENT_SOURCE_DIR}/config
         ${CMAKE_SOURCE_DIR}/3rdparty/uthash
         ${CMAKE_SOURCE_DIR}/3rdparty/cjson
-        ${CMAKE_CURRENT_SOURCE_DIR}/transport
+        ${CMAKE_CURRENT_SOURCE_DIR}/transport/common
+        ${CMAKE_CURRENT_SOURCE_DIR}/transport/dds
 )
 
 install(TARGETS rpc
@@ -74,6 +79,11 @@ install(TARGETS rpc
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/include/ DESTINATION include)
 
 target_link_libraries(rpc PUBLIC ntk elog)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # shm_open()/sem_timedwait() live in librt on older glibc.
+    target_link_libraries(rpc PUBLIC rt)
+endif()
 
 if(NB_ENABLE_DDS)
     target_link_libraries(rpc PUBLIC nb_cyclonedds)

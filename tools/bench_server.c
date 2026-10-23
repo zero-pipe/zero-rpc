@@ -7,6 +7,7 @@
  */
 #include <server.h>
 #include <dds.h>
+#include <shm.h>
 #include <platform.h>
 #include <thread/thread_pool.h>
 
@@ -108,9 +109,13 @@ int main(int argc, char **argv)
     int index;
     int use_worker = 0;
     int use_dds = 0;
+    int use_shm = 0;
     int dds_domain = 0;
+    const char *shm_channel = "zrpc-shm-bench";
     char dds_endpoint[32];
+    char shm_endpoint[128];
     nb_binding_config_t dds_binding;
+    nb_binding_config_t shm_binding;
     unsigned main_executor_threads = 0;
     int block_worker = 0;
     size_t block_delay_ms = 0;
@@ -150,6 +155,10 @@ int main(int argc, char **argv)
             use_worker = 1;
         } else if (strcmp(argv[index], "--dds") == 0) {
             use_dds = 1;
+        } else if (strcmp(argv[index], "--shm") == 0) {
+            use_shm = 1;
+        } else if (strcmp(argv[index], "--shm-channel") == 0 && index + 1 < argc) {
+            shm_channel = argv[++index];
         } else if (strcmp(argv[index], "--dds-domain") == 0 && index + 1 < argc) {
             dds_domain = atoi(argv[++index]);
         } else if (strcmp(argv[index], "--executor") == 0 && index + 1 < argc) {
@@ -207,7 +216,7 @@ int main(int argc, char **argv)
                           "[--mode static|mesh] "
                           "[--service <name>] [--method <name>] [--bind <ip>] [--io-threads <n>] "
                           "[--handler-threads <n>] [--handler-max-concurrency <n>] [--worker] "
-                          "[--dds] [--dds-domain <n>] "
+                          "[--dds] [--dds-domain <n>] [--shm] [--shm-channel <name>] "
                           "[--executor <threads>] "
                           "[--discovery-port <p>] [--data-port <p>] [--max-msg-bytes <n>] "
                           "[--backpressure-bytes <n>] [--peer <ip:port>]",
@@ -219,7 +228,24 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    if (use_dds) {
+    if (use_shm && use_dds) {
+        nb_log_error("--shm and --dds are mutually exclusive");
+        return 1;
+    }
+    if (use_shm) {
+        if (nb_shm_register() != NB_OK) {
+            nb_log_error("shm provider register failed");
+            return 1;
+        }
+        snprintf(shm_endpoint, sizeof(shm_endpoint), "shm://%s:1", shm_channel);
+        memset(&shm_binding, 0, sizeof(shm_binding));
+        shm_binding.name = "shm";
+        shm_binding.endpoint = shm_endpoint;
+        shm_binding.intra_process = NB_INTRA_OFF;
+        node_cfg.transport.bindings = &shm_binding;
+        node_cfg.transport.binding_count = 1;
+        mode = NB_MODE_STATIC;
+    } else if (use_dds) {
         if (nb_cyclone_dds_register() != NB_OK) {
             nb_log_error("dds provider register failed");
             return 1;
@@ -304,7 +330,8 @@ int main(int argc, char **argv)
                  service_name,
                  method_name,
                  block_method_name ? block_method_name : "-",
-                 nb_node_transport(node) == NB_TRANSPORT_TCP ? "tcp" : "udp",
+                 use_shm ? "shm" : (use_dds ? "dds" :
+                     (nb_node_transport(node) == NB_TRANSPORT_TCP ? "tcp" : "udp")),
                  (unsigned)nb_node_data_port(node),
                  (unsigned)nb_node_discovery_port(node),
                  node_cfg.runtime.handler_threads,

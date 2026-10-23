@@ -11,7 +11,7 @@
 
 add_executable(test_framing test_framing.c)
 target_include_directories(test_framing PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/transport
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/transport/common
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/message)
 target_link_libraries(test_framing PRIVATE rpc)
 add_test(NAME unit.framing COMMAND test_framing)
@@ -40,7 +40,8 @@ add_test(NAME unit.registry COMMAND test_registry)
 set_tests_properties(unit.registry PROPERTIES LABELS "unit;registry" TIMEOUT 120)
 
 add_executable(test_reliable test_reliable.c)
-target_include_directories(test_reliable PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src/transport)
+target_include_directories(test_reliable PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/transport/common)
 target_link_libraries(test_reliable PRIVATE rpc)
 add_test(NAME unit.reliable COMMAND test_reliable)
 set_tests_properties(unit.reliable PROPERTIES LABELS "unit;reliable" TIMEOUT 120)
@@ -58,7 +59,7 @@ target_include_directories(test_pool PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/message
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/registry
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/router
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/transport
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/transport/common
     ${CMAKE_SOURCE_DIR}/3rdparty/uthash)
 target_link_libraries(test_pool PRIVATE rpc)
 add_test(NAME unit.pool COMMAND test_pool)
@@ -91,3 +92,10 @@ add_executable(test_headers test_headers.c)
 target_link_libraries(test_headers PRIVATE rpc)
 add_test(NAME unit.headers COMMAND test_headers)
 set_tests_properties(unit.headers PROPERTIES LABELS "unit;headers" TIMEOUT 30)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(test_shm test_shm.c)
+    target_link_libraries(test_shm PRIVATE rpc)
+    add_test(NAME e2e.shm COMMAND test_shm)
+    set_tests_properties(e2e.shm PROPERTIES LABELS "e2e;shm" TIMEOUT 120)
+endif()

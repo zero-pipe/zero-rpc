@@ -44,7 +44,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BUILD_DIR = ROOT / "build"
 ARTIFACT_ROOT = ROOT / "artifacts" / "gate"
 IS_WINDOWS = os.name == "nt"
-ALL_TRANSPORTS = ("tcp", "udp", "dds")
+ALL_TRANSPORTS = ("tcp", "udp", "dds", "shm")
 MIB = 1024 * 1024
 
 
@@ -92,6 +92,7 @@ class Context:
         self.env = child_env()
         self.connect_timeout = int(args.connect_timeout)
         self.dds_domain = args.dds_domain if args.dds_domain is not None else random.randint(0, 232)
+        self.shm_channel = "zrpc-shm-{}-{}".format(os.getpid(), random.randint(0, 1 << 30))
         if args.command == "stability" and not args.transports:
             # Soak is intentionally short by default; ask for more transports
             # explicitly with --transports tcp,udp,dds.
@@ -209,6 +210,9 @@ def select_transports(args: argparse.Namespace, dds_enabled: bool) -> List[str]:
             raise GateError("unknown transport '{}'; expected tcp, udp or dds".format(item))
         if item == "dds" and not dds_enabled:
             print("gate: skipping DDS (NB_ENABLE_DDS=OFF)")
+            continue
+        if item == "shm" and not sys.platform.startswith("linux"):
+            print("gate: skipping SHM (Linux only)")
             continue
         if item not in result:
             result.append(item)
@@ -476,10 +480,12 @@ def evaluate_result(data: Optional[Dict[str, Any]], min_succeeded: int,
 def server_command(binary: Path, transport: str, port: int, dds_domain: int,
                    response_bytes: Optional[int], echo: bool,
                    io_threads: int, handler_threads: int,
-                   max_msg_bytes: int = MIB) -> List[str]:
+                   max_msg_bytes: int = MIB, shm_channel: str = "") -> List[str]:
     command = [str(binary)]
     if transport == "dds":
         command.extend(["--dds", "--dds-domain", str(dds_domain)])
+    elif transport == "shm":
+        command.extend(["--shm", "--shm-channel", shm_channel])
     else:
         command.extend([
             "--transport", transport,
@@ -504,10 +510,13 @@ def loadgen_command(binary: Path, transport: str, port: int, dds_domain: int,
                     duration: int, payload_bytes: int, expect_bytes: int,
                     output: Path, max_requests: int = 0, rate: float = 0.0,
                     verify: bool = False, timeout_ms: int = 5000,
-                    connect_timeout: int = 20, max_msg_bytes: int = MIB) -> List[str]:
+                    connect_timeout: int = 20, max_msg_bytes: int = MIB,
+                    shm_channel: str = "") -> List[str]:
     command = [str(binary)]
     if transport == "dds":
         command.extend(["--dds", "--dds-domain", str(dds_domain)])
+    elif transport == "shm":
+        command.extend(["--shm", "--shm-channel", shm_channel])
     else:
         command.extend([
             "--transport", transport,
@@ -547,6 +556,7 @@ def run_client(ctx: Context, transport: str, port: int, case_dir: Path,
         duration, payload_bytes, expect_bytes, result_path,
         max_requests=max_requests, rate=rate, verify=verify,
         timeout_ms=timeout_ms, connect_timeout=ctx.connect_timeout,
+        shm_channel=ctx.shm_channel,
     )
     try:
         result = run_command(command, cwd=ROOT, env=ctx.env,
@@ -568,7 +578,7 @@ def run_scenario(ctx: Context, transport: str, case_dir: Path, duration: int,
     command = server_command(
         ctx.binary("bench_server"), transport, port, ctx.dds_domain,
         None if echo_server else expect_bytes, echo_server,
-        io_threads, handler_threads,
+        io_threads, handler_threads, shm_channel=ctx.shm_channel,
     )
     server = ServerProcess(command, case_dir / "server.log", ctx.env)
     server.start()
@@ -793,7 +803,7 @@ def stability_case(ctx: Context, transport: str, case_dir: Path,
     port = free_port(transport) if transport in ("tcp", "udp") else 0
     command = server_command(
         ctx.binary("bench_server"), transport, port, ctx.dds_domain,
-        None, True, 2, 1,
+        None, True, 2, 1, shm_channel=ctx.shm_channel,
     )
     server = ServerProcess(command, case_dir / "server.log", ctx.env)
     server.start()
